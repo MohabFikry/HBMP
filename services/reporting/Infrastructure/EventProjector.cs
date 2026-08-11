@@ -143,10 +143,20 @@ public sealed class EventProjector(
             {
                 AuthorizationId = id, TenantId = ev.TenantId, Priority = Field(ev, "priority", "Routine"),
                 Status = status, SubmittedAt = ev.OccurredAt,
+                AuthNo = FieldOrNull(ev, "authNo"), ReviewerId = FieldOrNull(ev, "reviewerId"),
                 SlaDueAt = DateTimeOffset.TryParse(Field(ev, "slaDueAt"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var s) ? s : null,
             });
         }
-        else { row.Status = status; }
+        else
+        {
+            row.Status = status;
+            // A later event may name the reviewer the first one could not — AuthUnderReview is where a
+            // request acquires an owner. Only ever ADDITIVE: a null on a subsequent event means "not stated
+            // here", not "no longer assigned", and treating the two the same would blank the owner every
+            // time an unrelated lifecycle event arrived.
+            row.AuthNo ??= FieldOrNull(ev, "authNo");
+            row.ReviewerId = FieldOrNull(ev, "reviewerId") ?? row.ReviewerId;
+        }
     }
 
     private void RemovePending(ReportingEvent ev)

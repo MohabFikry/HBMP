@@ -62,7 +62,11 @@ public static class BranchEndpoints
             catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: $"a branch with code '{branch.BranchCode}' already exists"); }
 
             await audit.EmitAsync(Draft(branch, AuditAction.Create, me, outcome: "created"), ct);
-            await outbox.EnqueueAsync("BranchCreated", "provider.events", new { branchId = branch.BranchId, branch.BranchCode, branch.NameEn, branch.NameAr }, ct);
+            // `tenantId` — without it reporting-service refuses the message outright (ProjectionMapping
+            // returns null for an unattributable payload) and the branch never acquires a label, so every
+            // clinic on the Medical Director's workload and no-show reports renders as a bare GUID.
+            await outbox.EnqueueAsync("BranchCreated", "provider.events",
+                new { tenantId = me.Principal?.TenantId, branchId = branch.BranchId, branch.BranchCode, branch.NameEn, branch.NameAr }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/branches/{branch.BranchId}", ToView(branch));
         })
@@ -87,7 +91,11 @@ public static class BranchEndpoints
             await db.SaveChangesAsync(ct);
 
             await audit.EmitAsync(Draft(b, AuditAction.Update, me, outcome: "updated"), ct);
-            await outbox.EnqueueAsync("BranchUpdated", "provider.events", new { branchId = b.BranchId, b.BranchCode }, ct);
+            // The NAMES, not only the code. This event fires when a branch is renamed and carried neither
+            // name, so a rename could not propagate to any reader — the reporting label would have kept the
+            // clinic's original name indefinitely while the directory showed the new one.
+            await outbox.EnqueueAsync("BranchUpdated", "provider.events",
+                new { tenantId = me.Principal?.TenantId, branchId = b.BranchId, b.BranchCode, b.NameEn, b.NameAr }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(ToView(b));
         })

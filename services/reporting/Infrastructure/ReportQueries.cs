@@ -45,8 +45,41 @@ public sealed class ReportQueries(ReportingDbContext db, TimeProvider clock)
             .GroupBy(f => new { f.ClinicId, f.Period })
             .Select(g => new { g.Key.ClinicId, g.Key.Period, Sum = g.Sum(x => x.Count) })
             .OrderBy(r => r.ClinicId).ThenBy(r => r.Period).ToListAsync(ct);
-        return new ClinicWorkloadReport(rows.Select(r => new WorkloadRow(r.ClinicId, r.Period, r.Sum)).ToList());
+
+        var names = await ClinicNamesAsync(tenant, rows.Select(r => r.ClinicId), ct);
+        return new ClinicWorkloadReport(rows
+            .Select(r => new WorkloadRow(r.ClinicId, NameEn(names, r.ClinicId), NameAr(names, r.ClinicId), r.Period, r.Sum))
+            .ToList());
     }
+
+    /// <summary>
+    /// Bilingual clinic names for a set of location ids, from the dimension table.
+    /// </summary>
+    /// <remarks>
+    /// <para>One lookup for the whole result rather than a join, because <c>EncounterFact.ClinicId</c> is TEXT
+    /// and <c>DimensionLabel.DimensionId</c> is a uuid — the fact table stores whatever the publisher sent, so
+    /// it can legitimately hold a value that is not a location at all. Parsing in memory keeps an unparseable
+    /// id as an unlabelled row instead of failing the whole report, which is the behaviour a supervisor wants:
+    /// one nameless clinic is a gap, a blank page is an outage.</para>
+    /// </remarks>
+    private async Task<Dictionary<Guid, DimensionLabel>> ClinicNamesAsync(
+        string tenant, IEnumerable<string> clinicIds, CancellationToken ct)
+    {
+        var ids = clinicIds
+            .Select(id => Guid.TryParse(id, out var g) ? g : (Guid?)null)
+            .Where(g => g is not null).Select(g => g!.Value).Distinct().ToList();
+        if (ids.Count == 0) return [];
+
+        return await db.DimensionLabels.AsNoTracking()
+            .Where(d => d.TenantId == tenant && d.Kind == "branch" && ids.Contains(d.DimensionId))
+            .ToDictionaryAsync(d => d.DimensionId, ct);
+    }
+
+    private static string? NameEn(Dictionary<Guid, DimensionLabel> names, string clinicId) =>
+        Guid.TryParse(clinicId, out var g) && names.TryGetValue(g, out var l) ? l.LabelEn : null;
+
+    private static string? NameAr(Dictionary<Guid, DimensionLabel> names, string clinicId) =>
+        Guid.TryParse(clinicId, out var g) && names.TryGetValue(g, out var l) ? l.LabelAr : null;
 
     public async Task<UtilizationReport> UtilizationAsync(string tenant, UtilizationDimension dimension, DateOnly from, DateOnly to, int top = 25, CancellationToken ct = default)
     {
@@ -73,12 +106,88 @@ public sealed class ReportQueries(ReportingDbContext db, TimeProvider clock)
         {
             long booked = Sum(c, "Booked"), attended = Sum(c, "Attended"), noshow = Sum(c, "NoShow");
             var denom = attended + noshow;
-            return new NoShowRow(c, booked, attended, noshow, denom == 0 ? 0 : (double)noshow / denom);
+            return new NoShowRow(c, null, null, booked, attended, noshow, denom == 0 ? 0 : (double)noshow / denom);
         }).OrderBy(r => r.ClinicId).ToList();
 
         long tBooked = byClinic.Sum(r => r.Booked), tAtt = byClinic.Sum(r => r.Attended), tNo = byClinic.Sum(r => r.NoShow);
         var tDenom = tAtt + tNo;
-        return new NoShowReport(tBooked, tAtt, tNo, tDenom == 0 ? 0 : (double)tNo / tDenom, byClinic);
+
+        var names = await ClinicNamesAsync(tenant, byClinic.Select(r => r.ClinicId), ct);
+        var labelled = byClinic
+            .Select(r => r with { ClinicNameEn = NameEn(names, r.ClinicId), ClinicNameAr = NameAr(names, r.ClinicId) })
+            .ToList();
+        return new NoShowReport(tBooked, tAtt, tNo, tDenom == 0 ? 0 : (double)tNo / tDenom, labelled);
+    }
+
+    /// <summary>
+    /// The authorizations behind an SLA-breach count — still pending, already past their due time.
+    /// </summary>
+    /// <remarks>
+    /// Read from <c>pending_authorization</c> rather than from the decided facts on purpose: a breach a
+    /// supervisor can still do something about is one that has not been decided yet. A decided-but-breached
+    /// authorization is history and is already counted by the TAT report; this list is a worklist.
+    /// </remarks>
+    public async Task<SlaBreachReport> SlaBreachesAsync(string tenant, int top = 100, CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow();
+        var pending = await db.PendingAuthorizations.AsNoTracking()
+            .Where(p => p.TenantId == tenant)
+            .ToListAsync(ct);
+
+        var breached = pending
+            .Where(p => p.SlaBreached || (p.SlaDueAt is { } due && due < now))
+            .Select(p => new SlaBreachRow(
+                p.AuthNo ?? p.AuthorizationId.ToString(), p.Priority, p.Status,
+                AgeBuckets.Of(now - p.SubmittedAt),
+                (long)(now - p.SubmittedAt).TotalSeconds,
+                p.ReviewerId))
+            // Oldest first: the queue a supervisor works is the one that has waited longest, and a list
+            // ordered by anything else buries the case that has been waiting three days under today's.
+            .OrderByDescending(r => r.AgeSeconds)
+            .ToList();
+
+        return new SlaBreachReport(breached.Count, breached.Take(top).ToList());
+    }
+
+    /// <summary>
+    /// Claim outcomes and what they cost. Financial zone.
+    /// </summary>
+    /// <remarks>
+    /// Built from the reporting read model rather than by calling claims-service, because the Medical
+    /// Director holds <c>reporting:read-financial</c> and holds neither <c>claims:read</c> nor
+    /// <c>claims:reconcile</c> — and that is the right boundary rather than an obstacle to route around. A
+    /// supervisor needs the SHAPE of what was claimed and denied; opening a claimant's file is the claims
+    /// officer's authority, and widening an operational scope to satisfy an analytical need is how the two
+    /// stop being distinguishable.
+    /// </remarks>
+    public async Task<ClaimsSummaryReport> ClaimsSummaryAsync(string tenant, DateOnly from, DateOnly to, CancellationToken ct = default)
+    {
+        var costs = await db.CostFacts.AsNoTracking()
+            .Where(c => c.TenantId == tenant && c.Period >= from && c.Period <= to)
+            .Select(c => new { c.ClaimedAmount, c.ApprovedAmount, c.AdjustedAmount, c.ClaimCount })
+            .ToListAsync(ct);
+
+        // The outcome is derived from the money rather than stored, because the terminal event's status is
+        // not on the cost fact: nothing approved is a denial, something-but-not-everything is a partial.
+        // Reading it this way means the three buckets always sum to the decided total.
+        static string Outcome(decimal claimed, decimal approved) =>
+            approved <= 0m ? "Denied" : approved >= claimed ? "Approved" : "PartiallyApproved";
+
+        var byOutcome = costs
+            .GroupBy(c => Outcome(c.ClaimedAmount, c.ApprovedAmount))
+            .Select(g => new ClaimOutcomeRow(g.Key, g.Sum(x => (long)x.ClaimCount)))
+            .OrderBy(r => r.Outcome, StringComparer.Ordinal)
+            .ToList();
+
+        var financial = await FinancialSummaryAsync(tenant, from, to, ct);
+        var denials = await RejectedRequestsAsync(tenant, from, to, ct);
+
+        return new ClaimsSummaryReport(
+            byOutcome.Sum(r => r.Count),
+            costs.Sum(c => c.ApprovedAmount - c.AdjustedAmount),
+            byOutcome,
+            financial.ByServiceLine,
+            denials.ByReason.Take(10).ToList());
     }
 
     public async Task<TopCodesReport> TopCodesAsync(string tenant, CodeKind kind, DateOnly from, DateOnly to, int top = 20, CancellationToken ct = default)

@@ -31,6 +31,12 @@ public sealed class PendingAuthorization
 {
     public Guid AuthorizationId { get; set; }
     public string TenantId { get; set; } = default!;
+    /// <summary>The business number the rest of the platform prints on the request. Null on rows projected
+    /// before 0004 — the events always carried it, the table had nowhere to put it.</summary>
+    public string? AuthNo { get; set; }
+    /// <summary>Who holds it, once somebody does. Null while a request sits unclaimed, which is itself the
+    /// answer to "why has this waited three days".</summary>
+    public string? ReviewerId { get; set; }
     public string Priority { get; set; } = default!;
     public string Status { get; set; } = default!;
     public DateTimeOffset SubmittedAt { get; set; }

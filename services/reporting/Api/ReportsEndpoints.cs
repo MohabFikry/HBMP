@@ -63,6 +63,17 @@ public static class ReportsEndpoints
             .Produces<NoShowReport>()
             .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
+        // The drill-down behind a breach COUNT. Operational zone — an authorization number, a priority, an
+        // age and a reviewer are facts about a queue, not about a patient, and this list carries no
+        // beneficiary at all (see SlaBreachRow). Not period-parameterised: a breach is a CURRENT state, and
+        // "which are breached, as of a fortnight ago" is a question about history that the TAT report answers.
+        v1.MapGet("/sla-breaches", async (int? top, ReportContext cx, CancellationToken ct) =>
+        {
+            var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
+            return denied ?? Results.Ok(await cx.Q.SlaBreachesAsync(cx.Tenant, Math.Clamp(top ?? 100, 1, 500), ct));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<SlaBreachReport>();
+
         v1.MapGet("/rejected-requests", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "rejected-requests", from, to,
                 (f, t) => cx.Q.RejectedRequestsAsync(cx.Tenant, f, t, ct), ct))
@@ -90,6 +101,20 @@ public static class ReportsEndpoints
             cx.RunOrQueue(ReportingPolicies.ReadFinancial, "financial-summary", from, to,
                 (f, t) => cx.Q.FinancialSummaryAsync(cx.Tenant, f, t, ct), ct))
             .RequireAuthorization(HbmpPolicies.Scope("reporting:read-financial"));
+
+        // Claim outcomes and what they cost — the oversight portal's Claims & Cost view.
+        //
+        // SERVED FROM HERE RATHER THAN FROM CLAIMS-SERVICE. The Medical Director holds
+        // `reporting:read-financial` and holds neither `claims:read` nor `claims:reconcile`, and that split is
+        // the right one: a supervisor needs the shape of what was claimed and denied, and opening a
+        // claimant's file is the claims officer's authority. Reaching the chart by widening an operational
+        // scope is how the two stop being distinguishable.
+        v1.MapGet("/claims-summary", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
+            cx.RunOrQueue(ReportingPolicies.ReadFinancial, "claims-summary", from, to,
+                (f, t) => cx.Q.ClaimsSummaryAsync(cx.Tenant, f, t, ct), ct))
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read-financial"))
+            .Produces<ClaimsSummaryReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         // ── Async job poll ─────────────────────────────────────────────────────────────────────────────
         v1.MapGet("/jobs/{id:guid}", async (Guid id, ReportContext cx, CancellationToken ct) =>
@@ -138,14 +163,20 @@ public static class ReportsEndpoints
         // bilingual labels. Gated on the operational zone; clinical + financial widgets are included only for a
         // caller authorized for those zones (finance widgets exclude diagnoses by construction).
         var dash = app.MapGroup("/api/v1/dashboards");
-        dash.MapGet("/executive", async (string? from, string? to, ReportContext cx, DashboardBuilder builder, CancellationToken ct) =>
+        //
+        // `scope` narrows the widget set to what a given portal's dashboard is FOR — it is not an
+        // authorization input and cannot widen anything: the two zone checks above still decide what the
+        // caller may read, and an unknown scope returns the full permitted set. It exists because the SPA
+        // already took the argument and never sent it, so the executive, finance and director dashboards
+        // were byte-identical payloads under three different headings.
+        dash.MapGet("/executive", async (string? from, string? to, string? scope, ReportContext cx, DashboardBuilder builder, CancellationToken ct) =>
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
             if (denied is not null) return denied;
             var clinical = await cx.Gate.CheckAsync(ReportingPolicies.ReadClinical, ct) is null;
             var financial = await cx.Gate.CheckAsync(ReportingPolicies.ReadFinancial, ct) is null;
             var (f, t) = Api.Period.Parse(from, to, cx.Calendar);
-            var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, ct);
+            var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, scope, ct);
             return Results.Ok(payload);
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
             .Produces<ExecutiveDashboard>();

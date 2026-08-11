@@ -57,6 +57,11 @@ public static class ProjectionFeed
         // eight characters of its uuid, which is what `AnalyticsQueries.Label` falls back to.
         "PayerCreated", "PolicyPlanAttached",
 
+        // provider.events — the clinic's own name, so a per-clinic report can say "Maadi" rather than a
+        // location GUID. Both events, because a rename that does not propagate leaves the report confidently
+        // showing a name the directory no longer uses.
+        "BranchCreated", "BranchUpdated",
+
         // emr.events — encounter and appointment counts.
         "EncounterStarted", "ApptBooked", "ApptCheckedIn", "ApptNoShow",
 
