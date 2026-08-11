@@ -20,6 +20,9 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<Practitioner> Practitioners => Set<Practitioner>();               // 14.5
     public DbSet<PractitionerSpecialty> PractitionerSpecialties => Set<PractitionerSpecialty>();          // 14.5
     public DbSet<PractitionerBranchAssignment> PractitionerBranchAssignments => Set<PractitionerBranchAssignment>();   // 14.5
+    /// <summary>0014 — the append-only twin the trigger writes. The application never inserts into it; the
+    /// database does, which is what makes it a record of what happened rather than of what someone logged.</summary>
+    public DbSet<PractitionerHistoryRow> PractitionerHistory => Set<PractitionerHistoryRow>();
     public DbSet<NetworkTier> NetworkTiers => Set<NetworkTier>();                                   // 19.1b
     public DbSet<ProviderNetworkAssignment> NetworkAssignments => Set<ProviderNetworkAssignment>(); // 19.1b
     public DbSet<ProviderTerminationRequest> TerminationRequests => Set<ProviderTerminationRequest>();  // 2026-08-09 audit
@@ -192,9 +195,20 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");              // 0014
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");              // 0014
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");     // 0014
             e.HasIndex(x => x.UserId).IsUnique().HasFilter("is_deleted = false");
             e.HasMany(x => x.Specialties).WithOne().HasForeignKey(s => s.PractitionerId);
             e.HasMany(x => x.BranchAssignments).WithOne().HasForeignKey(a => a.PractitionerId);
+        });
+
+        b.Entity<PractitionerHistoryRow>(e =>
+        {
+            e.ToTable("practitioner_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
         });
 
         b.Entity<PractitionerSpecialty>(e =>

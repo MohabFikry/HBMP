@@ -29,6 +29,76 @@ public sealed class ProviderAvailabilityHistoryRow
 }
 
 /// <summary>
+/// The roster exception's history twin, written by the 0016 trigger. Same shape and same reasoning as
+/// <see cref="ProviderAvailabilityHistoryRow"/> — a closure is something a patient will ask about, and "who
+/// closed Aswan on the 12th" has to survive the row being edited or withdrawn.
+/// </summary>
+public sealed class RosterExceptionHistoryRow
+{
+    public long HistoryId { get; set; }
+    public Guid ExceptionId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = default!;
+    public DateTimeOffset RecordedAt { get; set; }
+}
+
+/// <summary>One entry of a roster exception's timeline. A withdrawal arrives as an UPDATE whose snapshot has
+/// <c>is_deleted: true</c> — which is what withdrawing an exception IS, and why it is not a separate
+/// operation.</summary>
+public sealed record RosterHistoryView(
+    long Sequence,
+    string Operation,
+    DateTimeOffset RecordedAt,
+    string? ActorSubject,
+    string? Kind,
+    string? DateFrom,
+    string? DateTo,
+    string? StartTime,
+    string? EndTime,
+    string? Reason,
+    bool Withdrawn)
+{
+    public static RosterHistoryView From(RosterExceptionHistoryRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        using var doc = JsonDocument.Parse(row.RowSnapshot);
+        var r = doc.RootElement;
+
+        return new RosterHistoryView(
+            row.HistoryId, row.Operation, row.RecordedAt,
+            HistoryJson.Text(r, "updated_by") ?? HistoryJson.Text(r, "created_by"),
+            HistoryJson.Text(r, "kind"),
+            HistoryJson.Text(r, "date_from"),
+            HistoryJson.Text(r, "date_to"),
+            HistoryJson.Text(r, "start_time"),
+            HistoryJson.Text(r, "end_time"),
+            HistoryJson.Text(r, "reason"),
+            HistoryJson.Bool(r, "is_deleted"));
+    }
+}
+
+/// <summary>
+/// Readers for a trigger-written snapshot.
+///
+/// <para>Every read is defensive by design. The snapshot is whatever the table looked like when the row was
+/// written, so an entry predating a column simply does not have it — that is a normal history, not a corrupt
+/// one, and throwing on it would make the timeline unreadable for exactly the oldest and most interesting
+/// entries.</para>
+/// </summary>
+internal static class HistoryJson
+{
+    public static string? Text(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    public static int? Int(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+
+    public static bool Bool(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+}
+
+/// <summary>
 /// One entry on the timeline: the administered values as they stood after this change, plus who made it.
 ///
 /// <para><b>Values, not diffs.</b> The client renders "before → after" by comparing an entry with the one
@@ -57,23 +127,12 @@ public sealed record AvailabilityHistoryView(
             row.HistoryId,
             row.Operation,
             row.RecordedAt,
-            Text(r, "updated_by"),
-            Text(r, "updated_by_name"),
-            Text(r, "start_time"),
-            Text(r, "end_time"),
-            Int(r, "slot_minutes"),
-            Int(r, "max_per_day"),
-            Bool(r, "is_deleted"));
+            HistoryJson.Text(r, "updated_by"),
+            HistoryJson.Text(r, "updated_by_name"),
+            HistoryJson.Text(r, "start_time"),
+            HistoryJson.Text(r, "end_time"),
+            HistoryJson.Int(r, "slot_minutes"),
+            HistoryJson.Int(r, "max_per_day"),
+            HistoryJson.Bool(r, "is_deleted"));
     }
-
-    // The snapshot is whatever the table looked like when the row was written, so every read is defensive:
-    // entries predating a column simply do not have it, and that is a normal history, not a corrupt one.
-    private static string? Text(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-
-    private static int? Int(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
-
-    private static bool Bool(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
 }

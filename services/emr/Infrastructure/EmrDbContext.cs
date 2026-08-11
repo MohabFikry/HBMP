@@ -18,6 +18,9 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     /// only writer is the database, which is what makes it a record of what happened rather than of what
     /// somebody remembered to log.</summary>
     public DbSet<ProviderAvailabilityHistoryRow> ProviderAvailabilityHistory => Set<ProviderAvailabilityHistoryRow>();
+    /// <summary>0016's twin, which had no reader until the roster grew a timeline: the rows were being
+    /// written from the day the table shipped and nothing on the platform could show them to anybody.</summary>
+    public DbSet<RosterExceptionHistoryRow> RosterExceptionHistory => Set<RosterExceptionHistoryRow>();
     public DbSet<WaitlistEntry> WaitlistEntries => Set<WaitlistEntry>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<EmrNote> Notes => Set<EmrNote>();
@@ -91,6 +94,14 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
         b.Entity<ProviderAvailabilityHistoryRow>(e =>
         {
             e.ToTable("provider_availability_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+        });
+
+        b.Entity<RosterExceptionHistoryRow>(e =>
+        {
+            e.ToTable("roster_exception_history");
             e.HasKey(x => x.HistoryId);
             e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
             e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");

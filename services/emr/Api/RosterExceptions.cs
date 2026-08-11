@@ -68,6 +68,43 @@ public static class RosterExceptionEndpoints
             return Results.Ok(rows.Select(ToView));
         });
 
+        // GET /roster-exceptions/{id}/history — who closed this clinic day, when, and what it said before.
+        //
+        // The rows have existed since 0016: the trigger has been writing a snapshot on every insert and
+        // update from the day the table shipped, and nothing on the platform could show one to anybody. The
+        // only reader of change history was audit-service, behind audit:read — Security, Compliance and the
+        // DPO. So the coordinator whose Tuesday moved had no way to find out who moved it, while the record
+        // sat in their own service's schema.
+        //
+        // Read at appointment:read, under the same branch scoping as the exception itself. NOT audit:read:
+        // widening the hash-chained trail to clinic staff to answer an operational question would hand them
+        // the whole compliance record, and min-necessary is the rule this platform is built on.
+        read.MapGet("/roster-exceptions/{id:guid}/history", async (
+            Guid id, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var row = await db.RosterExceptions.AsNoTracking()
+                .IgnoreQueryFilters()   // a WITHDRAWN exception still has a history, and that is when it is asked for
+                .FirstOrDefaultAsync(e => e.ExceptionId == id && e.TenantId == tenant, ct);
+            if (row is null)
+                return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            // A practitioner-only exception belongs to no single clinic, so there is no branch to check it
+            // against — it is returned to any caller who can already read the exception itself, exactly as the
+            // list endpoint above treats the same rows.
+            if (row.BranchId is { } owning
+                && BranchWriteScope.RefuseUnlessWritable(branch.Mode, branch.Context, owning) is { } refused)
+                return refused;
+
+            var entries = await db.RosterExceptionHistory.AsNoTracking()
+                .Where(h => h.ExceptionId == id && h.TenantId == tenant)
+                .OrderBy(h => h.HistoryId)
+                .Take(200)
+                .ToListAsync(ct);
+
+            return Results.Ok(new { exceptionId = id, entries = entries.Select(RosterHistoryView.From) });
+        });
+
         // POST /roster-exceptions[?dryRun=true] — impact preview, then apply.
         write.MapPost("/roster-exceptions", async (
             CreateRosterException req, bool? dryRun,

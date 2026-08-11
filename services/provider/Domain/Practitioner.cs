@@ -35,8 +35,36 @@ public sealed class Practitioner
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    /// <summary>0014 — WHO. The row has carried <c>created_at</c>/<c>updated_at</c> since 0006 and never the
+    /// actor, so its history was a timeline of anonymous events: it answered when a licence changed and left
+    /// the question anyone actually asks.</summary>
+    public string? CreatedBy { get; set; }
+    public string? UpdatedBy { get; set; }
+    /// <summary>The actor's display name, snapshotted at write time (0022's precedent). Resolving names on
+    /// read shows "unknown" for everybody who has since left the organisation.</summary>
+    public string? UpdatedByName { get; set; }
+
     public List<PractitionerSpecialty> Specialties { get; set; } = [];
     public List<PractitionerBranchAssignment> BranchAssignments { get; set; } = [];
+}
+
+/// <summary>
+/// The practitioner's history twin, written by the 0014 trigger — the same shape as
+/// <c>provider.provider_history</c> and <c>emr.roster_exception_history</c>.
+///
+/// <para><b>Not the audit trail, and not a substitute for it.</b> The audit chain is hash-linked, protected,
+/// and readable only by Security/Compliance/DPO; it exists to answer an investigator. This exists so the
+/// clinic manager who administers a licence can see who last renewed it, and is readable under the same
+/// branch reach as the practitioner. Every licence write emits both.</para>
+/// </summary>
+public sealed class PractitionerHistoryRow
+{
+    public long HistoryId { get; set; }
+    public Guid PractitionerId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = default!;
+    public DateTimeOffset RecordedAt { get; set; }
 }
 
 /// <summary>Many-to-many practitioner↔specialty; exactly one flagged primary (partial-unique in the migration).</summary>
