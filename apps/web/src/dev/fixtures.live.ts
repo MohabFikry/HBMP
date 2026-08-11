@@ -33,5 +33,6 @@ export const FIXTURES: Fixtures = {
   available: false,
   createApi: () => absent("DevApiClient"),
   createAuth: () => absent("DevAuthClient"),
+  createBranchApis: () => absent("DevBranchApis"),
   LoginForm: () => absent("DevLoginForm"),
 };

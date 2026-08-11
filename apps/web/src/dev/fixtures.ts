@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 import type { ApiClient } from "../api/client";
+import type { BranchApis } from "../api/branchApi";
+import { createDevBranchApis } from "./devBranchApis";
 import { DevApiClient } from "../api/DevApiClient";
 import { DevAuthClient, DEV_SESSION_KEY } from "../auth/devAuthClient";
 import type { AuthClient } from "../auth/authClient";
@@ -37,6 +39,15 @@ export interface Fixtures {
   readonly available: boolean;
   createApi(): ApiClient;
   createAuth(): AuthClient;
+  /**
+   * The Clinic Management portal's four surfaces (design 42 §6).
+   *
+   * Separate from `createApi` because they are a separate client: `branchApi` and its siblings are a narrow
+   * module over three services rather than part of `ApiClient`, following the `policyApi` precedent. They
+   * belong behind THIS door for the same reason everything else here does — a live bundle must not contain
+   * the demo clinic, and unreachability is not absence.
+   */
+  createBranchApis(): BranchApis;
   /** The no-backend role picker rendered by `LoginPage` in fixture builds. */
   readonly LoginForm: ComponentType;
 }
@@ -47,6 +58,7 @@ export const FIXTURES: Fixtures = {
   // resolves instantly is one where nobody ever sees the skeleton they wrote.
   createApi: () => new DevApiClient({ latencyMs: 250, roles: signedInIssuerRoles }),
   createAuth: () => new DevAuthClient(),
+  createBranchApis: () => createDevBranchApis(),
   LoginForm: DevLoginForm,
 };
 

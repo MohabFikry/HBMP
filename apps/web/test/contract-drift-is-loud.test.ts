@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { branchApi, inventoryApi, rosterApi } from "../src/api/branchApi";
+import { HTTP_BRANCH_APIS } from "../src/api/branchApi";
 import { createHttpPolicyApi } from "../src/api/policyApi";
 import { HttpApiClient } from "../src/api/HttpApiClient";
 import { ApiError } from "../src/api/http";
@@ -76,6 +76,15 @@ describe("policyApi validates instead of casting", () => {
   });
 });
 
+/**
+ * The HTTP implementations, NAMED — not the `branchApi` re-export.
+ *
+ * That re-export resolves through `@dev/fixtures`, so under vitest (a fixture build) it is the demo clinic,
+ * which never touches `fetch` and therefore sails past every stubbed response below. These cases are about
+ * the TRANSPORT's schema behaviour, so they have to hold the transport.
+ */
+const { branch: httpBranchApi, roster: httpRosterApi, inventory: httpInventoryApi } = HTTP_BRANCH_APIS;
+
 describe("branchApi validates instead of casting", () => {
   it("refuses a stock line whose on-hand count is absent", async () => {
     respondWith({
@@ -86,7 +95,7 @@ describe("branchApi validates instead of casting", () => {
         expiryDate: null, /* onHand: MISSING */ reorderLevel: 10, isLow: false, isQuarantined: false,
       }],
     });
-    const err = await failure(inventoryApi.stock());
+    const err = await failure(httpInventoryApi.stock());
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).kind).toBe("schema");
   });
@@ -95,7 +104,7 @@ describe("branchApi validates instead of casting", () => {
     // The count is what the operator acknowledges and the server re-checks on apply. Rendering a preview
     // with a silently-absent number is how eight people travel to a locked building.
     respondWith({ dryRun: true, affected: [] });
-    const err = await failure(rosterApi.preview({ kind: "ClinicClosed", dateFrom: "2026-08-10",
+    const err = await failure(httpRosterApi.preview({ kind: "ClinicClosed", dateFrom: "2026-08-10",
                                                   dateTo: "2026-08-10", reason: "maintenance" }));
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).kind).toBe("schema");
@@ -109,7 +118,7 @@ describe("branchApi validates instead of casting", () => {
       primarySpecialty: null, specialties: [], branches: [], status: "Active",
       licenseNo: null, licenseExpiry: "2027-01-01", licenceValid: true, daysUntilExpiry: 500,
     }]);
-    const rows = await branchApi.practitioners();
+    const rows = await httpBranchApi.practitioners();
     expect(rows[0].licenseNo).toBeNull();
   });
 });

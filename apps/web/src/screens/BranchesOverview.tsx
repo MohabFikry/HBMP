@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Card, DataTable, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { branchApi, inventoryApi } from "../api/branchApi";
@@ -58,6 +58,23 @@ export function BranchesOverview() {
   const alerts = useAsync(() => branchApi.licenceAlerts(90), []);
   const flagged = useAsync(() => branchApi.reassignmentNeeded(), []);
   const stock = useAsync(() => inventoryApi.alerts(), []);
+  // A fourth read, for the NAMES. See the branch column below for why this screen went without them.
+  const branches = useAsync(() => branchApi.branches(), []);
+
+  /**
+   * A clinic's name, or its short id when the reference read has not landed (or does not know it).
+   *
+   * The fallback is the truncated id and NOT a placeholder like "—": a row with a count against it must stay
+   * identifiable even when the lookup is missing, and a dash would make two unknown clinics look like one.
+   */
+  const nameOf = useCallback(
+    (branchId: string): string => {
+      const b = branches.data?.find((x) => x.branchId === branchId);
+      if (!b) return branchId.slice(0, 8);
+      return lang === "ar" ? b.nameAr : b.nameEn;
+    },
+    [branches.data, lang],
+  );
 
   const rows: BranchRow[] = useMemo(() => {
     const byBranch = new Map<string, BranchRow>();
@@ -76,14 +93,28 @@ export function BranchesOverview() {
     for (const l of stock.data?.lowStock ?? []) ensure(l.branchId).lowStock += 1;
     for (const q of stock.data?.quarantined ?? []) ensure(q.branchId).quarantined += 1;
 
-    return [...byBranch.values()].sort((a, b) => a.branchId.localeCompare(b.branchId));
-  }, [alerts.data, flagged.data, stock.data]);
+    // Sorted by NAME, which is the order a supervisor reads a list of clinics in. Sorting by id put them in
+    // an order with no meaning, which reads as no order at all.
+    return [...byBranch.values()].sort((a, b) =>
+      nameOf(a.branchId).localeCompare(nameOf(b.branchId), lang === "ar" ? "ar" : "en"));
+  }, [alerts.data, flagged.data, stock.data, nameOf, lang]);
 
   const columns: Column<BranchRow>[] = useMemo(
     () => [
-      // Branch NAMES live behind provider:read, which these roles do not hold — so the short id is what
-      // there is. Truthful over invented: a fabricated label would read as a name and be wrong.
-      { key: "branch", header: t(S.branch), cell: (r) => r.branchId.slice(0, 8) },
+      /*
+        THE CLINIC'S NAME.
+
+        This rendered `branchId.slice(0, 8)` — an eight-character hex fragment — under a comment asserting
+        that "branch NAMES live behind provider:read, which these roles do not hold". That was not true.
+        `GET /api/v1/branches` is `RequireAuthorization()` in provider-service: any signed-in caller, because
+        branches are org reference data with no PHI. The app-bar branch switcher has been reading exactly
+        that endpoint for its labels since 14.8.
+
+        So the manager's flagship comparison screen — the one screen that exists to be read across six
+        clinics — labelled its rows `a3f81c2e` while the switcher three centimetres above it said "Maadi".
+        The comment was doing the work of a check, and it was wrong.
+      */
+      { key: "branch", header: t(S.branch), cell: (r) => nameOf(r.branchId), sortable: true, sortValue: (r) => nameOf(r.branchId) },
       { key: "licences", header: t(S.licenceAlerts), cell: (r) => count(r.licenceAlerts, t(S.clear)) },
       { key: "flagged", header: t(S.flagged), cell: (r) => count(r.flagged, t(S.clear)) },
       { key: "low", header: t(S.lowStock), cell: (r) => count(r.lowStock, t(S.clear)) },
@@ -99,10 +130,11 @@ export function BranchesOverview() {
           ),
       },
     ],
-    [t],
+    [t, nameOf],
   );
 
-  const loading = alerts.status === "loading" || flagged.status === "loading" || stock.status === "loading";
+  const loading = alerts.status === "loading" || flagged.status === "loading"
+    || stock.status === "loading" || branches.status === "loading";
 
   return (
     <div className="branch-screen">

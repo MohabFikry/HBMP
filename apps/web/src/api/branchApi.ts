@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { getRaw, parseOr, postRaw } from "./http";
+import { deleteRaw, getRaw, parseOr, postRaw, putRaw } from "./http";
+import { FIXTURES } from "@dev/fixtures";
+import { LIVE } from "../config";
 
 /**
  * `getRaw`/`postRaw` return `unknown` by design — `http.ts` is the transport and does not know any screen's
@@ -38,7 +40,37 @@ const parsed = <T>(schema: z.ZodType<T>, p: Promise<unknown>): Promise<T> => p.t
  * parsing for free. The branch header matters more here than anywhere else on the platform: it is what makes
  * one set of screens serve a coordinator (one clinic) and a clinics manager (all six) without a second
  * implementation of anything.
+ *
+ * ============================================================================================================
+ * WHY THESE ARE INTERFACES WITH TWO IMPLEMENTATIONS
+ * ============================================================================================================
+ * They used to be plain object literals calling `http.ts` directly — the only surface on the platform that
+ * did. Every other portal resolves through `ApiClient`, which `ApiProvider` swaps for `DevApiClient` in
+ * fixture mode, and the SPA is in fixture mode BY DEFAULT (`LIVE = !FIXTURE_MODE`). There is no MSW and no
+ * fetch interception anywhere in the tree.
+ *
+ * So the entire Clinic Management portal — five screens — errored in the demo bundle, and could not be
+ * rendered in a screen-level test at all. That is not a hypothetical: it is why the only test covering this
+ * portal exercised `LicenceStatus` in isolation, and why the axe route sweep skipped every one of these
+ * routes while reporting itself complete.
+ *
+ * The fix reuses the seam that already exists rather than inventing one. `@dev/fixtures` is aliased to a
+ * refusing stub in a live build, so the fixtures are absent from a production bundle rather than merely
+ * unreached — the same guarantee `check-live-bundle-clean.sh` enforces for `DevApiClient`.
  */
+
+export interface BranchApi {
+  practitioners(params?: { branchId?: string; asOf?: string; includeUnlicensed?: boolean }): Promise<BranchPractitioner[]>;
+  licenceAlerts(withinDays?: number): Promise<LicenceAlertsResponse>;
+  updateLicence(practitionerId: string, body: { licenseNo: string; licenseExpiry: string }): Promise<{ practitionerId: string; licenseNo: string; licenseExpiry: string }>;
+  /** What a PROPOSED expiry would strand. Informational — the server flags, it does not veto. */
+  licenceImpact(practitionerId: string, expiry: string): Promise<LicenceImpact>;
+  practitionerHistory(practitionerId: string): Promise<PractitionerHistory>;
+  assignBranch(practitionerId: string, body: { branchId: string; validFrom: string; validTo?: string }): Promise<{ practitionerId: string; branchId: string }>;
+  reassignmentNeeded(params?: { branchId?: string; doctorId?: string }): Promise<{ asOf: string; count: number; appointments: FlaggedAppointment[] }>;
+  /** Branch reference data — names for the ids every other read returns. */
+  branches(): Promise<BranchRef[]>;
+}
 
 // ── Practitioners & licences ────────────────────────────────────────────────────────────────────────────
 
@@ -95,28 +127,88 @@ export const zFlaggedAppointment = z.object({
 }).passthrough();
 export type FlaggedAppointment = z.infer<typeof zFlaggedAppointment>;
 
-export const branchApi = {
-  practitioners: (params: { branchId?: string; asOf?: string; includeUnlicensed?: boolean } = {}) =>
+/** A clinic, by name. Read at plain `RequireAuthorization()` — any signed-in caller. */
+export const zBranchRef = z.object({
+  branchId: z.string(),
+  branchCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+}).passthrough();
+export type BranchRef = z.infer<typeof zBranchRef>;
+
+/** The appointments a proposed licence expiry would strand. Same shape as the roster's impact preview. */
+export const zLicenceImpact = z.object({
+  asOf: z.string(),
+  doctorId: z.string(),
+  proposedExpiry: z.string(),
+  affectedCount: z.number(),
+  affected: z.array(z.object({
+    appointmentId: z.string(),
+    beneficiaryId: z.string(),
+    beneficiaryName: z.string().nullable(),
+    branchId: z.string().nullable(),
+    doctorId: z.string().nullable(),
+    scheduledStart: z.string(),
+  })),
+}).passthrough();
+export type LicenceImpact = z.infer<typeof zLicenceImpact>;
+
+/**
+ * One entry of a change timeline. VALUES, not diffs — the server returns the state after each change and the
+ * client renders "before → after" by comparing adjacent entries, so the diff is written once and works for
+ * every history on the platform.
+ */
+export const zPractitionerHistoryEntry = z.object({
+  sequence: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorSubject: z.string().nullable(),
+  actorName: z.string().nullable(),
+  licenseNo: z.string().nullable(),
+  licenseExpiry: z.string().nullable(),
+  status: z.string().nullable(),
+  deleted: z.boolean(),
+}).passthrough();
+export type PractitionerHistoryEntry = z.infer<typeof zPractitionerHistoryEntry>;
+
+export const zPractitionerHistory = z.object({
+  practitionerId: z.string(),
+  entries: z.array(zPractitionerHistoryEntry),
+}).passthrough();
+export type PractitionerHistory = z.infer<typeof zPractitionerHistory>;
+
+const httpBranchApi: BranchApi = {
+  practitioners: (params = {}) =>
     parsed(z.array(zBranchPractitioner), getRaw(`/practitioners${qs(params)}`)),
 
   licenceAlerts: (withinDays = 90) =>
     parsed(zLicenceAlertsResponse, getRaw(`/practitioners/licence-alerts?withinDays=${withinDays}`)),
 
   /** Record or renew a licence. BOTH fields required — an expiry is what makes it enforceable (25.3). */
-  updateLicence: (practitionerId: string, body: { licenseNo: string; licenseExpiry: string }) =>
+  updateLicence: (practitionerId, body) =>
     parsed(
       z.object({ practitionerId: z.string(), licenseNo: z.string(), licenseExpiry: z.string() }).passthrough(),
       postRaw(`/practitioners/${practitionerId}/licence`, body)),
 
-  assignBranch: (practitionerId: string, body: { branchId: string; validFrom: string; validTo?: string }) =>
+  // Served by EMR, not provider: provider-service holds no appointments. Keyed on the practitioner id
+  // because that is what the screen has; emr knows it as the doctor id.
+  licenceImpact: (practitionerId, expiry) =>
+    parsed(zLicenceImpact, getRaw(`/appointments/licence-impact?doctorId=${practitionerId}&expiry=${expiry}`)),
+
+  practitionerHistory: (practitionerId) =>
+    parsed(zPractitionerHistory, getRaw(`/practitioners/${practitionerId}/history`)),
+
+  assignBranch: (practitionerId, body) =>
     parsed(
       z.object({ practitionerId: z.string(), branchId: z.string() }).passthrough(),
       postRaw(`/practitioners/${practitionerId}/branches`, body)),
 
-  reassignmentNeeded: (params: { branchId?: string; doctorId?: string } = {}) =>
+  reassignmentNeeded: (params = {}) =>
     parsed(
       z.object({ asOf: z.string(), count: z.number(), appointments: z.array(zFlaggedAppointment) }).passthrough(),
       getRaw(`/appointments/reassignment-needed${qs(params)}`)),
+
+  branches: () => parsed(z.array(zBranchRef), getRaw(`/branches`)),
 };
 
 // ── Roster ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -161,8 +253,32 @@ export interface CreateRosterExceptionBody {
   acknowledgedImpactCount?: number;
 }
 
-export const rosterApi = {
-  list: (params: { branchId?: string; practitionerId?: string; from?: string; to?: string } = {}) =>
+/** One entry of a roster exception's timeline. A WITHDRAWAL arrives as an update with `withdrawn: true`. */
+export const zRosterHistoryEntry = z.object({
+  sequence: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorSubject: z.string().nullable(),
+  kind: z.string().nullable(),
+  dateFrom: z.string().nullable(),
+  dateTo: z.string().nullable(),
+  startTime: z.string().nullable(),
+  endTime: z.string().nullable(),
+  reason: z.string().nullable(),
+  withdrawn: z.boolean(),
+}).passthrough();
+export type RosterHistoryEntry = z.infer<typeof zRosterHistoryEntry>;
+
+export interface RosterApi {
+  list(params?: { branchId?: string; practitionerId?: string; from?: string; to?: string }): Promise<RosterException[]>;
+  preview(body: CreateRosterExceptionBody): Promise<RosterImpact>;
+  apply(body: CreateRosterExceptionBody): Promise<{ exceptionId: string; affectedCount: number; flagged: number; cancelled: number }>;
+  withdraw(exceptionId: string): Promise<{ exceptionId: string; withdrawn: boolean }>;
+  history(exceptionId: string): Promise<{ exceptionId: string; entries: RosterHistoryEntry[] }>;
+}
+
+const httpRosterApi: RosterApi = {
+  list: (params = {}) =>
     parsed(z.array(zRosterException), getRaw(`/roster-exceptions${qs(params)}`)),
 
   /**
@@ -170,19 +286,114 @@ export const rosterApi = {
    * count this returned. Closing a clinic day without seeing whose day it is, is how eight people travel to
    * a locked building.
    */
-  preview: (body: CreateRosterExceptionBody) =>
-    parsed(zRosterImpact, postRaw(`/roster-exceptions?dryRun=true`, body)),
+  preview: (body) => parsed(zRosterImpact, postRaw(`/roster-exceptions?dryRun=true`, body)),
 
-  apply: (body: CreateRosterExceptionBody) =>
+  apply: (body) =>
     parsed(
       z.object({ exceptionId: z.string(), affectedCount: z.number(), flagged: z.number(), cancelled: z.number() })
         .passthrough(),
       postRaw(`/roster-exceptions`, body)),
 
-  withdraw: (exceptionId: string) =>
+  /**
+   * DELETE, not `POST /{id}/withdraw`.
+   *
+   * This called a route that has never existed. emr maps `DELETE /roster-exceptions/{id}`; this posted to
+   * `/roster-exceptions/{id}/withdraw`, which no service registers. It went unnoticed because nothing called
+   * it either — so withdrawing an exception was unreachable from the UI and broken in the client, and the
+   * two defects hid each other.
+   */
+  withdraw: (exceptionId) =>
     parsed(
       z.object({ exceptionId: z.string(), withdrawn: z.boolean() }).passthrough(),
-      postRaw(`/roster-exceptions/${exceptionId}/withdraw`, {})),
+      deleteRaw(`/roster-exceptions/${exceptionId}`)),
+
+  history: (exceptionId) =>
+    parsed(
+      z.object({ exceptionId: z.string(), entries: z.array(zRosterHistoryEntry) }).passthrough(),
+      getRaw(`/roster-exceptions/${exceptionId}/history`)),
+};
+
+// ── The weekly pattern ──────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A recurring availability rule: when this clinician normally works at this clinic on this weekday, in what
+ * slot length, and at most how many patients.
+ *
+ * `maxPerDay` null means UNCAPPED, which is every rule that existed before the cap did. `slotsFromWindow` and
+ * `slotsPerDay` are both returned because "24 slots, capped at 20" is the sentence a coordinator is reading;
+ * one number alone either hides the cap or makes the session look shorter than it is.
+ */
+export const zAvailabilityRule = z.object({
+  availabilityId: z.string(),
+  providerId: z.string(),
+  locationId: z.string(),
+  branchId: z.string().nullable(),
+  doctorId: z.string().nullable(),
+  dayOfWeek: z.number(),
+  startTime: z.string(),
+  endTime: z.string(),
+  slotMinutes: z.number(),
+  maxPerDay: z.number().nullable(),
+  slotsFromWindow: z.number(),
+  slotsPerDay: z.number(),
+  updatedAt: z.string().nullable(),
+  updatedBy: z.string().nullable(),
+  updatedByName: z.string().nullable(),
+}).passthrough();
+export type AvailabilityRule = z.infer<typeof zAvailabilityRule>;
+
+export const zAvailabilityHistoryEntry = z.object({
+  sequence: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorSubject: z.string().nullable(),
+  actorName: z.string().nullable(),
+  startTime: z.string().nullable(),
+  endTime: z.string().nullable(),
+  slotMinutes: z.number().nullable(),
+  maxPerDay: z.number().nullable(),
+  retired: z.boolean(),
+}).passthrough();
+export type AvailabilityHistoryEntry = z.infer<typeof zAvailabilityHistoryEntry>;
+
+export interface UpsertAvailabilityBody {
+  providerId: string;
+  locationId: string;
+  doctorId?: string;
+  branchId?: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  slotMinutes: number;
+  maxPerDay?: number | null;
+}
+
+export interface AvailabilityApi {
+  list(params?: { branchId?: string; doctorId?: string }): Promise<AvailabilityRule[]>;
+  create(body: UpsertAvailabilityBody): Promise<AvailabilityRule>;
+  update(availabilityId: string, body: UpsertAvailabilityBody): Promise<AvailabilityRule>;
+  /** Retires the pattern. Does NOT retract slots already generated, or cancel anything booked into them. */
+  retire(availabilityId: string): Promise<{ availabilityId: string; retired: boolean }>;
+  history(availabilityId: string): Promise<{ availabilityId: string; entries: AvailabilityHistoryEntry[] }>;
+}
+
+const httpAvailabilityApi: AvailabilityApi = {
+  list: (params = {}) => parsed(z.array(zAvailabilityRule), getRaw(`/provider-availability${qs(params)}`)),
+
+  create: (body) => parsed(zAvailabilityRule, postRaw(`/provider-availability`, body)),
+
+  update: (availabilityId, body) =>
+    parsed(zAvailabilityRule, putRaw(`/provider-availability/${availabilityId}`, body)),
+
+  retire: (availabilityId) =>
+    parsed(
+      z.object({ availabilityId: z.string(), retired: z.boolean() }).passthrough(),
+      deleteRaw(`/provider-availability/${availabilityId}`)),
+
+  history: (availabilityId) =>
+    parsed(
+      z.object({ availabilityId: z.string(), entries: z.array(zAvailabilityHistoryEntry) }).passthrough(),
+      getRaw(`/provider-availability/${availabilityId}/history`)),
 };
 
 // ── Inventory ───────────────────────────────────────────────────────────────────────────────────────────
@@ -248,11 +459,18 @@ export const zInventoryAlerts = z.object({
 }).passthrough();
 export type InventoryAlerts = z.infer<typeof zInventoryAlerts>;
 
-export const inventoryApi = {
-  stock: (params: { branchId?: string; category?: ItemCategory; lowStock?: boolean; expiringWithinDays?: number } = {}) =>
-    parsed(zStockResponse, getRaw(`/inventory/stock${qs(params)}`)),
+export interface InventoryApi {
+  stock(params?: { branchId?: string; category?: ItemCategory; lowStock?: boolean; expiringWithinDays?: number }): Promise<StockResponse>;
+  movements(params?: { branchId?: string; itemId?: string; kind?: MovementKind; page?: number; pageSize?: number }): Promise<{ total: number; page: number; pageSize: number; movements: Movement[] }>;
+  alerts(branchId?: string): Promise<InventoryAlerts>;
+  postMovement(idempotencyKey: string, body: { branchId: string; itemId: string; kind: MovementKind; quantity: number; batchId?: string; reason?: string }): Promise<{ movementId: string; replayed: boolean; quantity: number; onHand: number }>;
+  transfer(idempotencyKey: string, body: { fromBranchId: string; toBranchId: string; itemId: string; quantity: number; batchId?: string; reason?: string }): Promise<{ transferRef: string; outMovementId: string; inMovementId: string; netChange: number }>;
+}
 
-  movements: (params: { branchId?: string; itemId?: string; kind?: MovementKind; page?: number; pageSize?: number } = {}) =>
+const httpInventoryApi: InventoryApi = {
+  stock: (params = {}) => parsed(zStockResponse, getRaw(`/inventory/stock${qs(params)}`)),
+
+  movements: (params = {}) =>
     parsed(
       z.object({ total: z.number(), page: z.number(), pageSize: z.number(), movements: z.array(zMovement) })
         .passthrough(),
@@ -284,6 +502,39 @@ export const inventoryApi = {
                  netChange: z.number() }).passthrough(),
       postRaw(`/inventory/transfers`, body, idempotencyKey)),
 };
+
+// ── The seam ────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The four surfaces the Clinic Management portal reads, resolved together so a fixture cannot supply half. */
+export interface BranchApis {
+  branch: BranchApi;
+  roster: RosterApi;
+  availability: AvailabilityApi;
+  inventory: InventoryApi;
+}
+
+export const HTTP_BRANCH_APIS: BranchApis = {
+  branch: httpBranchApi,
+  roster: httpRosterApi,
+  availability: httpAvailabilityApi,
+  inventory: httpInventoryApi,
+};
+
+/**
+ * Live builds get the HTTP implementations; fixture builds get the demo ones, through the same
+ * `@dev/fixtures` door `ApiProvider` uses for `DevApiClient`.
+ *
+ * A module-level ternary rather than a hook, deliberately: `LIVE` folds to a constant at build time, so
+ * rollup drops the branch it did not take — which is what keeps the fixtures out of a production bundle
+ * rather than merely unreached. Wrapping this in a lambda rollup declines to reason about would put the whole
+ * subtree back, exactly as `fixtures.live.ts` warns.
+ */
+const APIS: BranchApis = LIVE ? HTTP_BRANCH_APIS : FIXTURES.createBranchApis();
+
+export const branchApi = APIS.branch;
+export const rosterApi = APIS.roster;
+export const availabilityApi = APIS.availability;
+export const inventoryApi = APIS.inventory;
 
 function qs(params: Record<string, string | number | boolean | undefined>): string {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== "");
