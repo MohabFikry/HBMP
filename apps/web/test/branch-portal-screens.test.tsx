@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
 import { DevAuthClient } from "../src/auth/devAuthClient";
@@ -217,6 +218,72 @@ describe("the weekly pattern", () => {
     // The change that matters is visible as a change: the cap appears where it previously was not set.
     expect(entries[0].maxPerDay).toBeNull();
     expect(last.maxPerDay).toBe(12);
+  });
+});
+
+describe("recording a renewal", () => {
+  it("opens as a DIALOG, not a card appended below the table", async () => {
+    // C4 — this rendered a `Card` after the table, so clicking the action on row 20 of a 25-row page put the
+    // form below the fold with nothing to say it had opened: no focus move, no role, no Esc, no focus
+    // returned. On the portal's primary write. Radix Dialog supplies all four; asserting the role is what
+    // makes "it is a dialog" a fact rather than an intention.
+    const user = userEvent.setup();
+    wrap(<BranchPractitioners />);
+
+    await waitFor(() => expect(screen.getByText("Hala Fouad")).toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "Record renewal" })[0]);
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("warns and demands an impact check when the expiry moves EARLIER", async () => {
+    // C6 — the roster has required a preview before closing a clinic day since 25.4; shortening a licence
+    // strands appointments the same way and asked for nothing at all.
+    const user = userEvent.setup();
+    wrap(<BranchPractitioners />);
+
+    await waitFor(() => expect(screen.getByText("Hala Fouad")).toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "Record renewal" })[0]);
+
+    const dialog = await screen.findByRole("dialog");
+    const expiry = within(dialog).getByLabelText(/Expiry/i);
+    await user.clear(expiry);
+    await user.type(expiry, "2026-01-01");
+
+    expect(within(dialog).getByText(/cannot be booked/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Check impact" })).toBeInTheDocument();
+    // Save is held until the operator has looked.
+    expect(within(dialog).getByRole("button", { name: "Save licence" })).toBeDisabled();
+  });
+
+  it("asks for nothing extra when the expiry moves OUTWARDS", async () => {
+    // The routine renewal, and the common one. An acknowledgement demanded on every save is one that gets
+    // clicked without reading, which would destroy the value of the case above.
+    const user = userEvent.setup();
+    wrap(<BranchPractitioners />);
+
+    await waitFor(() => expect(screen.getByText("Hala Fouad")).toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "Record renewal" })[0]);
+
+    const dialog = await screen.findByRole("dialog");
+    const expiry = within(dialog).getByLabelText(/Expiry/i);
+    await user.clear(expiry);
+    await user.type(expiry, "2099-01-01");
+
+    expect(within(dialog).queryByText(/cannot be booked/i)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Save licence" })).toBeEnabled();
+  });
+
+  it("is reachable from the ALERTS worklist, which is where the work is identified", async () => {
+    // C5 — the "who do I chase" table had no action, so the operator held a name in their head, navigated to
+    // another screen, and searched for it.
+    const user = userEvent.setup();
+    wrap(<BranchLicenceAlerts />);
+
+    await waitFor(() => expect(screen.getByText("Karim Adel")).toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "Record renewal" })[0]);
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });
 

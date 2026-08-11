@@ -1,25 +1,73 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, ComboboxField, StatusChip, useTheme } from "@mersal/design-system";
+import {
+  Button, Card, DataTable, InlineAlert, InputField, ComboboxField, Modal, StatusChip, useTheme,
+} from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
-import { rosterApi } from "../api/branchApi";
-import type { CreateRosterExceptionBody, RosterException, RosterImpact, RosterKind } from "../api/branchApi";
+import { availabilityApi, branchApi, rosterApi } from "../api/branchApi";
+import type {
+  AvailabilityRule, BranchPractitioner, BranchRef, CreateRosterExceptionBody, RosterException, RosterImpact,
+  RosterKind,
+} from "../api/branchApi";
 import { useAsync } from "../api/useAsync";
 import { useWrite, writeErrorText } from "../api/useWrite";
+import { useAuth } from "../auth/AuthProvider";
+import { isSetScopedRole } from "../shell/useBranchContext";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { useFormat } from "../i18n/useFormat";
+import { ChangeTimeline } from "./branch/ChangeTimeline";
+import type { TimelineEntry } from "./branch/ChangeTimeline";
 import type { Localized } from "../portals/catalog";
 
 const S = {
   title: { en: "Roster & Availability", ar: "الجدول والإتاحة" },
   intro: {
-    en: "The weekly pattern says when the clinic normally runs. Exceptions say when it does not — leave, a public holiday, a closure — or when it runs extra.",
-    ar: "يحدد النمط الأسبوعي مواعيد العمل المعتادة. أما الاستثناءات فتحدد متى لا تعمل العيادة — إجازة أو عطلة رسمية أو إغلاق — أو متى تعمل بشكل إضافي.",
+    en: "The weekly pattern says when the clinic normally runs and how many patients each clinician takes. Exceptions say when it does not — leave, a public holiday, a closure — or when it runs extra.",
+    ar: "يحدد النمط الأسبوعي مواعيد العمل المعتادة وعدد المرضى لكل إكلينيكي. أما الاستثناءات فتحدد متى لا تعمل العيادة — إجازة أو عطلة رسمية أو إغلاق — أو متى تعمل بشكل إضافي.",
   },
   whyNotDelete: {
     en: "Adding an exception leaves the weekly pattern intact. Deleting the pattern to cover one absence removes every other week too.",
     ar: "إضافة استثناء تُبقي النمط الأسبوعي كما هو. أما حذف النمط لتغطية غياب واحد فيلغي كل الأسابيع الأخرى أيضًا.",
   },
 
+  // ── weekly pattern ────────────────────────────────────────────────────────────────────────────────────
+  patternHeading: { en: "Weekly pattern", ar: "النمط الأسبوعي" },
+  noPattern: {
+    en: "No weekly pattern is recorded for this clinic yet. Until one is, no appointment slots are generated.",
+    ar: "لا يوجد نمط أسبوعي مسجل لهذه العيادة بعد. وحتى يُسجَّل، لن تُنشأ أي مواعيد متاحة.",
+  },
+  clinician: { en: "Clinician", ar: "الإكلينيكي" },
+  day: { en: "Day", ar: "اليوم" },
+  hoursCol: { en: "Hours", ar: "الساعات" },
+  slotLength: { en: "Slot length", ar: "مدة الموعد" },
+  cap: { en: "Daily limit", ar: "الحد اليومي" },
+  offered: { en: "Slots offered", ar: "المواعيد المتاحة" },
+  noCap: { en: "No limit", ar: "بلا حد" },
+  minutes: { en: "min", ar: "دقيقة" },
+  capExplains: {
+    en: "of {window} the hours allow",
+    ar: "من {window} تسمح بها الساعات",
+  },
+  editPattern: { en: "Edit", ar: "تعديل" },
+  historyAction: { en: "History", ar: "السجل" },
+
+  editHeading: { en: "Edit the weekly pattern", ar: "تعديل النمط الأسبوعي" },
+  startLabel: { en: "Starts", ar: "يبدأ" },
+  endLabel: { en: "Ends", ar: "ينتهي" },
+  slotMinutesLabel: { en: "Slot length (minutes)", ar: "مدة الموعد (بالدقائق)" },
+  capLabel: { en: "Most patients per day", ar: "أقصى عدد مرضى في اليوم" },
+  capHelp: {
+    en: "Leave empty for no limit. The hours decide how many slots exist; this decides how many are offered. A six-hour day at 15 minutes offers 24 — a clinician who can safely see 20 says 20.",
+    ar: "اتركه فارغًا لعدم وضع حد. الساعات تحدد عدد المواعيد الممكنة، وهذا يحدد عدد المعروض منها. يوم من ست ساعات بمواعيد ١٥ دقيقة يتيح ٢٤ موعدًا — والإكلينيكي الذي يمكنه استقبال ٢٠ بأمان يحدد ٢٠.",
+  },
+  savePattern: { en: "Save pattern", ar: "حفظ النمط" },
+  patternSaved: { en: "Weekly pattern updated.", ar: "تم تحديث النمط الأسبوعي." },
+  capMustBePositive: {
+    en: "A limit of zero would close the clinic silently. Leave it empty for no limit, or record a closure below.",
+    ar: "الحد صفر يغلق العيادة دون إشعار. اتركه فارغًا لعدم وضع حد، أو سجّل إغلاقًا أدناه.",
+  },
+  historyHeading: { en: "Change history", ar: "سجل التغييرات" },
+
+  // ── exceptions ────────────────────────────────────────────────────────────────────────────────────────
   existing: { en: "Exceptions", ar: "الاستثناءات" },
   noneYet: { en: "No exceptions are recorded for the next 90 days.", ar: "لا توجد استثناءات مسجلة خلال التسعين يومًا القادمة." },
   kind: { en: "Kind", ar: "النوع" },
@@ -30,6 +78,14 @@ const S = {
   effect: { en: "Effect", ar: "الأثر" },
   removes: { en: "Removes slots", ar: "يلغي المواعيد المتاحة" },
   adds: { en: "Adds slots", ar: "يضيف مواعيد متاحة" },
+  appliesTo: { en: "Applies to", ar: "ينطبق على" },
+  wholeClinic: { en: "The whole clinic", ar: "العيادة بأكملها" },
+  withdraw: { en: "Withdraw", ar: "سحب" },
+  withdrawn: { en: "Exception withdrawn. The days it removed are available again.", ar: "تم سحب الاستثناء. عادت الأيام التي ألغاها متاحة." },
+  withdrawExplains: {
+    en: "Withdrawing restores the availability this removed. It does NOT un-flag appointments already flagged — you may have rung those patients and moved them already.",
+    ar: "السحب يعيد الإتاحة التي أُلغيت. لكنه لا يزيل تعليم المواعيد التي عُلّمت بالفعل — فقد تكون اتصلت بهؤلاء المستفيدين ونقلتهم بالفعل.",
+  },
 
   addHeading: { en: "Record an exception", ar: "تسجيل استثناء" },
   kindLeave: { en: "Leave", ar: "إجازة" },
@@ -48,6 +104,19 @@ const S = {
     en: "Required. A patient will ask why their appointment moved, and this is the answer they are owed.",
     ar: "مطلوب. سيسأل المستفيد عن سبب تغيير موعده، وهذا هو الجواب الذي يستحقه.",
   },
+
+  whoLabel: { en: "Who is affected", ar: "من يتأثر" },
+  whoHelp: {
+    en: "Leave as the whole clinic to close it for everyone. Name a clinician to record their absence while the clinic stays open.",
+    ar: "اتركه على العيادة بأكملها لإغلاقها للجميع. أو حدد إكلينيكيًا لتسجيل غيابه مع بقاء العيادة مفتوحة.",
+  },
+  whichClinic: { en: "Which clinic", ar: "أي عيادة" },
+  whichClinicHelp: {
+    en: "You supervise several clinics, so this change must name the one it applies to.",
+    ar: "أنت تشرف على عدة عيادات، لذا يجب تحديد العيادة التي ينطبق عليها هذا التغيير.",
+  },
+  pickClinic: { en: "Choose a clinic…", ar: "اختر عيادة…" },
+  needClinic: { en: "Choose which clinic this applies to.", ar: "اختر العيادة التي ينطبق عليها هذا." },
 
   preview: { en: "Check impact", ar: "فحص الأثر" },
   previewing: { en: "Checking…", ar: "جارٍ الفحص…" },
@@ -70,12 +139,14 @@ const S = {
   },
   mustAcknowledge: { en: "Confirm you have read the affected appointments.", ar: "أكّد اطلاعك على المواعيد المتأثرة." },
   needReason: { en: "Enter a reason.", ar: "أدخل سببًا." },
+  needFrom: { en: "Enter the date this starts.", ar: "أدخل تاريخ البدء." },
   applied: { en: "Exception applied.", ar: "تم تطبيق الاستثناء." },
   flaggedNoneCancelled: { en: "flagged for reassignment · 0 cancelled", ar: "مُعلَّم لإعادة التوزيع · 0 ملغى" },
   staleImpact: {
     en: "The number of affected appointments changed since you checked. Check the impact again.",
     ar: "تغيّر عدد المواعيد المتأثرة منذ الفحص. افحص الأثر مرة أخرى.",
   },
+  cancel: { en: "Cancel", ar: "إلغاء" },
 } satisfies Record<string, Localized>;
 
 const KIND_LABEL: Record<RosterKind, Localized> = {
@@ -85,25 +156,299 @@ const KIND_LABEL: Record<RosterKind, Localized> = {
   AdHocClinic: S.kindAdHoc,
 };
 
+/** .NET `DayOfWeek` — Sunday is 0, matching `provider_availability.day_of_week`. */
+const DAY_LABEL: Localized[] = [
+  { en: "Sunday", ar: "الأحد" },
+  { en: "Monday", ar: "الإثنين" },
+  { en: "Tuesday", ar: "الثلاثاء" },
+  { en: "Wednesday", ar: "الأربعاء" },
+  { en: "Thursday", ar: "الخميس" },
+  { en: "Friday", ar: "الجمعة" },
+  { en: "Saturday", ar: "السبت" },
+];
+
 /**
- * 25.7 (design 42 §4/§6) — the roster, and the IMPACT PREVIEW that gates every change to it.
+ * (design 42 §4/§6) — the roster: the weekly pattern the clinic normally runs, and the exceptions to it.
  *
- * <b>The preview is not advisory.</b> Apply is disabled until the operator has run it AND ticked that they
- * read the list, and the server independently refuses an apply whose acknowledged count no longer matches
- * what it computes. Both halves are needed: the client stops the careless click, and the server stops the
- * stale one — a preview taken twenty minutes ago, before two more people booked, must not silently cover them.
+ * <b>The weekly pattern band is new, and its absence was the defect.</b> This screen opened by telling the
+ * coordinator that "the weekly pattern says when the clinic normally runs" and then showed only the
+ * exceptions to it — because `emr.provider_availability` had no read endpoint anywhere on the platform. Leave
+ * could be recorded; working hours could not be seen, changed or retired. The sentence was describing data
+ * the screen had no way to fetch.
  *
- * The list is rendered, not just the count. "8 appointments" is a number; the list is what lets a coordinator
- * recognise the two who cannot easily travel again.
+ * <b>The impact preview is not advisory.</b> Apply is disabled until the operator has run it AND ticked that
+ * they read the list, and the server independently refuses an apply whose acknowledged count no longer
+ * matches what it computes. Both halves are needed: the client stops the careless click, and the server stops
+ * the stale one — a preview taken twenty minutes ago, before two more people booked, must not silently cover
+ * them.
  */
 export function BranchRoster() {
   const t = useLoc();
   const { lang } = useTheme();
-  const state = useAsync(() => rosterApi.list(), []);
+  const exceptions = useAsync(() => rosterApi.list(), []);
+  const rules = useAsync(() => availabilityApi.list(), []);
+  // Names for the ids the roster rows carry. Both reads are cheap reference data and both are needed by the
+  // two bands, so they are fetched once here rather than by each.
+  const people = useAsync(() => branchApi.practitioners({ includeUnlicensed: true }), []);
+  const branches = useAsync(() => branchApi.branches(), []);
+
+  const nameOf = useMemo(() => {
+    const byId = new Map((people.data ?? []).map((p) => [p.practitionerId, p]));
+    return (id: string | null): string | null => {
+      if (!id) return null;
+      const p = byId.get(id);
+      if (!p) return id.slice(0, 8);
+      return lang === "ar" ? p.fullNameAr : p.fullNameEn;
+    };
+  }, [people.data, lang]);
+
+  return (
+    <div className="branch-screen">
+      <PageHeader title={t(S.title)} />
+      <p className="muted lede">{t(S.intro)}</p>
+
+      <WeeklyPattern rules={rules} nameOf={nameOf} onChanged={() => rules.reload()} />
+
+      <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
+
+      <Exceptions
+        state={exceptions}
+        nameOf={nameOf}
+        onChanged={() => exceptions.reload()}
+      />
+
+      <RecordException
+        lang={lang}
+        practitioners={people.data ?? []}
+        branches={branches.data ?? []}
+        onApplied={() => exceptions.reload()}
+      />
+    </div>
+  );
+}
+
+// ── The weekly pattern ──────────────────────────────────────────────────────────────────────────────────
+
+function WeeklyPattern({
+  rules,
+  nameOf,
+  onChanged,
+}: {
+  rules: ReturnType<typeof useAsync<AvailabilityRule[]>>;
+  nameOf: (id: string | null) => string | null;
+  onChanged: () => void;
+}) {
+  const t = useLoc();
+  const [editing, setEditing] = useState<AvailabilityRule | null>(null);
+  const [viewingHistory, setViewingHistory] = useState<AvailabilityRule | null>(null);
+
+  const columns: Column<AvailabilityRule>[] = useMemo(
+    () => [
+      { key: "clinician", header: t(S.clinician), cell: (r) => nameOf(r.doctorId) ?? t(S.wholeClinic) },
+      {
+        key: "day", header: t(S.day),
+        cell: (r) => t(DAY_LABEL[r.dayOfWeek] ?? DAY_LABEL[0]),
+        sortable: true, sortValue: (r) => r.dayOfWeek,
+      },
+      { key: "hours", header: t(S.hoursCol), cell: (r) => `${r.startTime}–${r.endTime}` },
+      { key: "slot", header: t(S.slotLength), cell: (r) => `${r.slotMinutes} ${t(S.minutes)}` },
+      {
+        key: "cap",
+        header: t(S.cap),
+        /*
+          The cap and what it COSTS, together.
+
+          A bare "12" leaves the reader to work out whether that is a restriction at all. Showing "12 of 16
+          the hours allow" makes the two facts one sentence, and it is the sentence somebody is checking when
+          they ask why the calendar looks shorter than the opening times.
+        */
+        cell: (r) =>
+          r.maxPerDay === null ? (
+            <span className="muted">{t(S.noCap)}</span>
+          ) : (
+            <span>
+              <strong>{r.maxPerDay}</strong>{" "}
+              <span className="muted">
+                {t(S.capExplains).replace("{window}", String(r.slotsFromWindow))}
+              </span>
+            </span>
+          ),
+      },
+      { key: "offered", header: t(S.offered), cell: (r) => String(r.slotsPerDay) },
+      {
+        key: "actions",
+        stickyEnd: true,
+        header: "",
+        cell: (r) => (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>{t(S.editPattern)}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setViewingHistory(r)}>{t(S.historyAction)}</Button>
+          </>
+        ),
+      },
+    ],
+    [t, nameOf],
+  );
+
+  return (
+    <>
+      <h2>{t(S.patternHeading)}</h2>
+      <AsyncSection state={rules} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noPattern}>
+        {(rows) => (
+          <Card>
+            <DataTable
+              caption={t(S.patternHeading)}
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.availabilityId}
+            />
+          </Card>
+        )}
+      </AsyncSection>
+
+      {editing && (
+        <EditPattern
+          rule={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            onChanged();
+          }}
+        />
+      )}
+
+      {viewingHistory && (
+        <PatternHistory rule={viewingHistory} onClose={() => setViewingHistory(null)} />
+      )}
+    </>
+  );
+}
+
+function EditPattern({
+  rule,
+  onClose,
+  onSaved,
+}: {
+  rule: AvailabilityRule;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+  const [startTime, setStartTime] = useState(rule.startTime);
+  const [endTime, setEndTime] = useState(rule.endTime);
+  const [slotMinutes, setSlotMinutes] = useState(String(rule.slotMinutes));
+  // Empty string means "no limit", which is a different value from 0 — and 0 is refused, because a clinic
+  // that takes nobody is a closure and closures carry a reason and an impact preview.
+  const [cap, setCap] = useState(rule.maxPerDay === null ? "" : String(rule.maxPerDay));
+  const [validation, setValidation] = useState<string | null>(null);
+  const write = useWrite();
+
+  const submit = async () => {
+    const capValue = cap.trim() === "" ? null : Number(cap);
+    if (capValue !== null && (!Number.isFinite(capValue) || capValue <= 0)) {
+      setValidation(t(S.capMustBePositive));
+      return;
+    }
+    setValidation(null);
+    const ok = await write.run(() =>
+      availabilityApi.update(rule.availabilityId, {
+        providerId: rule.providerId,
+        locationId: rule.locationId,
+        doctorId: rule.doctorId ?? undefined,
+        branchId: rule.branchId ?? undefined,
+        dayOfWeek: rule.dayOfWeek,
+        startTime,
+        endTime,
+        slotMinutes: Number(slotMinutes),
+        maxPerDay: capValue,
+      }),
+    );
+    if (ok) onSaved();
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.editHeading)}
+      description={`${t(DAY_LABEL[rule.dayOfWeek] ?? DAY_LABEL[0])} · ${rule.startTime}–${rule.endTime}`}
+      footer={
+        <>
+          <Button onClick={submit} disabled={write.busy}>{t(S.savePattern)}</Button>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+        </>
+      }
+    >
+      <InputField label={t(S.startLabel)} type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+      <InputField label={t(S.endLabel)} type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+      <InputField label={t(S.slotMinutesLabel)} type="number" min={1} value={slotMinutes} onChange={(e) => setSlotMinutes(e.target.value)} required />
+      <InputField label={t(S.capLabel)} type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} help={t(S.capHelp)} />
+      {validation && <InlineAlert tone="warn">{validation}</InlineAlert>}
+      {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+    </Modal>
+  );
+}
+
+function PatternHistory({ rule, onClose }: { rule: AvailabilityRule; onClose: () => void }) {
+  const t = useLoc();
+  const history = useAsync(() => availabilityApi.history(rule.availabilityId), [rule.availabilityId]);
+
+  const entries: TimelineEntry[] = (history.data?.entries ?? []).map((e) => ({
+    sequence: e.sequence,
+    recordedAt: e.recordedAt,
+    actorName: e.actorName,
+    actorSubject: e.actorSubject,
+    values: [
+      { label: S.hoursCol, value: e.startTime && e.endTime ? `${e.startTime}–${e.endTime}` : null },
+      { label: S.slotLength, value: e.slotMinutes === null ? null : `${e.slotMinutes} ${t(S.minutes)}` },
+      { label: S.cap, value: e.maxPerDay === null ? t(S.noCap) : String(e.maxPerDay) },
+    ],
+  }));
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.historyHeading)}
+      description={t(DAY_LABEL[rule.dayOfWeek] ?? DAY_LABEL[0])}
+      wide
+      footer={<Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>}
+    >
+      <AsyncSection state={history} isEmpty={(d) => d.entries.length === 0} emptyLabel={S.historyHeading}>
+        {() => <ChangeTimeline entries={entries} />}
+      </AsyncSection>
+    </Modal>
+  );
+}
+
+// ── Exceptions ──────────────────────────────────────────────────────────────────────────────────────────
+
+function Exceptions({
+  state,
+  nameOf,
+  onChanged,
+}: {
+  state: ReturnType<typeof useAsync<RosterException[]>>;
+  nameOf: (id: string | null) => string | null;
+  onChanged: () => void;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+  const [confirming, setConfirming] = useState<RosterException | null>(null);
+  const [outcome, setOutcome] = useState<string | null>(null);
+  const write = useWrite();
 
   const columns: Column<RosterException>[] = useMemo(
     () => [
       { key: "kind", header: t(S.kind), cell: (e) => t(KIND_LABEL[e.kind]) },
+      {
+        key: "who",
+        header: t(S.appliesTo),
+        // Whose absence this is. Without it every row read as "the clinic is shut", which is what the form
+        // could only ever record — and the two are a very different message to the desk.
+        cell: (e) => nameOf(e.practitionerId) ?? t(S.wholeClinic),
+      },
       { key: "dates", header: t(S.dates), cell: (e) => (e.dateFrom === e.dateTo ? e.dateFrom : `${e.dateFrom} → ${e.dateTo}`) },
       { key: "hours", header: t(S.hours), cell: (e) => (e.wholeDay ? t(S.wholeDay) : `${e.startTime}–${e.endTime}`) },
       {
@@ -118,16 +463,30 @@ export function BranchRoster() {
           ),
       },
       { key: "reason", header: t(S.reason), cell: (e) => e.reason, sortable: true, sortValue: (e) => e.reason },
+      {
+        key: "actions",
+        stickyEnd: true,
+        header: "",
+        cell: (e) => (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(e)}>{t(S.withdraw)}</Button>
+        ),
+      },
     ],
-    [t],
+    [t, nameOf],
   );
 
-  return (
-    <div className="branch-screen">
-      <PageHeader title={t(S.title)} />
-      <p className="muted lede">{t(S.intro)}</p>
-      <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
+  const doWithdraw = async () => {
+    if (!confirming) return;
+    const ok = await write.run(() => rosterApi.withdraw(confirming.exceptionId));
+    if (ok) {
+      setConfirming(null);
+      setOutcome(t(S.withdrawn));
+      onChanged();
+    }
+  };
 
+  return (
+    <>
       <AsyncSection state={state} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noneYet}>
         {(rows) => (
           <Card>
@@ -136,14 +495,63 @@ export function BranchRoster() {
         )}
       </AsyncSection>
 
-      <RecordException lang={lang} onApplied={() => state.reload()} />
-    </div>
+      {outcome && (
+        <InlineAlert tone="ok">
+          <span role="status" aria-live="polite">{outcome}</span>
+        </InlineAlert>
+      )}
+
+      {confirming && (
+        <Modal
+          open
+          onOpenChange={(next) => { if (!next) setConfirming(null); }}
+          title={t(S.withdraw)}
+          description={confirming.reason}
+          footer={
+            <>
+              <Button onClick={doWithdraw} disabled={write.busy}>{t(S.withdraw)}</Button>
+              <Button variant="ghost" onClick={() => setConfirming(null)}>{t(S.cancel)}</Button>
+            </>
+          }
+        >
+          {/* The half of withdrawal that surprises people: restoring availability does NOT un-flag the
+              appointments this stranded, because the coordinator may already have rung those patients and
+              moved them. Un-flagging would quietly undo work somebody did on the phone. */}
+          <p>{t(S.withdrawExplains)}</p>
+          {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+        </Modal>
+      )}
+    </>
   );
 }
 
-function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: () => void }) {
+function RecordException({
+  lang,
+  practitioners,
+  branches,
+  onApplied,
+}: {
+  lang: "en" | "ar";
+  practitioners: BranchPractitioner[];
+  branches: BranchRef[];
+  onApplied: () => void;
+}) {
   const t = useLoc();
+  const { session } = useAuth();
+  /*
+    A clinics manager reaches several clinics at once and has NO active branch until they filter, so the
+    server cannot infer which clinic a write is for — and refuses (400) rather than guessing. This form never
+    sent a branch at all, which made the supervisor of six clinics the one user who could not record an
+    exception anywhere.
+
+    A REACH distinction, not an authority one: both roles hold the same permission set. The picker appears
+    because a manager has a choice to make, and a coordinator does not.
+  */
+  const mustChooseClinic = isSetScopedRole(session?.role ?? undefined);
+
   const [kind, setKind] = useState<RosterKind>("Leave");
+  const [practitionerId, setPractitionerId] = useState("");
+  const [branchId, setBranchId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -178,11 +586,20 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
     reason: reason.trim(),
     startTime: startTime || undefined,
     endTime: endTime || undefined,
+    practitionerId: practitionerId || undefined,
+    branchId: branchId || undefined,
   });
 
+  const invalid = (): string | null => {
+    if (!dateFrom) return t(S.needFrom);
+    if (!reason.trim()) return t(S.needReason);
+    if (mustChooseClinic && !branchId) return t(S.needClinic);
+    return null;
+  };
+
   const runPreview = async () => {
-    if (!dateFrom) { setValidation(t(S.from)); return; }
-    if (!reason.trim()) { setValidation(t(S.needReason)); return; }
+    const problem = invalid();
+    if (problem) { setValidation(problem); return; }
     setValidation(null);
     await previewWrite.run(async () => {
       const result = await rosterApi.preview(body());
@@ -220,6 +637,39 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
         value={kind}
         onChange={(v) => invalidate(setKind)(v as RosterKind)}
       />
+
+      {/*
+        WHO. Design 42 §4's motivating example is "Dr Hala is on leave next Tuesday", and this form could not
+        express it: it never sent a practitionerId, so every exception it created closed the entire clinic.
+        The server has accepted the field since 25.4.
+      */}
+      <ComboboxField
+        label={t(S.whoLabel)}
+        options={[
+          { value: "", label: t(S.wholeClinic) },
+          ...practitioners.map((p) => ({
+            value: p.practitionerId,
+            label: lang === "ar" ? p.fullNameAr : p.fullNameEn,
+          })),
+        ]}
+        value={practitionerId}
+        onChange={(v) => invalidate(setPractitionerId)(v)}
+        help={t(S.whoHelp)}
+      />
+
+      {mustChooseClinic && (
+        <ComboboxField
+          label={t(S.whichClinic)}
+          options={[
+            { value: "", label: t(S.pickClinic) },
+            ...branches.map((b) => ({ value: b.branchId, label: lang === "ar" ? b.nameAr : b.nameEn })),
+          ]}
+          value={branchId}
+          onChange={(v) => invalidate(setBranchId)(v)}
+          help={t(S.whichClinicHelp)}
+          required
+        />
+      )}
 
       <InputField label={t(S.from)} type="date" value={dateFrom} onChange={(e) => invalidate(setDateFrom)(e.target.value)} required />
       <InputField label={t(S.to)} type="date" value={dateTo} onChange={(e) => invalidate(setDateTo)(e.target.value)} />

@@ -3482,6 +3482,67 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 
 /* ============================================================================================================
+   THE CHANGE TIMELINE — who altered this clinic's roster, licence or weekly pattern, and when.
+
+   A LIST, not a table. Each entry has a different number of changed fields, so a table would spend most of
+   its cells on "unchanged" — and the reason someone opens a timeline is to find the one thing that moved.
+
+   The rail is a border on the list with a dot per entry, drawn with logical properties throughout so it
+   mirrors in Arabic without a second rule. A left border here would sit on the wrong side of an RTL page,
+   which is the kind of mistake that survives review because the reviewer reads in English.
+   ============================================================================================================ */
+.change-timeline {
+  display: grid;
+  gap: var(--sp3);
+}
+.change-timeline__list {
+  list-style: none;
+  margin: 0;
+  padding-inline-start: var(--sp4);
+  border-inline-start: 2px solid var(--border);
+  display: grid;
+  gap: var(--sp4);
+}
+.change-timeline__entry {
+  position: relative;
+}
+/* The dot. `aria-hidden` is unnecessary — a pseudo-element is not in the accessibility tree — and it must
+   not carry meaning on its own: the entry's date and actor are the content, in words, directly beside it. */
+.change-timeline__entry::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--sp4) - 5px);
+  inset-block-start: 0.45em;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.change-timeline__when {
+  margin: 0 0 var(--sp1);
+}
+.change-timeline__changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp1);
+}
+.change-timeline__field {
+  color: var(--text-2);
+}
+/* The superseded value, de-emphasised but NOT struck through: a strikethrough reads as "deleted", and this
+   value was not deleted, it was replaced. It also has to stay legible — half the point of showing it is that
+   the reader compares the two. */
+.change-timeline__from {
+  color: var(--text-2);
+}
+.change-timeline__note {
+  max-width: 68ch;
+  margin: 0;
+}
+
+/* ============================================================================================================
    THE RESTRICTED-RESULT CARD (14.8, design 37 §6/§7) — the highest-stakes surface in the app: what a
    clinician sees when a result is withheld pending a justified, time-boxed, single-result grant.
 
