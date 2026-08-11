@@ -560,6 +560,46 @@
         }
       }
     },
+    "/api/v1/appointments/licence-impact": {
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "doctorId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "expiry",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "branchId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/appointments/summary": {
       "get": {
         "tags": [
@@ -975,6 +1015,133 @@
         }
       }
     },
+    "/api/v1/provider-availability": {
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "branchId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "doctorId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertAvailabilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/provider-availability/{id}/history": {
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/provider-availability/{id}": {
+      "put": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertAvailabilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/roster-exceptions": {
       "get": {
         "tags": [
@@ -1043,6 +1210,29 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/roster-exceptions/{id}/history": {
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -2194,6 +2384,11 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "maxPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -2556,6 +2751,50 @@
           },
           "plan": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpsertAvailabilityRequest": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "doctorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "dayOfWeek": {
+            "$ref": "#/components/schemas/DayOfWeek"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "time"
+          },
+          "endTime": {
+            "type": "string",
+            "format": "time"
+          },
+          "slotMinutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "maxPerDay": {
+            "type": "integer",
+            "format": "int32",
             "nullable": true
           }
         },

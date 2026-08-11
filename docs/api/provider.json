@@ -877,6 +877,29 @@
         }
       }
     },
+    "/api/v1/practitioners/{id}/history": {
+      "get": {
+        "tags": [
+          "Mersal.Provider.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/practitioners/{id}/licence": {
       "post": {
         "tags": [
