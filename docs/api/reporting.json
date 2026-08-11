@@ -223,6 +223,35 @@
         }
       }
     },
+    "/api/v1/reports/sla-breaches": {
+      "get": {
+        "tags": [
+          "Mersal.Reporting.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlaBreachReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reports/rejected-requests": {
       "get": {
         "tags": [
@@ -386,6 +415,51 @@
         }
       }
     },
+    "/api/v1/reports/claims-summary": {
+      "get": {
+        "tags": [
+          "Mersal.Reporting.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimsSummaryReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reports/jobs/{id}": {
       "get": {
         "tags": [
@@ -499,6 +573,13 @@
           },
           {
             "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
             "in": "query",
             "schema": {
               "type": "string"
@@ -814,6 +895,55 @@
         },
         "additionalProperties": false
       },
+      "ClaimOutcomeRow": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClaimsSummaryReport": {
+        "type": "object",
+        "properties": {
+          "decided": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalAllowed": {
+            "type": "number",
+            "format": "double"
+          },
+          "byOutcome": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimOutcomeRow"
+            },
+            "nullable": true
+          },
+          "byServiceLine": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FinancialRow"
+            },
+            "nullable": true
+          },
+          "topDenialReasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RejectionReasonRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ClinicWorkloadReport": {
         "type": "object",
         "properties": {
@@ -1038,6 +1168,14 @@
             "type": "string",
             "nullable": true
           },
+          "clinicNameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "clinicNameAr": {
+            "type": "string",
+            "nullable": true
+          },
           "booked": {
             "type": "integer",
             "format": "int64"
@@ -1179,6 +1317,53 @@
         },
         "additionalProperties": false
       },
+      "SlaBreachReport": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlaBreachRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SlaBreachRow": {
+        "type": "object",
+        "properties": {
+          "authNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "priority": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "ageBucket": {
+            "type": "string",
+            "nullable": true
+          },
+          "ageSeconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reviewerId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "TatRow": {
         "type": "object",
         "properties": {
@@ -1269,6 +1454,14 @@
         "type": "object",
         "properties": {
           "clinicId": {
+            "type": "string",
+            "nullable": true
+          },
+          "clinicNameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "clinicNameAr": {
             "type": "string",
             "nullable": true
           },
