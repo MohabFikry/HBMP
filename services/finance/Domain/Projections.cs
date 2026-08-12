@@ -60,9 +60,25 @@ public sealed record SettlementView(
     string CurrencyCode,
     decimal Total,
     string Status,
-    IReadOnlyList<SettlementLineView> Lines) : IFinanceProjection
+    IReadOnlyList<SettlementLineView> Lines,
+    /// <summary>
+    /// Who submitted this settlement, and who approved it. Staff subject ids — the same class of identifier
+    /// the approvals worklist carries as <c>AssignedReviewerId</c>, and no more identifying than that.
+    /// </summary>
+    /// <remarks>
+    /// <para>Projected so segregation of duties can be honoured BEFORE the click rather than only in the
+    /// refusal. The approve handler compares <c>SubmittedBy</c> against the calling principal and answers 409
+    /// <c>urn:hbmp:sod-violation</c> when they match; without these fields a screen has no way to know that in
+    /// advance, so it offers the submitter an Approve button and then refuses it. A control that is working
+    /// correctly reads as a defect when the only way to discover the rule is to break it.</para>
+    /// <para>The refusal stays. The client is not the authority on who may release a payment — it is merely
+    /// no longer the only place the rule becomes visible.</para>
+    /// </remarks>
+    string? SubmittedBy = null,
+    string? ApprovedBy = null) : IFinanceProjection
 {
     public static SettlementView From(Settlement s) =>
         new(s.SettlementId, s.SettlementNo, s.ProviderId.ToString(), s.ContractId, s.PeriodStart, s.PeriodEnd,
-            s.CurrencyCode, s.Total, s.Status.ToString(), s.Lines.Select(SettlementLineView.From).ToList());
+            s.CurrencyCode, s.Total, s.Status.ToString(), s.Lines.Select(SettlementLineView.From).ToList(),
+            s.SubmittedBy, s.ApprovedBy);
 }

@@ -521,7 +521,12 @@ plugins:
       # instead of presenting a truncated list as the whole answer. Unexposed, `res.headers.get` returns null
       # in the browser, the client falls back to the page length, and the banner never appears — a silent
       # degradation back to exactly the behaviour it was added to fix.
-      exposed_headers: ["X-Correlation-Id", "ETag", "X-Active-Branch", "X-Total-Count"]
+      # X-Row-Count is the third instance of the same trap, and the one with the least forgiving failure. The
+      # finance export returns a FILE, so the audited row count has nowhere to live but a header. Unexposed,
+      # the Exports screen would download the CSV correctly and report "0 rows" beside it — a figure the
+      # operator has no reason to disbelieve, contradicting the `data.export` audit event that recorded the
+      # real one.
+      exposed_headers: ["X-Correlation-Id", "ETag", "X-Active-Branch", "X-Total-Count", "X-Row-Count"]
       credentials: false
       max_age: 3600
   # Global correlation IDs (W3C-style) on every request.

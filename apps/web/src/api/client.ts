@@ -84,6 +84,7 @@ import type {
   DecisionResult,
   DispenseRequest,
   DispenseResult,
+  OutOfStockResult,
   EligibilityHit,
   EligibilityResult,
   Encounter,
@@ -126,6 +127,8 @@ import type {
   PrescribeResult,
   Prescription,
   Settlement,
+  SettlementPage,
+  GenerateSettlementRequest,
   UtilizationView,
   IdentityUser,
   RoleCatalogEntry,
@@ -486,6 +489,10 @@ export interface ApiClient {
    */
   pharmacySearch(by: { rxNo?: string; cardNumber?: string; memberNo?: string; passport?: string }): Promise<Prescription[]>;
   dispense(req: DispenseRequest): Promise<DispenseResult>;
+  /** Report that the counter cannot fill a line. Idempotent — a second report notifies nobody. */
+  flagOutOfStock(req: {
+    prescriptionId: string; lineId: string; quantity?: number; note?: string;
+  }): Promise<OutOfStockResult>;
   /**
    * What the prescription costs and how it splits between member and payer.
    *
@@ -700,9 +707,16 @@ export interface ApiClient {
   escalations(): Promise<Escalation[]>;
 
   // Finance — billing codes + amounts only, no diagnosis (Phase 10.2).
-  utilization(): Promise<UtilizationView>;
-  settlements(): Promise<Settlement[]>;
-  financialSummary(dimension: "serviceline" | "category" | "provider"): Promise<FinancialSummary>;
+  /** The period is the operator's, not the server's default — see design 49 §4. */
+  utilization(period?: Period): Promise<UtilizationView>;
+  /** Server-side `providerId`/`status`, and the true count behind the endpoint's 100-row cap. */
+  settlements(filter?: { providerId?: string; status?: string }): Promise<SettlementPage>;
+  /** The three writes the `finance` role has held scopes for since phase 10.2 with no screen to use them. */
+  generateSettlement(req: GenerateSettlementRequest): Promise<Settlement>;
+  submitSettlement(id: string): Promise<Settlement>;
+  approveSettlement(id: string): Promise<Settlement>;
+  financialSummary(dimension: "serviceline" | "category" | "provider", period?: Period): Promise<FinancialSummary>;
+  /** Downloads the file as a side effect and returns the receipt. See `HttpApiClient.exportReport`. */
   exportReport(req: ExportRequest): Promise<ExportResult>;
 
   // Claims management — codes + amounts only, no diagnosis (Phase 10b). Provider users isolated to own claims server-side.

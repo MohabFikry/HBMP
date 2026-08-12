@@ -558,3 +558,75 @@ describe("the prescription page", () => {
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
   });
 });
+
+/**
+ * The shortage the counter could not report (design 49 §5).
+ *
+ * <p>`POST …/out-of-stock` has been complete since phase 6.3 — it consumes nothing, notifies the prescriber
+ * on a route that escalates to the pharmacy supervisor after eight hours, and audits. Nothing in this
+ * application called it, so a pharmacist facing an empty shelf had two options on this page: dispense, which
+ * is impossible, or nothing. And the `outOfStock` flag the contract declares existed only as a literal
+ * `false` in the HTTP client and a literal `true` in one fixture.</p>
+ */
+describe("reporting a shortage", () => {
+  it("offers the control the counter did not have", async () => {
+    renderPage();
+    const table = await screen.findByRole("table");
+    // Named for the medicine, like every other row control — five rows of "Report out of stock" are not
+    // navigable by a screen reader without it.
+    expect(within(table).getAllByRole("button", { name: /report out of stock/i }).length).toBeGreaterThan(0);
+  });
+
+  it("does not offer it on a line already reported", async () => {
+    // RXL-2 in the fixture is flagged. Offering the control there would invite a second notification for a
+    // shortage the prescriber has already been told about.
+    renderPage();
+    const table = await screen.findByRole("table");
+    const flagged = within(table).getByText(/guaifenesin/i).closest("tr")!;
+    expect(within(flagged).queryByRole("button", { name: /report out of stock/i })).toBeNull();
+    expect(within(flagged).getByText(/out of stock/i)).toBeTruthy();
+  });
+
+  it("shows WHO reported it and what they said, not just that it happened", async () => {
+    // A bare chip tells the next pharmacist nothing about whether the prescriber knows, or how long ago.
+    renderPage();
+    await screen.findByRole("table");
+    expect(screen.getByText(/supplier back-order/i)).toBeTruthy();
+  });
+
+  it("reports the shortage with an optional quantity and note", async () => {
+    const api = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(api, "flagOutOfStock");
+    const user = userEvent.setup();
+    renderPage(LIVE, api);
+
+    const table = await screen.findByRole("table");
+    await user.click(within(table).getAllByRole("button", { name: /report out of stock/i })[0]);
+
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/how much is short/i), "5");
+    await user.type(within(dialog).getByLabelText(/note for the prescriber/i), "back-order until Sunday");
+    await user.click(within(dialog).getByRole("button", { name: /report it/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0][0]).toMatchObject({ quantity: 5, note: "back-order until Sunday" });
+  });
+
+  it("sends neither field when the counter has none of it at all — the common case", async () => {
+    const api = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(api, "flagOutOfStock");
+    const user = userEvent.setup();
+    renderPage(LIVE, api);
+
+    const table = await screen.findByRole("table");
+    await user.click(within(table).getAllByRole("button", { name: /report out of stock/i })[0]);
+    const dialog = await screen.findByRole("dialog");
+    // No required field. A control a busy counter must fill in to use is a control that gets skipped, and
+    // skipping it returns us to the prescriber never being told.
+    await user.click(within(dialog).getByRole("button", { name: /report it/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0][0].quantity).toBeUndefined();
+    expect(spy.mock.calls[0][0].note).toBeUndefined();
+  });
+});

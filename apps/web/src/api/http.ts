@@ -209,6 +209,78 @@ export async function getRawCounted(
     total: total === null || Number.isNaN(total) ? null : total,
   };
 }
+/**
+ * A POST whose response is a FILE, not JSON.
+ *
+ * <p>The finance export is the only one. It has always returned `text/csv` through `Results.File`, and the
+ * client called {@link postRaw}, which parses JSON — so the Exports screen reported a row count and handed
+ * the operator nothing. There was no `Blob`, no object URL and no anchor click anywhere in the application.
+ * An export delivers a file; a row count is a receipt.</p>
+ *
+ * <p>Three things come back. The <b>blob</b>, which is the deliverable. The <b>filename</b>, read from
+ * `Content-Disposition` so the download is named by the server that knows what it produced rather than by a
+ * template the client guesses — the old client built `${report}-${from}_${to}.${format}` locally, which is
+ * how it managed to name a file `.xlsx` that was always CSV. And the <b>row count</b>, from `X-Row-Count`,
+ * because a file body has nowhere to put it.</p>
+ *
+ * <p>`rowCount` is null when the header is absent — a gateway that has not been told to expose it is
+ * indistinguishable from a server that did not send it, and both mean "unknown", never zero. The download
+ * does not depend on it.</p>
+ *
+ * <p>An error response is still `application/problem+json`, so failures read exactly as they do everywhere
+ * else in this module.</p>
+ */
+export async function postForFile(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<{ blob: Blob; filename: string | null; rowCount: number | null }> {
+  let res: Response;
+  const token = getToken();
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const branch = activeBranchHeader();
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth, ...branch },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    if (isAbort(e)) throw new ApiError("aborted", `Request to ${path} was cancelled`);
+    throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
+  }
+  if (!res.ok) {
+    const problem = await readProblem(res);
+    throw new ApiError("http", problem?.detail ?? problem?.title ?? `Request to ${path} failed`, res.status, problem);
+  }
+  const raw = res.headers.get("X-Row-Count");
+  const rowCount = raw === null ? null : Number.parseInt(raw, 10);
+  return {
+    blob: await res.blob(),
+    filename: filenameFrom(res.headers.get("Content-Disposition")),
+    rowCount: rowCount === null || Number.isNaN(rowCount) ? null : rowCount,
+  };
+}
+
+/**
+ * The filename out of a `Content-Disposition`, or null.
+ *
+ * <p>`filename*=UTF-8''…` first, because that is the encoding a non-ASCII name arrives in and the plain
+ * `filename=` beside it is the ASCII fallback the server degraded to. Null rather than a guess when the
+ * header is missing or unparseable: the caller names the download itself in that case, and a wrong name on a
+ * financial export is a file somebody later cannot identify.</p>
+ */
+function filenameFrom(header: string | null): string | null {
+  if (!header) return null;
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (extended?.[1]) {
+    try { return decodeURIComponent(extended[1].trim()); } catch { /* fall through to the plain form */ }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain?.[1]?.trim() || null;
+}
+
 export function postRaw(
   path: string,
   body: unknown,

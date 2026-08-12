@@ -113,6 +113,8 @@ import {
   zExportResult,
   zFinancialSummary,
   zSettlement,
+  zSettlementPage,
+  zOutOfStockResult,
   zUtilizationView,
   type ConsumeRequest,
   type DecisionRequest,
@@ -139,6 +141,7 @@ import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecor
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
 import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
+import type { GenerateSettlementRequest, Settlement } from "@mersal/contracts";
 import { sectionStateFor } from "../dev/profileSectionMatrix";
 import { ApiError } from "./http";
 
@@ -170,6 +173,88 @@ const NOTIFICATION_FIXTURE = [
   },
 ];
 const NOW = "2026-07-22T08:30:00Z";
+
+/**
+ * The settlement lifecycle's four chips, and the two staff ids the SoD fixture needs.
+ *
+ * <p>Four DISTINCT chips. The HTTP client wrote the literal string `"ok"` into every settlement's status, so
+ * Draft, Submitted, Approved and Paid rendered identically — and, because `zStatus` is an object and `"ok"`
+ * is a string, threw on every call besides. `Approved` is `info` rather than `ok`: approval authorises a
+ * payment, it does not complete one, and `Paid` is the only state that gets the affirmative chip.</p>
+ */
+const SETTLEMENT_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: Localized }> = {
+  draft: { kind: "neu", label: loc("Draft", "مسودة") },
+  submitted: { kind: "warn", label: loc("Submitted", "مُقدَّمة") },
+  approved: { kind: "info", label: loc("Approved", "معتمدة") },
+  paid: { kind: "ok", label: loc("Paid", "مدفوعة") },
+};
+
+/** The dev principal. `DEV_APPROVER` is somebody else, which is the entire point of the pair. */
+// Matches `devAuthClient`'s `dev-${primaryRole}`, so the SoD sentence on the Settlements screen
+// actually fires in development and in the tests. A fixture whose submitter is nobody the session
+// could ever be cannot exercise the rule it exists to demonstrate.
+const DEV_SUBJECT = "dev-finance";
+const DEV_APPROVER = "dev-finance-manager";
+
+const DEV_SETTLEMENTS = [
+  {
+    id: "stl-2026-000007",
+    settlementNo: "STL-2026-000007",
+    providerRef: "PRV-•••301",
+    providerName: loc("Nile Imaging Center", "مركز النيل للأشعة"),
+    periodStart: "2026-06-01",
+    periodEnd: "2026-06-30",
+    currency: "EGP",
+    total: 58500,
+    status: SETTLEMENT_CHIP.submitted,
+    state: "submitted" as const,
+    // Submitted BY THE DEV PRINCIPAL, so the Approve button on this row is the one the screen must withhold
+    // and explain. A fixture in which nobody is ever the submitter cannot exercise the rule.
+    submittedBy: DEV_SUBJECT,
+    approvedBy: null,
+    lines: [
+      { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 9, agreedUnitPrice: 6500, lineTotal: 58500, priceSource: "Contract" as const },
+    ],
+  },
+  {
+    id: "stl-2026-000006",
+    settlementNo: "STL-2026-000006",
+    providerRef: "PRV-•••118",
+    providerName: loc("Cairo Community Pharmacy", "صيدلية القاهرة"),
+    periodStart: "2026-06-01",
+    periodEnd: "2026-06-30",
+    currency: "EGP",
+    total: 12400,
+    status: SETTLEMENT_CHIP.approved,
+    state: "approved" as const,
+    submittedBy: DEV_APPROVER,
+    approvedBy: DEV_SUBJECT,
+    lines: [
+      { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), deliveredQty: 231, agreedUnitPrice: 53.68, lineTotal: 12400, priceSource: "Contract" as const },
+    ],
+  },
+  {
+    id: "stl-2026-000005",
+    settlementNo: "STL-2026-000005",
+    providerRef: "PRV-•••204",
+    providerName: loc("Maadi Diagnostics Lab", "معمل المعادي للتحاليل"),
+    periodStart: "2026-05-01",
+    periodEnd: "2026-05-31",
+    currency: "EGP",
+    total: 9120,
+    status: SETTLEMENT_CHIP.draft,
+    state: "draft" as const,
+    submittedBy: null,
+    approvedBy: null,
+    // A draft carrying an UNPRICED line. The reviewer about to submit this is the person the price-source
+    // column exists for: two of these three numbers are the contract's and one is a floor this platform
+    // inferred because no tariff names the code.
+    lines: [
+      { serviceCode: "80053", serviceLine: loc("Lab", "مختبر"), deliveredQty: 60, agreedUnitPrice: 106, lineTotal: 6360, priceSource: "Contract" as const },
+      { serviceCode: "84443", serviceLine: loc("Lab", "مختبر"), deliveredQty: 26, agreedUnitPrice: 106.15, lineTotal: 2760, priceSource: "ObservedFloor" as const },
+    ],
+  },
+];
 
 /** The claim / line / bucket vocabularies, resolved once. Each key is a real enum member (`ClaimStatus`,
  *  `ClaimLineStatus`, `ReconBucket`) — the previous fixture invented three that were not. */
@@ -2365,6 +2450,8 @@ export class DevApiClient implements ApiClient {
               // join it exists to exercise.
               unitPriceEgp: null,
               status: { kind: "info", label: loc("Pending", "معلّقة") },
+              outOfStockAt: null,
+              outOfStockNote: null,
               outOfStock: false,
             },
             {
@@ -2382,6 +2469,13 @@ export class DevApiClient implements ApiClient {
               activeIngredient: null,
               unitPriceEgp: null,
               status: { kind: "warn", label: loc("Out of stock", "غير متوفر") },
+              // Flagged, WITH its provenance. Until 0020 this `true` was the only place in the entire
+              // system the value could come from: the server's view did not carry the field and the HTTP
+              // client wrote the literal `false`, so the chip rendered here and in the tests and could not
+              // render in production. The two fields beside it are the ones that make the flag readable —
+              // how long it has been that way, and what the pharmacist told the prescriber.
+              outOfStockAt: "2026-07-21T07:40:00.000Z",
+              outOfStockNote: "Supplier back-order; substitute discussed with the prescriber.",
               outOfStock: true,
             },
           ],
@@ -2518,6 +2612,31 @@ export class DevApiClient implements ApiClient {
           : { kind: "part", label: loc("Partially dispensed", "صرف جزئي") },
         replayed,
         linesOutstanding: outstanding,
+      });
+    });
+  }
+
+  /**
+   * Lines this fixture has been told the counter cannot fill, keyed `rxId:lineId`.
+   *
+   * <p>State, not a constant, because the second report must be able to answer `replayed: true` — the whole
+   * behaviour worth having a fixture for. A stub that always said `replayed: false` would let a screen test
+   * assert the "reported just now" message on a line a colleague had already flagged.</p>
+   */
+  #outOfStock = new Map<string, string>();
+
+  flagOutOfStock(req: { prescriptionId: string; lineId: string; quantity?: number; note?: string }) {
+    return this.gate(() => {
+      const key = `${req.prescriptionId}:${req.lineId}`;
+      const existing = this.#outOfStock.get(key);
+      const at = existing ?? new Date().toISOString();
+      this.#outOfStock.set(key, at);
+      return ok(zOutOfStockResult, {
+        lineId: req.lineId,
+        flagged: true,
+        // The server does not notify the prescriber a second time, and this says which happened.
+        replayed: existing !== undefined,
+        outOfStockAt: at,
       });
     });
   }
@@ -3083,7 +3202,7 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Finance (Phase 10.2) — billing codes + amounts only, no diagnosis --------------------------------
-  utilization() {
+  utilization(_period?: Period) {
     return this.gate(() =>
       ok(zUtilizationView, {
         from: "2026-06-22",
@@ -3099,45 +3218,73 @@ export class DevApiClient implements ApiClient {
       }),
     );
   }
-  settlements() {
-    return this.gate(
-      () =>
-        ok(z.array(zSettlement), [
-          {
-            id: "STL-2026-000007",
-            settlementNo: "STL-2026-000007",
-            providerRef: "PRV-•••301",
-            providerName: loc("Nile Imaging Center", "مركز النيل للأشعة"),
-            periodStart: "2026-06-01",
-            periodEnd: "2026-06-30",
-            currency: "EGP",
-            total: 58500,
-            status: { kind: "info", label: loc("Submitted", "مُقدّمة") },
-            state: "submitted",
-            lines: [
-              { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 9, agreedUnitPrice: 6500, lineTotal: 58500 },
-            ],
-          },
-          {
-            id: "STL-2026-000006",
-            settlementNo: "STL-2026-000006",
-            providerRef: "PRV-•••118",
-            providerName: loc("Cairo Community Pharmacy", "صيدلية القاهرة") ,
-            periodStart: "2026-06-01",
-            periodEnd: "2026-06-30",
-            currency: "EGP",
-            total: 12400,
-            status: { kind: "ok", label: loc("Approved", "معتمدة") },
-            state: "approved",
-            lines: [
-              { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), deliveredQty: 231, agreedUnitPrice: 53.68, lineTotal: 12400 },
-            ],
-          },
-        ]),
-      [],
+  /**
+   * The settlement list.
+   *
+   * <p>Kept as MUTABLE STATE on the instance rather than a literal, because the three lifecycle writes now
+   * exist and a fixture that ignored them would let a screen test "approve" a settlement and then assert
+   * against a list that had never heard of it. A fixture speaks the service's vocabulary or it is a second
+   * implementation of the bug — and a fixture that cannot move through a state machine the screen drives is
+   * the same mistake one layer up.</p>
+   */
+  #settlements: Settlement[] = DEV_SETTLEMENTS.map((s) => ({ ...s, lines: s.lines.map((l) => ({ ...l })) }));
+
+  settlements(filter?: { providerId?: string; status?: string }) {
+    const rows = this.#settlements.filter(
+      (s) => (!filter?.status || s.state === filter.status.toLowerCase())
+        && (!filter?.providerId || s.providerRef === filter.providerId),
     );
+    return this.gate(() => ok(zSettlementPage, { rows, total: rows.length }), { rows: [], total: 0 });
   }
-  financialSummary(dimension: "serviceline" | "category" | "provider") {
+
+  generateSettlement(req: GenerateSettlementRequest) {
+    const seq = 8 + this.#settlements.length - DEV_SETTLEMENTS.length;
+    const created = {
+      id: `stl-dev-${seq}`,
+      settlementNo: `STL-2026-${String(seq).padStart(6, "0")}`,
+      providerRef: req.providerId,
+      providerName: loc("Nile Imaging Center", "مركز النيل للأشعة"),
+      periodStart: req.periodStart,
+      periodEnd: req.periodEnd,
+      currency: "EGP",
+      total: 4300,
+      status: SETTLEMENT_CHIP.draft,
+      state: "draft" as const,
+      submittedBy: null,
+      approvedBy: null,
+      // One contract-priced line and one floor-priced one, so the unpriced count on the screen is exercised
+      // by something other than zero. A settlement in which every line is a guess and one in which none is
+      // are the two cases a reviewer treats differently.
+      lines: [
+        { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 4, agreedUnitPrice: 800, lineTotal: 3200, priceSource: "Contract" as const },
+        { serviceCode: "70554", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 2, agreedUnitPrice: 550, lineTotal: 1100, priceSource: "ObservedFloor" as const },
+      ],
+    };
+    this.#settlements = [created, ...this.#settlements];
+    return this.gate(() => ok(zSettlement, created));
+  }
+
+  submitSettlement(id: string) {
+    return this.gate(() => ok(zSettlement, this.#move(id, "submitted", { submittedBy: DEV_SUBJECT })));
+  }
+
+  approveSettlement(id: string) {
+    // SoD is the SERVER's rule and this fixture does not re-implement it — the screen withholds the button
+    // from the submitter using `submittedBy`, and the test that proves it asserts on the screen, not here.
+    return this.gate(() => ok(zSettlement, this.#move(id, "approved", { approvedBy: DEV_APPROVER })));
+  }
+
+  #move(id: string, state: "submitted" | "approved", who: { submittedBy?: string; approvedBy?: string }) {
+    const next = this.#settlements.map((s) =>
+      s.id === id ? { ...s, state, status: SETTLEMENT_CHIP[state], ...who } : s,
+    );
+    this.#settlements = next;
+    const moved = next.find((s) => s.id === id);
+    if (!moved) throw new ApiError("http", `No settlement ${id}`, 404);
+    return moved;
+  }
+
+  financialSummary(dimension: "serviceline" | "category" | "provider", _period?: Period) {
     return this.gate(() =>
       ok(zFinancialSummary, {
         dimension,
@@ -3154,9 +3301,12 @@ export class DevApiClient implements ApiClient {
     return this.gate(() =>
       ok(zExportResult, {
         report: req.report,
-        format: req.format,
+        // CSV, always — the only thing the endpoint has ever produced. The XLSX segment is gone from the
+        // screen and the schema; this fixture used to echo whatever was asked for, which is exactly how the
+        // lie stayed invisible in every test.
+        format: "csv",
         rowCount: 3,
-        filename: `${req.report}-${req.from}_${req.to}.${req.format}`,
+        filename: `${req.report}-${req.from}_${req.to}.csv`,
         status: { kind: "ok", label: loc("Export ready (audited)", "التصدير جاهز (مُدقّق)") },
       }),
     );

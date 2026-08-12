@@ -91,14 +91,22 @@ public static class FinanceEndpoints
         }).RequireAuthorization(HbmpPolicies.Scope("finance:write"))
         .Produces<SettlementView>();
 
-        v1.MapGet("/settlements", async (FinanceDeps deps, CancellationToken ct, Guid? providerId, string? status) =>
+        v1.MapGet("/settlements", async (FinanceDeps deps, HttpResponse http, CancellationToken ct,
+            Guid? providerId, string? status) =>
         {
             var denied = await deps.Gate.CheckAsync(FinancePolicies.ReadSettlement, ct);
             if (denied is not null) return denied;
             var q = deps.Db.Settlements.AsNoTracking().Include(s => s.Lines).Where(s => s.TenantId == deps.Tenant);
             if (providerId is not null) q = q.Where(s => s.ProviderId == providerId);
             if (Enum.TryParse<SettlementStatus>(status, true, out var st)) q = q.Where(s => s.Status == st);
-            var rows = await q.OrderByDescending(s => s.CreatedAt).Take(100).ToListAsync(ct);
+            var rows = await q.OrderByDescending(s => s.CreatedAt).Take(Cap).ToListAsync(ct);
+
+            // How many there ACTUALLY are, so the screen can say it is showing 100 of 340 rather than
+            // presenting a truncated list as a complete one (invariant 31). The COUNT is skipped when the
+            // page came back short, because then the page IS the total and a second query would ask the
+            // database a question already answered.
+            var total = rows.Count < Cap ? rows.Count : await q.CountAsync(ct);
+            http.Headers["X-Total-Count"] = total.ToString();
             return Results.Ok(rows.Select(SettlementView.From).ToList());
         }).RequireAuthorization(HbmpPolicies.Scope("finance:read"))
         .Produces<IEnumerable<SettlementView>>();
@@ -167,14 +175,55 @@ public static class FinanceEndpoints
             var denied = await deps.Gate.CheckAsync(FinancePolicies.Export, ct);
             if (denied is not null) return denied;
 
-            var view = await deps.Queries.UtilizationAsync(deps.Tenant, req.From, req.To, req.Category, req.ProviderId, null, ct);
-            var (csv, rows) = FinanceQueries.ToCsv(view);
-            var filter = $"report={req.Report};from={req.From};to={req.To};category={req.Category};provider={req.ProviderId}";
+            // A FORMAT THIS ENDPOINT DOES NOT PRODUCE IS REFUSED, not recorded.
+            //
+            // The portal offered CSV and XLSX; this handler has always returned `text/csv`. The claimed
+            // format was nonetheless written into `ExportRecord.Format`, so the export ledger asserted
+            // spreadsheets that were never generated. XLSX is gone from the portal (a CSV opens in Excel;
+            // the gap is not worth a spreadsheet library in the one service whose security argument is that
+            // it cannot express a clinical field) — and refused here, because the portal is not the only
+            // caller and a silent substitution is how the ledger became wrong in the first place.
+            var format = string.IsNullOrWhiteSpace(req.Format) ? "csv" : req.Format.ToLowerInvariant();
+            if (format != "csv")
+                return Unprocessable("unsupported-format", $"This endpoint produces CSV; '{req.Format}' is not available.");
+            if (req.To < req.From) return Unprocessable("bad-period", "to precedes from.");
+
+            // THE REPORT SELECTOR NOW SELECTS.
+            //
+            // Every report ran `UtilizationAsync`; `Report` named the file and the audit event and was
+            // otherwise unread. Asking for settlements produced utilization rows in a file called
+            // `settlement-….csv` AND wrote a high-severity `data.export` event asserting a settlement export
+            // that did not happen — a record naming an action nobody performed, which is worse than no
+            // record, because the record is the thing an auditor trusts.
+            //
+            // An unknown report is refused rather than falling back to utilization: a fallback is how the
+            // original defect would read from the outside.
+            //
+            // Normalised once. The record declares `Report` non-nullable, but it arrives from JSON, where a
+            // missing property is null however the type is written — so it is coalesced here rather than
+            // trusted, and the local is what the ledger and the audit event then record.
+            var report = req.Report ?? "";
+            (string? csv, int rows) = report.ToLowerInvariant() switch
+            {
+                "settlement" or "settlements" => FinanceQueries.ToCsv(
+                    await deps.Queries.SettlementsForExportAsync(deps.Tenant, req.From, req.To, req.ProviderId, ct)),
+                "summary" => FinanceQueries.ToCsv(
+                    await deps.Queries.SummaryAsync(deps.Tenant, req.From, req.To, req.Dimension ?? "serviceline", ct)),
+                "utilization" => FinanceQueries.ToCsv(
+                    await deps.Queries.UtilizationAsync(deps.Tenant, req.From, req.To, req.Category, req.ProviderId, null, ct)),
+                _ => (null, 0),
+            };
+            if (csv is null)
+                return Unprocessable("unknown-report",
+                    $"'{report}' is not a report. Known reports: utilization, settlement, summary.");
+
+            var filter = $"report={report};from={req.From};to={req.To};category={req.Category};provider={req.ProviderId}";
             var correlation = http.HttpContext?.TraceIdentifier;
 
             deps.Db.Exports.Add(new ExportRecord
             {
-                TenantId = deps.Tenant, Report = req.Report, Format = req.Format ?? "csv", Filter = filter,
+                // `format` — the one that was produced — never `req.Format`, the one that was asked for.
+                TenantId = deps.Tenant, Report = report, Format = format, Filter = filter,
                 RowCount = rows, RequestedBy = deps.Subject, CorrelationId = correlation, CreatedAt = deps.Clock.GetUtcNow(),
             });
             await deps.Db.SaveChangesAsync(ct);
@@ -182,11 +231,21 @@ public static class FinanceEndpoints
             // data.export is a distinct HIGH-severity audit event (19-audit §): actor, filter, row count, correlation.
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
-                EntityType = "finance_export", EntityId = req.Report, Action = AuditAction.Export,
+                EntityType = "finance_export", EntityId = report, Action = AuditAction.Export,
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
                 AfterState = $"rows={rows}", DecisionReasonCode = filter, Severity = AuditSeverity.High,
             }, ct);
 
+            // The audited row count, on a HEADER.
+            //
+            // The response body is a file, so there is nowhere in it to put the figure — and the SPA's
+            // Exports screen reported a count while downloading nothing at all, because its client read this
+            // response as JSON. Now that it receives the file, this is how it still gets the number it
+            // shows the operator, and the number it shows is the number the audit event recorded.
+            //
+            // Kong must list this in `exposed_headers` or cross-origin JavaScript cannot read it — the trap
+            // `X-Active-Branch` documents in that file and `X-Total-Count` hit last pass.
+            http.HttpContext!.Response.Headers["X-Row-Count"] = rows.ToString();
             return Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"{req.Report}-{req.From}_{req.To}.csv");
         }).RequireAuthorization(HbmpPolicies.Scope("finance:export"))
         // A CSV, not JSON. Declaring a schema here would publish a shape this endpoint
@@ -225,6 +284,10 @@ public static class FinanceEndpoints
             return Results.Ok(new { handled });
         }).RequireAuthorization(HbmpPolicies.Scope("finance:project"));
     }
+
+    /// <summary>The settlement list's page size. Matches <see cref="FinanceQueries.ExportCap"/> so the file
+    /// and the screen answer the same question.</summary>
+    private const int Cap = FinanceQueries.ExportCap;
 
     private static (DateOnly From, DateOnly To) Window(DateOnly? from, DateOnly? to, IBusinessCalendar calendar)
     {

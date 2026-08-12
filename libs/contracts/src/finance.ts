@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { zId, zLocalized, zStatus } from "./common";
+import { zDate, zId, zLocalized, zStatus } from "./common";
 
 /**
  * Finance contracts (Phase 10.2/10.3). The Finance portal is minimum-necessary: **billing codes + quantities +
@@ -56,12 +56,31 @@ export type FinancialSummary = z.infer<typeof zFinancialSummary>;
 export const zSettlementStatus = z.enum(["draft", "submitted", "approved", "paid"]);
 export type SettlementStatus = z.infer<typeof zSettlementStatus>;
 
+/**
+ * Where a settlement line's price came from.
+ *
+ * <p>`Contract` — the provider's agreed price book named this code. `ObservedFloor` — it did not, and the
+ * line is priced at the LOWEST unit cost observed for the code in the period: a floor, pending a tariff,
+ * which can only under-state.</p>
+ */
+export const zPriceSource = z.enum(["Contract", "ObservedFloor"]);
+export type PriceSource = z.infer<typeof zPriceSource>;
+
 export const zSettlementLine = z.object({
   serviceCode: z.string(),
   serviceLine: zLocalized,
   deliveredQty: z.number().int().nonnegative(),
   agreedUnitPrice: z.number(),   // 18.D2 (U7): raw; formatted at render
   lineTotal: z.number(),
+  /**
+   * Whether a tariff priced this line.
+   *
+   * <p>The server has always projected it, with a comment on the domain field saying exactly why: *a
+   * reviewer issuing the draft has to be able to tell them apart*. The client dropped it. So at the moment
+   * of authorising a payment, a column of "agreed prices" mixed the contract's tariff with a floor this
+   * platform inferred because no tariff exists, rendered identically.</p>
+   */
+  priceSource: zPriceSource,
 });
 export type SettlementLine = z.infer<typeof zSettlementLine>;
 
@@ -77,13 +96,55 @@ export const zSettlement = z.object({
   status: zStatus,
   state: zSettlementStatus,
   lines: z.array(zSettlementLine),
+  /**
+   * Who submitted this settlement, and who approved it. Staff subject ids.
+   *
+   * <p>Carried so segregation of duties can be honoured BEFORE the click. The service compares the
+   * submitter against the approving principal and answers 409 `urn:hbmp:sod-violation` when they match;
+   * without this the screen offers the submitter an Approve button and then refuses it, which is a control
+   * working correctly and reading as a defect.</p>
+   *
+   * <p>The refusal stays — the client is not the authority on who may release a payment. It is merely no
+   * longer the only place the rule becomes visible.</p>
+   */
+  submittedBy: z.string().nullish(),
+  approvedBy: z.string().nullish(),
 });
 export type Settlement = z.infer<typeof zSettlement>;
 
-/** Result of an export — the download plus the audited row count (a data.export event is written server-side). */
+/** Generate a draft settlement for one provider and one period. */
+export const zGenerateSettlementRequest = z.object({
+  providerId: zId,
+  periodStart: zDate,
+  periodEnd: zDate,
+}).refine((v) => v.periodStart <= v.periodEnd, {
+  path: ["periodEnd"],
+  message: "period.reversed",
+});
+export type GenerateSettlementRequest = z.infer<typeof zGenerateSettlementRequest>;
+
+/** The list plus how many there actually are — the endpoint caps at 100 and says so on `X-Total-Count`. */
+export const zSettlementPage = z.object({
+  rows: z.array(zSettlement),
+  total: z.number().int().nonnegative(),
+});
+export type SettlementPage = z.infer<typeof zSettlementPage>;
+
+/**
+ * Result of an export — what was DELIVERED, plus the audited row count.
+ *
+ * <p>The file is the deliverable and the row count is the receipt. Previously this was the whole of it: the
+ * server returned `text/csv` through `Results.File`, the client parsed the response as JSON, and the screen
+ * showed a count while handing the operator nothing at all.</p>
+ *
+ * <p>`format` no longer offers `xlsx`. The endpoint has only ever produced CSV — and stored the *claimed*
+ * format in the export ledger, so it asserted spreadsheets that were never generated. A CSV opens in Excel;
+ * the gap is not worth a spreadsheet library in the one service whose security argument is that it cannot
+ * express a clinical field.</p>
+ */
 export const zExportResult = z.object({
   report: z.string(),
-  format: z.enum(["csv", "xlsx"]),
+  format: z.literal("csv"),
   rowCount: z.number().int().nonnegative(),
   filename: z.string(),
   status: zStatus,
@@ -92,8 +153,13 @@ export type ExportResult = z.infer<typeof zExportResult>;
 
 export const zExportRequest = z.object({
   report: z.enum(["utilization", "settlement", "summary"]),
-  format: z.enum(["csv", "xlsx"]),
-  from: z.string(),
-  to: z.string(),
+  format: z.literal("csv"),
+  from: zDate,
+  to: zDate,
+  /** Narrows utilization and settlement exports. Both are accepted by the endpoint and neither was sent. */
+  category: z.string().optional(),
+  providerId: zId.optional(),
+  /** Which dimension a `summary` export groups by — so the file matches the roll-up on screen. */
+  dimension: z.enum(["serviceline", "category", "provider"]).optional(),
 });
 export type ExportRequest = z.infer<typeof zExportRequest>;

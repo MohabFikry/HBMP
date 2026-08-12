@@ -342,17 +342,59 @@ public static class DispensingEndpoints
         // ---- 6.3 Out-of-stock: flag WITHOUT consuming; the unfilled quantity stays available; notify prescriber/beneficiary ----
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/out-of-stock", async (
             Guid rxId, Guid lineId, OutOfStockRequest req, PharmacyDbContext db, DispensingGate gate,
-            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            CancellationToken ct) =>
         {
             var denied = await gate.AuthorizeDispenseAsync(ct);
             if (denied is not null) return denied;
 
-            var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == rxId, ct);
+            // TRACKED, not AsNoTracking — 0020 made this a write. The flag lives on the line.
+            var rx = await db.Prescriptions.Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == rxId, ct);
             if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var line = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
             if (line is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
-            // No accumulator change — the line stays available for backorder / a later visit. Notify + audit only.
+            /*
+             * RAISING THE SAME FLAG TWICE NOTIFIES ONCE (invariant 44).
+             *
+             * The notification route this enqueues is ACTIONABLE and escalates to the pharmacy supervisor
+             * after eight hours. Two pharmacists reporting the same empty shelf — or one pharmacist whose
+             * first request timed out and who pressed the button again — would put two of those in front of
+             * the prescriber, each with its own escalation timer behind it. A control whose cost grows with
+             * how often the counter is short is a control the counter learns not to use.
+             *
+             * The replay answers with what was recorded rather than 409: nothing went wrong, and the second
+             * pharmacist's screen should end up showing the flag either way.
+             */
+            if (line.OutOfStock)
+                return Results.Accepted($"/api/v1/prescriptions/{rxId}/dispensing", new
+                {
+                    flagged = true, prescriptionLineId = lineId, remaining = line.QuantityRemaining,
+                    replayed = true, outOfStockAt = line.OutOfStockAt, outOfStockBy = line.OutOfStockBy,
+                });
+
+            /*
+             * ONE TRANSACTION, EXPLICITLY.
+             *
+             * The platform's usual shape is "commit the business change, THEN enqueue" (ADR-0013), which
+             * accepts losing an event to a crash in the gap because the next attempt re-does both. That
+             * reasoning stops working the moment the guard above exists: a crash between the flag landing
+             * and `RxLineOutOfStock` being staged would leave a line marked short, a counter shown a chip,
+             * and a prescriber who is never told — and the retry, finding the flag already set, would return
+             * the replay and notify nobody. The failure would be permanent and silent.
+             *
+             * So the flag and its announcement commit together or neither does.
+             */
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            // The accumulator is NOT touched, in either direction. `QuantityRemaining` is unchanged and
+            // `Status` is not written: the line stays dispensable, because stock arriving tomorrow must not
+            // require anything to be undone. Out of stock is a fact about the pharmacy.
+            line.OutOfStockAt = clock.GetUtcNow();
+            line.OutOfStockBy = me.Principal?.Subject;
+            line.OutOfStockQty = req.Quantity;
+            line.OutOfStockNote = req.Note;
+
             await outbox.EnqueueAsync("RxLineOutOfStock", "pharmacy.events", new
             {
                 tenantId = rx.TenantId, prescriptionId = rxId, prescriptionLineId = lineId, beneficiaryId = rx.BeneficiaryId,
@@ -394,8 +436,15 @@ public static class DispensingEndpoints
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "OutOfStock",
                 DecisionReasonCode = $"rx:{rxId};line:{lineId};qty:{req.Quantity?.ToString() ?? "remaining"};note:{req.Note}",
             }, ct);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
             return Results.Accepted($"/api/v1/prescriptions/{rxId}/dispensing",
-                new { flagged = true, prescriptionLineId = lineId, remaining = line.QuantityRemaining });
+                new
+                {
+                    flagged = true, prescriptionLineId = lineId, remaining = line.QuantityRemaining,
+                    replayed = false, outOfStockAt = line.OutOfStockAt, outOfStockBy = line.OutOfStockBy,
+                });
         }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:dispense"));
     }
 

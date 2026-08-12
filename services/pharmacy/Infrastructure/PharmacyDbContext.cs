@@ -119,6 +119,9 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.Property(x => x.AmendedAt).HasColumnName("amended_at");
             e.Ignore(x => x.QuantityRemaining);
             e.Ignore(x => x.IsTerminal);
+            // 6.3 — derived from out_of_stock_at, which IS a column (0020). The four backing properties map
+            // by the snake_case convention; only the predicate needs ignoring.
+            e.Ignore(x => x.OutOfStock);
             e.HasIndex(x => x.PrescriptionId);
             e.HasIndex(x => new { x.RootLineId, x.VersionNo });
         });

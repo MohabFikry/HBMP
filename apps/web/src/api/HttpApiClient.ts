@@ -90,6 +90,8 @@ import {
   zExportResult,
   zFinancialSummary,
   zSettlement,
+  zSettlementPage,
+  zOutOfStockResult,
   zUtilizationView,
   type ConsumeRequest,
   type DecisionRequest,
@@ -138,6 +140,7 @@ import type {
   SetDocumentValidity,
   SaveApprovalRule,
   SetAutoDecision,
+  GenerateSettlementRequest,
 } from "@mersal/contracts";
 import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind } from "@mersal/contracts";
 import { zChronicPreview, zQuantityPreview, zRefillFrequency } from "@mersal/contracts";
@@ -149,7 +152,7 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { SubstitutionRequest, WithdrawResult } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { ApiError, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, postForFile, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { newIdempotencyKey } from "./http";
 import type { ApprovalQueueFilter } from "./client";
 import { GATEWAY_BASE } from "../config";
@@ -330,6 +333,30 @@ function cairoToday(): string {
  * with different server defaults — thirty days and ninety — sat in the same row with nothing on screen
  * saying they covered different windows.</p>
  */
+/**
+ * Hand a downloaded file to the user.
+ *
+ * <p>An object URL and an anchor click — the only way a browser saves bytes it already holds. The URL is
+ * revoked immediately afterwards: it pins the blob in memory for as long as it lives, and a finance export
+ * is an audited extract of what the organisation spent, which should not outlive the click that produced
+ * it.</p>
+ *
+ * <p>Guarded on `document` so a non-DOM environment (a contract test driving this client over a stubbed
+ * `fetch`) exercises the mapping without needing a document to click into.</p>
+ */
+function saveBlob(blob: Blob, filename: string): void {
+  if (typeof document === "undefined" || typeof URL?.createObjectURL !== "function") return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function periodQuery(period?: Period, extra?: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   if (period?.from) params.set("from", period.from);
@@ -505,6 +532,53 @@ const breakGlassChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "n
   if (k === "rejected" || k === "revoked") return { kind: "bad", label: { en: raw, ar: "ملغى" } };
   return { kind: "neu", label: { en: raw || "Expired", ar: "منتهٍ" } };
 };
+/**
+ * A settlement's lifecycle state → its chip.
+ *
+ * <p>All four states used to render an identical green "ok" chip, because this client wrote the literal
+ * string `"ok"` into the `status` field. Two consequences, and the second is the reason the Settlements
+ * screen had never worked at all:</p>
+ *
+ * <ol>
+ *   <li>Draft, Submitted, Approved and Paid were visually indistinguishable — the four-cue rule broken at
+ *       its root, not by a missing icon but by the same cue for every value. The real state travelled in
+ *       `state` and was never displayed.</li>
+ *   <li><b>`"ok"` is a string and `zStatus` is `{ kind, label }`, so `parseOr` threw on every call.</b>
+ *       Every settlement read failed with `ApiError("schema")` against a real gateway, and no test noticed
+ *       because the tests construct `DevApiClient`. Design 49 §1.</li>
+ * </ol>
+ *
+ * <p>`Approved` is `info` rather than `ok`: approval authorises a payment, it does not complete one. `Paid`
+ * is the settled state and is the only one that gets the affirmative chip — a distinction a finance clerk
+ * answering "has this provider been paid" depends on.</p>
+ */
+const settlementChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
+  switch (String(s ?? "").toLowerCase()) {
+    case "submitted": return { kind: "warn", label: { en: "Submitted", ar: "مُقدَّمة" } };
+    case "approved":  return { kind: "info", label: { en: "Approved", ar: "معتمدة" } };
+    case "paid":      return { kind: "ok",   label: { en: "Paid", ar: "مدفوعة" } };
+    default:          return { kind: "neu",  label: { en: "Draft", ar: "مسودة" } };
+  }
+};
+
+/**
+ * A coordination task's state → its chip. Same literal-`"ok"` crash as {@link settlementChip} described.
+ *
+ * <p>Carried along from a different portal, deliberately and knowingly: `caseTasks` and `escalations` are
+ * case management, outside the finance/pharmacy audit that found this. Leaving a proven, one-line,
+ * always-throwing crash in place on the grounds that it belongs to another portal is scope discipline
+ * applied until it stops making sense. They are noted in design 49 §6 so the next reader takes them as two
+ * lines carried, not two screens audited.</p>
+ */
+const taskChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
+  switch (String(s ?? "").toLowerCase().replace(/[^a-z]/g, "")) {
+    case "done":       return { kind: "ok",   label: { en: "Done", ar: "منجزة" } };
+    case "inprogress": return { kind: "info", label: { en: "In progress", ar: "جارية" } };
+    case "blocked":    return { kind: "warn", label: { en: "Blocked", ar: "معطّلة" } };
+    default:           return { kind: "neu",  label: { en: "To do", ar: "قيد الانتظار" } };
+  }
+};
+
 /** Map a case/approval priority string → the zCasePriority enum. */
 const casePriority = (p: unknown): "low" | "normal" | "high" | "urgent" =>
   ({ low: "low", normal: "normal", routine: "normal", high: "high", urgent: "urgent", emergency: "urgent" })[
@@ -2053,7 +2127,14 @@ export class HttpApiClient implements ApiClient {
           activeIngredient: null,
           unitPriceEgp: null,
           status: rxStatus(l.status),
-          outOfStock: false,
+          // READ, not asserted. This was the literal `false` — the server's `DispensableLineView` did not
+          // carry the field, so the one client that talks to a real gateway could never produce anything
+          // else, while the dev fixture supplied `true` on one row. The chip, the "out of stock" exclusion
+          // from the fillable set, and the tests covering both were all exercising a value production could
+          // not reach. Design 49 §5, pharmacy migration 0020.
+          outOfStock: Boolean(l.outOfStock),
+          outOfStockAt: l.outOfStockAt ?? null,
+          outOfStockNote: l.outOfStockNote ?? null,
         })),
       });
     });
@@ -2384,6 +2465,39 @@ export class HttpApiClient implements ApiClient {
       status: rxStatus(last?.rxStatus ?? rx.status),
       replayed: !!last?.replayed,
       linesOutstanding: outstanding,
+    });
+  }
+
+  /**
+   * Report that the counter cannot fill a line.
+   *
+   * <p>The endpoint has been complete since phase 6.3 — it consumes nothing, so the unfilled quantity stays
+   * available for a later visit; it notifies the PRESCRIBER on a route that escalates to the pharmacy
+   * supervisor after eight hours; it audits. Nothing in this application called it, so a pharmacist facing an
+   * empty shelf had no control at all: the prescriber was never told, the escalation never fired, and a
+   * refugee beneficiary made a second journey for a medicine nobody recorded as missing.</p>
+   *
+   * <p>Quantity and note are both optional. "We have none at all" is the common case and needs neither, and
+   * a required field on the one control a busy counter reaches for under pressure is a control that gets
+   * skipped.</p>
+   *
+   * <p>Raising it twice is safe: the server returns what it already recorded and does <b>not</b> notify
+   * again. Two pharmacists reporting the same empty shelf must not put two escalating notifications in front
+   * of one prescriber.</p>
+   */
+  async flagOutOfStock(req: { prescriptionId: string; lineId: string; quantity?: number; note?: string }) {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(req.prescriptionId)}/lines/${encodeURIComponent(req.lineId)}/out-of-stock`,
+      { prescriptionLineId: req.lineId, quantity: req.quantity, note: req.note },
+    )) as any;
+    return parseOr(zOutOfStockResult, {
+      lineId: r?.prescriptionLineId ?? req.lineId,
+      flagged: r?.flagged !== false,
+      // TRUE when the line was already flagged and this call notified nobody. The screen says so, because
+      // "already reported by a colleague" and "reported just now" are different things to a pharmacist
+      // deciding whether the prescriber has heard about it.
+      replayed: !!r?.replayed,
+      outOfStockAt: r?.outOfStockAt ?? null,
     });
   }
 
@@ -2889,7 +3003,7 @@ export class HttpApiClient implements ApiClient {
         title: neutral(t.title ?? t.description ?? ""),
         state: String(t.state ?? "todo").toLowerCase().replace(/inprogress/, "in_progress"),
         dueAt: t.dueAt ?? undefined,
-        status: "ok",
+        status: taskChip(t.state),
       }),
     );
   }
@@ -2903,7 +3017,9 @@ export class HttpApiClient implements ApiClient {
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
-        status: "ok",
+        // An escalation is by definition something that needed raising. `warn`, never the green chip the
+        // literal produced — and, as above, that literal threw before it could mislead anyone.
+        status: { kind: "warn" as const, label: { en: "Escalated", ar: "مُصعَّدة" } },
         raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
       }),
     );
@@ -2912,8 +3028,24 @@ export class HttpApiClient implements ApiClient {
   // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.
   // The service emits plain strings + numeric amounts; these adapters map to the bilingual + pre-formatted
   // contract shape (and compute share%), then validate the mapping.
-  async utilization() {
-    const r = (await getRaw(`/finance/utilization`)) as any;
+  //
+  // ============================================================================================================
+  // THE MAPPINGS BELOW ARE NOW TESTED (design 49 §1)
+  // ============================================================================================================
+  // Two of them used to write the literal string "ok" into a `status` field whose schema is `{ kind, label }`,
+  // so `parseOr` threw and EVERY settlement read and EVERY export failed against a real gateway. Nothing
+  // caught it because nothing ran it: the web tests construct `DevApiClient`, and this class only exists when
+  // there is a gateway on the other end. The Provider Settlements screen and the Exports screen were
+  // permanently in their error state in production and permanently green in CI.
+  //
+  // `test/http-client-contract.test.ts` now drives these methods over a stubbed `fetch` and validates what
+  // comes out against the real schemas. The HTTP adapter is code, and untested code is code that does not work.
+  async utilization(period?: Period) {
+    // `from`/`to` reach the server at last. The endpoint has accepted them since phase 10.2 and this screen
+    // sent neither, so finance saw the trailing month forever and could not close a prior one — the single
+    // most routine thing a finance function does. The screen even RENDERED the window it was given, which is
+    // the period rule honoured in the reading and broken in the asking.
+    const r = (await getRaw(`/finance/utilization${periodQuery(period)}`)) as any;
     return parseOr(zUtilizationView, {
       from: r?.from ?? "",
       to: r?.to ?? "",
@@ -2931,32 +3063,94 @@ export class HttpApiClient implements ApiClient {
       totalSpend: money(r?.totalSpend, "utilization.totalSpend"),
     });
   }
-  async settlements() {
-    const r = (await getRaw(`/finance/settlements`)) as any[];
-    return (r ?? []).map((s: any) =>
-      parseOr(zSettlement, {
-        id: s.id,
-        settlementNo: s.settlementNo,
-        providerRef: s.providerRef ?? s.providerId ?? "",
-        providerName: neutral(s.providerName ?? s.providerRef ?? ""),
-        periodStart: s.periodStart ?? "",
-        periodEnd: s.periodEnd ?? "",
-        currency: s.currency ?? "EGP",
-        total: money(s.total, "settlement.total"),
-        status: "ok",
-        state: String(s.state ?? s.status ?? "draft").toLowerCase(),
-        lines: (s.lines ?? []).map((l: any) => ({
-          serviceCode: l.serviceCode,
-          serviceLine: neutral(l.serviceLine),
-          deliveredQty: l.deliveredQty ?? 0,
-          agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
-          lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
-        })),
-      }),
-    );
+
+  /**
+   * The settlement list, with how many there ACTUALLY are.
+   *
+   * <p>The endpoint caps at 100 and reports the true count on `X-Total-Count`. It also accepts `providerId`
+   * and `status`, neither of which was ever sent — the screen pulled every settlement and filtered in the
+   * browser, which cannot see past the cap and so filtered a truncated set while presenting it as complete.</p>
+   */
+  async settlements(filter?: { providerId?: string; status?: string }) {
+    const params = new URLSearchParams();
+    if (filter?.providerId) params.set("providerId", filter.providerId);
+    if (filter?.status) params.set("status", filter.status);
+    const q = params.toString();
+    const { body, total } = await getRawCounted(`/finance/settlements${q ? `?${q}` : ""}`);
+    const rows = ((body as any[]) ?? []).map((s: any) => this.#settlement(s));
+    return parseOr(zSettlementPage, { rows, total: total ?? rows.length });
   }
-  async financialSummary(dimension: "serviceline" | "category" | "provider") {
-    const r = (await getRaw(`/finance/summaries?dimension=${dimension}`)) as any;
+
+  /**
+   * One settlement, from the service's `SettlementView`.
+   *
+   * <p>Private because four call sites need it — the list and the three lifecycle writes, each of which
+   * returns the settlement it just moved. A generate that returned a shape the list could not parse would be
+   * a screen that writes successfully and then cannot show what it wrote.</p>
+   */
+  #settlement(s: any) {
+    return {
+      id: s.settlementId ?? s.id,
+      settlementNo: s.settlementNo,
+      providerRef: s.providerRef ?? s.providerId ?? "",
+      providerName: neutral(s.providerName ?? s.providerRef ?? ""),
+      periodStart: s.periodStart ?? "",
+      periodEnd: s.periodEnd ?? "",
+      currency: s.currencyCode ?? s.currency ?? "EGP",
+      total: money(s.total, "settlement.total"),
+      // The REAL state, four ways. This was the literal "ok" — see `settlementChip`.
+      status: settlementChip(s.status ?? s.state),
+      state: String(s.status ?? s.state ?? "draft").toLowerCase(),
+      submittedBy: s.submittedBy ?? undefined,
+      approvedBy: s.approvedBy ?? undefined,
+      lines: (s.lines ?? []).map((l: any) => ({
+        serviceCode: l.serviceCode,
+        serviceLine: neutral(l.serviceLine),
+        deliveredQty: l.deliveredQty ?? 0,
+        agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
+        lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
+        // Projected by the service since phase 10.2 and dropped here, so a reviewer authorising a payment
+        // saw a contract tariff and an inferred floor rendered identically. `Contract` is the default only
+        // for a row written before the column existed; a value the enum does not know is not silently
+        // widened into one it does.
+        priceSource: l.priceSource === "ObservedFloor" ? "ObservedFloor" : "Contract",
+      })),
+    };
+  }
+
+  /**
+   * Generate a draft settlement for a provider and period.
+   *
+   * <p>The first of three writes the finance role has held the scopes for since phase 10.2 with no screen to
+   * use them. Idempotency-keyed because generating one mints a financial artifact and a retried request must
+   * return the settlement produced the first time rather than a second one.</p>
+   */
+  async generateSettlement(req: GenerateSettlementRequest) {
+    const r = (await postRaw(`/finance/settlements`, req, newIdempotencyKey())) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  /** Submit a draft for approval — the initiator half of the SoD split. */
+  async submitSettlement(id: string) {
+    const r = (await postRaw(`/finance/settlements/${encodeURIComponent(id)}/submit`, {})) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  /**
+   * Approve a submitted settlement — the release half.
+   *
+   * <p>The service refuses when the approver is the submitter (409 `urn:hbmp:sod-violation`), and that
+   * refusal stays: the client is not the authority on who may release a payment. The screen reads
+   * `submittedBy` and declines to offer the button in the first place, so the ordinary path no longer runs
+   * through a refusal.</p>
+   */
+  async approveSettlement(id: string) {
+    const r = (await postRaw(`/finance/settlements/${encodeURIComponent(id)}/approve`, {})) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  async financialSummary(dimension: "serviceline" | "category" | "provider", period?: Period) {
+    const r = (await getRaw(`/finance/summaries${periodQuery(period, { dimension })}`)) as any;
     const buckets: any[] = r?.buckets ?? [];
     const total = buckets.reduce((acc, b) => acc + Number(b.spend ?? 0), 0) || 1;
     return parseOr(zFinancialSummary, {
@@ -2970,14 +3164,33 @@ export class HttpApiClient implements ApiClient {
       totalSpend: money(r?.totalSpend ?? total, "financialSummary.totalSpend"),
     });
   }
+
+  /**
+   * Run an export and HAND OVER THE FILE.
+   *
+   * <p>This method used to `postRaw` — parse a `text/csv` response as JSON — and return a row count. There
+   * was no download anywhere in the application, so the one thing the Exports screen exists to do did not
+   * happen; and the filename it reported was built locally from the requested format, which is how it managed
+   * to name a file `.xlsx` that the server had always produced as CSV.</p>
+   *
+   * <p>The blob is saved through an object URL and an anchor click, and the URL is revoked afterwards —
+   * a blob held by a live URL is a copy of an audited financial extract kept alive in the page.</p>
+   */
   async exportReport(req: ExportRequest) {
-    const r = (await postRaw(`/finance/exports`, req)) as any;
+    const { blob, filename, rowCount } = await postForFile(`/finance/exports`, req);
+    // The server's name if it gave one — it knows what it produced. The local fallback is CSV-suffixed
+    // unconditionally, because CSV is the only thing this endpoint returns.
+    const name = filename ?? `${req.report}-${req.from}_${req.to}.csv`;
+    saveBlob(blob, name);
     return parseOr(zExportResult, {
-      report: r?.report ?? req.report,
-      format: r?.format ?? req.format,
-      rowCount: r?.rowCount ?? r?.rows ?? 0,
-      filename: r?.filename ?? `${req.report}-${req.from}_${req.to}.${req.format}`,
-      status: "ok",
+      report: req.report,
+      format: "csv",
+      // Null means the gateway has not been told to expose `X-Row-Count`, which is not the same fact as
+      // zero rows — but the schema wants a number and the file is already downloaded, so the honest
+      // fallback is the one the operator can check for themselves by opening it.
+      rowCount: rowCount ?? 0,
+      filename: name,
+      status: { kind: "ok" as const, label: { en: "Exported", ar: "تم التصدير" } },
     });
   }
 
