@@ -229,6 +229,7 @@ writes `false`, `DevApiClient` writes `true` on one row.
 | `Mersal.Finance.Tests` (`--with-db`) | **31/31** |
 | `Mersal.Pharmacy.Tests` (`--with-db`) | **182/182** |
 | `tsc --noEmit` (apps/web) | clean |
+| Full solution (`--with-db`) | **38 assemblies, 3848 passed, 1 failed** — see below |
 
 ### Gates
 
@@ -245,6 +246,20 @@ writes `false`, `DevApiClient` writes `true` on one row.
 | service inventory | ✓ 22 services |
 | button icon policy | ✓ *after a fix* — see §8 |
 | gate freshness | **cannot run locally.** It reads a CI-only `.ci-state` heartbeat ledger that is never committed; every gate reports "never recorded" on any developer machine. Not introduced here. |
+
+### The one solution-run failure, attributed rather than assumed
+
+`Mersal.Admin.Tests.BranchScopeGrantParityTests.Every_assignment_is_copied_with_its_window_home_flag_and_revocation_intact`
+fails with `23505 ux_bsg_home_per_subject`. It is **not this branch's**: it is `admin/0007_branch_scope_grant.sql`'s
+bug, proved in the previous pass by substituting PR #7's fixed version of that file (115/115 with it, the
+failure returns without it). The fix lives only on `fix/migration-rerunnability` (PR #7), so it will show on
+this branch's CI until #7 merges into their shared ancestor.
+
+The same bug is why `tools/ci/apply-migrations.sh` halts before `pharmacy/` — it runs under `set -e` and
+`admin/` sorts first — which is why `0020` was verified directly below rather than through the script.
+
+Nothing else failed. The `Mersal.Orders.Tests` cross-assembly contention seen in the previous pass did not
+recur.
 
 ### The migration replays
 
