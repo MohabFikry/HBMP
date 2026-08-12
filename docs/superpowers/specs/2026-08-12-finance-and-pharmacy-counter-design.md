@@ -298,3 +298,19 @@ Seven departures from §4, all recorded because a spec that only describes what 
 8. **The button-icon policy caught two bare buttons.** `Submit for approval` and `Generate draft` are members
    of recurring action classes the product gives glyphs (`check2`, `plus`). A real consistency rule, found by
    its gate rather than by review.
+
+---
+
+## 9. The invariant registry
+
+Four entries added, because the registry's stated job is *making the unproven visible* — and the first of
+them is the entry whose absence was this pass's headline defect.
+
+| Invariant | Proven by |
+|---|---|
+| `INV-THE-HTTP-ADAPTER-IS-EXECUTED-AGAINST-ITS-OWN-CONTRACTS` | 4 tests in `http-client-contract.test.ts` |
+| `INV-AN-EXPORT-PRODUCES-THE-REPORT-IT-NAMES` | 4 finance-service tests + 1 client test |
+| `INV-A-REPORTED-SHORTAGE-IS-RECORDED-AND-NOTIFIES-ONCE` | 4 pharmacy-service tests + 1 screen test |
+| `INV-SEGREGATION-OF-DUTIES-IS-VISIBLE-BEFORE-THE-CLICK` | 2 finance-service tests + 1 screen test |
+
+`check-invariant-registry.py`: **OK — every named test exists and runs** (2992 test methods indexed).
