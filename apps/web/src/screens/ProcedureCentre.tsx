@@ -57,7 +57,10 @@ const S = {
   cType: { en: "Type", ar: "النوع" },
   cProgress: { en: "Progress", ar: "التقدّم" },
   cContext: { en: "Referral reason", ar: "سبب الإحالة" },
-  cAction: { en: "", ar: "" },
+  // 32.6 — NAMED. An empty <th> is an axe `empty-table-header` finding: a screen-reader user tabbing into
+  // the last cell hears the row's other columns announced and this one silently. It is only "minor" by axe's
+  // grading, which is why the route sweep let it through and a per-screen audit did not.
+  cAction: { en: "Actions", ar: "إجراءات" },
 
   notDisclosed: { en: "Not disclosed", ar: "لم يُفصح عنه" },
   notDisclosedHint: {

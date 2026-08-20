@@ -78,6 +78,7 @@ import {
   zStatusChangeResult,
   type RegisterBeneficiaryInput,
   zCheckInResult,
+  zWaitingTicket,
   zOrderRow,
   zRxRow,
   zResultDetail,
@@ -925,6 +926,48 @@ export class DevApiClient implements ApiClient {
   checkIn(appointmentId: string, _rowVersion?: number) {
     void _rowVersion; // fixture path applies no concurrency guard; the live client echoes it as If-Match.
     return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "ok", label: loc("Checked in", "تم الوصول") } }));
+  }
+
+  // ---- 32.6 — the waiting room ------------------------------------------
+  //
+  // The fixture carries a ticket with NO NAME on purpose. Check-in can be recorded without one, and a board
+  // that quietly prints "Unknown" in that slot calls somebody who is not there; a fixture where every row is
+  // named would never exercise the branch that has to say so.
+  private waitingTickets = [
+    { queueId: "q-1", appointmentId: "appt-2", position: 1, memberNo: "MRS-M-2026-000009", displayName: "Amal Hassan", appointmentType: "FollowUp", state: "Waiting", waitSeconds: 1140 },
+    { queueId: "q-2", appointmentId: "appt-3", position: 2, memberNo: "MRS-M-2026-000031", displayName: null, appointmentType: "Consultation", state: "Waiting", waitSeconds: 420 },
+  ];
+
+  waitingRoom() {
+    return this.gate(() => ok(z.array(zWaitingTicket), this.waitingTickets), []);
+  }
+
+  callNextWaiting() {
+    return this.gate(() => {
+      const head = this.waitingTickets[0];
+      // An empty waiting room is an ANSWER. The service returns 204 and the client maps it to null; a
+      // fixture that threw here would make the honest case look like a fault.
+      if (!head) return null;
+      this.waitingTickets = this.waitingTickets.slice(1).map((t, i) => ({ ...t, position: i + 1 }));
+      return ok(zWaitingTicket, { ...head, state: "InConsultation", position: 0 });
+    });
+  }
+
+  requeueWaiting(queueId: string) {
+    return this.gate(() => { void queueId; return undefined as void; });
+  }
+
+  removeWaiting(queueId: string) {
+    return this.gate(() => {
+      this.waitingTickets = this.waitingTickets
+        .filter((t) => t.queueId !== queueId)
+        .map((t, i) => ({ ...t, position: i + 1 }));
+      return undefined as void;
+    });
+  }
+
+  completeWaiting(queueId: string) {
+    return this.gate(() => { void queueId; return undefined as void; });
   }
 
   // ---- Booking -----------------------------------------------------------

@@ -73,12 +73,38 @@ public static class QueueModule
         .Produces<AppointmentResponse>();
 
         // GET /queues — ordered, minimum-necessary queue for a clinic/doctor.
+        // 32.6 — locationId and providerId are OPTIONAL now, and that is why this endpoint had no caller.
+        //
+        // They were mandatory Guids, so the only answerable question was "who is waiting for THIS provider at
+        // THIS location". A reception desk has neither in hand: it knows its branch. The desk therefore could
+        // not ask, so nothing asked, so tickets issued on every check-in were never read by anything —
+        // accumulating in Waiting for ever while the board beside them showed the same people from the
+        // appointments table.
+        //
+        // Dropping the filters is safe for a BranchScoped caller because ApplyBranchScope narrows the answer
+        // to their branch either way. It is NOT safe for a MemberScoped one: `ApplyBranchScope` is
+        // deliberately unrestricted for that mode, so an unfiltered call from the call centre — which holds
+        // appointment:read — would list every person waiting in every branch on the platform. That is refused
+        // below rather than silently served, because widening a disclosure as a side effect of removing a
+        // required parameter is exactly the kind of change nobody reviews as a disclosure change.
         read.MapGet("/queues", async (
-            Guid locationId, Guid providerId, Guid? doctorId, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            Guid? locationId, Guid? providerId, Guid? doctorId, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
+            // IsBranchRestricted, not `== BranchScoped`. A clinics manager is BranchSetScoped — narrowed to
+            // the branches they hold a grant to — and ApplyBranchScope narrows them correctly; asking for the
+            // single-branch mode alone would refuse them a queue they are entitled to. BranchScope.cs names
+            // this exact mistake, in the other direction, as the one this helper exists to prevent.
+            if (locationId is null && providerId is null
+                && !BranchScopeModes.IsBranchRestricted(BranchModeOf(me)))
+                return Results.Problem(
+                    statusCode: 422, title: "queue-scope-required", type: "urn:hbmp:queue-scope-required",
+                    detail: "A caller who is not narrowed to a branch must name a location or provider. "
+                          + "Without one this would be the whole platform's waiting room.");
+
             var now = clock.GetUtcNow();
             var q = db.Set<QueueTicket>().AsNoTracking()
-                .Where(t => t.LocationId == locationId && t.ProviderId == providerId
+                .Where(t => (locationId == null || t.LocationId == locationId)
+                            && (providerId == null || t.ProviderId == providerId)
                             && (doctorId == null || t.DoctorId == doctorId)
                             && t.State == QueueTicketState.Waiting);
             // 14.4 — BranchScoped callers see only their active branch's queue; 25.1 — a set-scoped clinics
@@ -91,15 +117,28 @@ public static class QueueModule
         .Produces<IEnumerable<QueueItemView>>();
 
         // POST /queues/call-next — pop the head (Waiting→InConsultation).
+        // 32.6 — the same optionality as the read above, and the same refusal for an unnarrowed caller. The
+        // head of "every branch's queue" is not a person anybody at a desk is about to call.
         write.MapPost("/queues/call-next", async (
-            Guid locationId, Guid providerId, Guid? doctorId, EmrDbContext db, IAuditClient audit,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            Guid? locationId, Guid? providerId, Guid? doctorId, BranchScopeState branch, EmrDbContext db,
+            IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
+            if (locationId is null && providerId is null
+                && !BranchScopeModes.IsBranchRestricted(BranchModeOf(me)))
+                return Results.Problem(
+                    statusCode: 422, title: "queue-scope-required", type: "urn:hbmp:queue-scope-required",
+                    detail: "A caller who is not narrowed to a branch must name a location or provider.");
+
             var now = clock.GetUtcNow();
             var waiting = await db.Set<QueueTicket>()
-                .Where(t => t.LocationId == locationId && t.ProviderId == providerId
+                .Where(t => (locationId == null || t.LocationId == locationId)
+                            && (providerId == null || t.ProviderId == providerId)
                             && (doctorId == null || t.DoctorId == doctorId)
                             && t.State == QueueTicketState.Waiting)
+                // The branch narrowing the READ has always applied, applied to the WRITE as well. Calling the
+                // next patient is the act that moves somebody, and it must not reach across a branch boundary
+                // the same request could not read across.
+                .ApplyBranchScope(t => t.BranchId, BranchModeOf(me), branch.Context)
                 .ToListAsync(ct);
             var head = QueueRules.Ordered(waiting).FirstOrDefault();
             if (head is null) return Results.NoContent();

@@ -9,7 +9,7 @@
     "claims": 12,
     "document": 0,
     "eligibility": 3,
-    "emr": 28,
+    "emr": 27,
     "finance": 8,
     "identity": 1,
     "interop": 0,
@@ -23,5 +23,8 @@
     "profile": 0,
     "provider": 18,
     "reporting": 13
+  },
+  "_lowered": {
+    "emr": "32.6 — 28 → 27. GET /encounters/queue was RETIRED (see the note in services/emr/Api/Program.cs): it presented the encounter's open/closed bookkeeping as a waiting room, listing people who had already been called through, under `.RequireAuthorization()` with no scope. One fewer described operation because there is one fewer operation — not because an endpoint stopped describing itself. A floor lowered for that reason is recorded here so the next reader does not have to reconstruct it from the git history."
   }
 }

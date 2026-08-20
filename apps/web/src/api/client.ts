@@ -22,6 +22,7 @@ import type {
   MembershipRow,
   ProgramEnablement,
   AppointmentRow,
+  WaitingTicket,
   BookableClinic,
   DoctorAvailability,
   AppointmentDay,
@@ -231,6 +232,27 @@ export interface ApiClient {
    * named without handing out the provider directory. Missing ids are absent from the map.
    */
   branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
+  /**
+   * 32.6 — the waiting room, in call order (emr `GET /queues`).
+   *
+   * <p>Tickets have been issued on every check-in since phase 3.3 and read by nothing: the endpoint required
+   * a locationId AND a providerId, which a reception desk does not have — it knows its branch. So the rows
+   * accumulated in Waiting for ever while the board beside them showed the same people out of the
+   * appointments table, unordered and with no notion of who is next.</p>
+   *
+   * <p>No arguments. The branch is the caller's, resolved server-side from their validated active branch;
+   * naming another is a 403 the desk could not talk its way around anyway.</p>
+   */
+  waitingRoom(): Promise<WaitingTicket[]>;
+  /** Call the head of the queue through (Waiting → InConsultation). Null when nobody is waiting. */
+  callNextWaiting(): Promise<WaitingTicket | null>;
+  /** Send somebody back to Waiting — they stepped out, or were called and did not come. */
+  requeueWaiting(queueId: string): Promise<void>;
+  /** Drop a ticket. The person left, or was checked in by mistake. */
+  removeWaiting(queueId: string): Promise<void>;
+  /** The consultation is over (InConsultation → Done). */
+  completeWaiting(queueId: string): Promise<void>;
+
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
   /**

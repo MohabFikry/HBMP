@@ -1,6 +1,7 @@
 import {
   zAccessReviewCampaign,
   zAppointmentRow,
+  zWaitingTicket,
   zBookableClinic,
   zTimelineStep,
   zBookableSlot,
@@ -1012,6 +1013,60 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
+  // ---- 32.6 — the waiting room (emr /queues, phase 3.3) ------------------------------------------------
+  //
+  // Five endpoints that had no caller anywhere in the product for four phases, while the WRITE half of the
+  // same subsystem ran on every check-in. Nothing read the tickets and nothing cleared them.
+  //
+  // NO ARGUMENTS on the reads. The branch comes from the caller's validated active-branch claim server-side;
+  // passing one from here would be a filter the server has to re-check anyway, and a filter that looks like
+  // a permission is how a client-side narrowing gets mistaken for one.
+
+  async waitingRoom() {
+    const r = (await getRaw(`/queues`)) as any[];
+    return (r ?? []).map((t) => parseOr(zWaitingTicket, {
+      queueId: t.queueId,
+      appointmentId: t.appointmentId,
+      position: Number(t.position ?? 0),
+      // NOT defaulted to a placeholder. Check-in can be recorded without them, and a board that prints
+      // "Unknown" calls somebody who is not there.
+      memberNo: t.memberNo ?? null,
+      displayName: t.displayName ?? null,
+      appointmentType: String(t.appointmentType ?? ""),
+      state: String(t.state ?? ""),
+      waitSeconds: Number(t.waitSeconds ?? 0),
+    }));
+  }
+
+  async callNextWaiting() {
+    // 204 when nobody is waiting — an empty waiting room is an answer, not a failure, and `getRaw`/`postRaw`
+    // give back undefined for a no-content body.
+    const r = (await postRaw(`/queues/call-next`, {})) as any;
+    if (!r?.queueId) return null;
+    return parseOr(zWaitingTicket, {
+      queueId: r.queueId,
+      appointmentId: r.appointmentId,
+      position: Number(r.position ?? 0),
+      memberNo: r.memberNo ?? null,
+      displayName: r.displayName ?? null,
+      appointmentType: String(r.appointmentType ?? ""),
+      state: String(r.state ?? ""),
+      waitSeconds: Number(r.waitSeconds ?? 0),
+    });
+  }
+
+  async requeueWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/requeue`, {});
+  }
+
+  async removeWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/remove`, {});
+  }
+
+  async completeWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/complete`, {});
+  }
+
   async checkIn(appointmentId: string, rowVersion?: number) {
     // Opt-in optimistic concurrency: echo the row version we read as If-Match; a stale board loses to a
     // concurrent transition with 412 (surfaced as an ApiError the desk shows) instead of double check-in.

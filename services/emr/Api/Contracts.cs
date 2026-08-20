@@ -32,12 +32,10 @@ public sealed record EncounterResponse(
         e.StartedAt, beneficiaryName, branchId);
 }
 
-public sealed record QueueItemResponse(
-    Guid QueueEntryId, Guid EncounterId, Guid BeneficiaryId, Guid? ProviderId, string State, DateTimeOffset EnqueuedAt)
-{
-    public static QueueItemResponse From(QueueEntry q) => new(
-        q.QueueEntryId, q.EncounterId, q.BeneficiaryId, q.ProviderId, q.State.ToString(), q.EnqueuedAt);
-}
+// 32.6 — QueueItemResponse is gone with the endpoint that served it (GET /encounters/queue; see the note in
+// Program.cs). It projected raw beneficiary ids for a "queue" that listed people who had already been called
+// through. Deleted rather than left beside QueueItemView: two response records named for the same concept is
+// how the next screen picks the wrong one.
 
 // ---- Phase 3.1 appointments (17-api-specifications §6, US-020) ----
 
