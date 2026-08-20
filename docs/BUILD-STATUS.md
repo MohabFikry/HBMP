@@ -1164,3 +1164,86 @@ a bar that can be lowered to pass is not a bar. It is in `REQUIRED_GATES`, so it
   projections**, where a receptionist and a doctor asking the same question receive different KEYS. Only the
   paging envelope is fixed, and that is what is declared. Publishing a fixed item schema there would be a
   lie that reads as documentation.
+
+---
+
+## The portal audit passes — four portals, 2026-08-10 → 2026-08-12
+
+### Why these have no phase number
+
+Phases 0–31.6 above were driven by `HBMP-Design/claude-code-prompts/`: a phase file said what to build and
+the work built it. These four were driven by *looking at what shipped*. Numbering them 32–35 would file them
+as more of the same and they are not — a phase adds a capability, a pass asks whether an existing one is
+connected to anything. They are recorded here, in sequence, because this file's job is "where the build has
+got to" and for eight days it answered that question with 31.6 while ninety commits landed.
+
+### The method, and the defect class it keeps finding
+
+Each pass takes one portal, or a pair that share a persona, and compares **five layers**: the design doc, the
+service endpoints, the OpenAPI spec, the HTTP client, and the screen. The finding that recurs in every single
+pass is one shape:
+
+> **a capability exists in the contract, in the screen, and in the dev fixtures — and nowhere on the wire.**
+
+It survives review because every layer looks right on its own. It survives the test suite because the tests
+run against the fixture client, which implements the capability. The only thing that catches it is asking
+each layer what the layer beneath it actually serves.
+
+| Pass | Portal(s) and design doc | The headline defect |
+|---|---|---|
+| 1 | Clinic Management (`branch_coordinator` + `clinics_manager`) — doc `42`, ADR-0029 | The branch **write** path predates `BranchSetScoped`: `ResolveBookingBranch` returns the caller's `branchId` straight off the request body without testing it against `PermittedBranchIds`. A manager granted two clinics could act on all six. The read path had been fixed and documents the bug in its own header; the write path was never migrated. |
+| 2 | Medical Director (`/director`) — doc `47-oversight-and-analytics.md` | The supervised could author their own supervision numbers — `POST /reports/projections` writes facts into the read model the director is judged by — and nothing recorded that they had. Plus a portal reaching about a third of a reporting service that is far richer than what it exposes, sending no parameters and dropping some of what comes back. |
+| 3 | Approvals + Claims (`medical_approval`, `claims_officer`) — doc `48-approvals-and-claims-workbench.md` | A claims worklist reading the wrong endpoint; an officer holding `claims:decide`, `:adjudicate`, `:adjust` and `:appeal` with no screen for any of them; and a break-glass retrospective review that could be **entered and never exited**. |
+| 4 | Finance + the pharmacy counter (`finance`, `pharmacy`) — doc `49-finance-and-the-counter.md` | `settlements()` and `exportReport()` threw on **every** call — the client mapped `status: "ok"` into a schema expecting `{kind,label}`. An export button with three controls that did nothing. The out-of-stock flag that existed in the contract, the screen and the fixtures, and in no table. |
+
+Full specs: `docs/superpowers/specs/2026-08-11-clinic-management-portal-design.md`,
+`…-medical-director-portal-design.md`, `2026-08-11-approvals-and-claims-workbench-design.md`,
+`2026-08-12-finance-and-pharmacy-counter-design.md`.
+
+**The systemic fix landed in pass 4** and is the one to keep: `apps/web/test/http-client-contract.test.ts`
+runs `HttpApiClient`'s mappings against the real zod schemas over a stubbed `fetch`. The absence of that
+test *was* finding F1. Without it the next literal `status: "ok"` ships the same way.
+
+### 2026-08-20 — the four passes landed on `master`
+
+They were seven PRs in one linear stack, each based on the one below, and none had ever been merged. Two
+merges took the lot: `2a19354` (the lower half, through `fix/migration-rerunnability`) and `ed659a3` (the
+upper half, through `feat/finance-and-pharmacy-counter`).
+
+**`fix/migration-rerunnability` was merged first, and that order was load-bearing.** Its `admin/0007`
+fix — `ux_bsg_home_per_subject`, a unique index that could not survive its own migration being replayed — is
+why `Mersal.Admin.Tests.BranchScopeGrantParityTests` failed on every branch above it, and why
+`tools/ci/apply-migrations.sh` halted in `admin/` and never reached `pharmacy/`. Pass 4 had to apply its own
+migration by hand for exactly this reason. Both symptoms are gone.
+
+Verified on the merged tree **before** the push, not after:
+
+| | |
+|---|---|
+| Solution, `--with-db` | 38 assemblies, **3,850 passed, 0 failed, 0 skipped** |
+| `apps/web` | 116 files, **1,487 passed, 0 failed**; `tsc --noEmit` clean |
+| OpenAPI drift | 22 specs match the running services |
+| `apply-migrations.sh` | **247 files, two consecutive passes, exit 0 both** — the first completing replay this repository has had |
+| Tenant-isolation fuzzer | 153 tenant-scoped tables proven, 2 declared RLS-free |
+| Live-bundle clean | no fixture marker survives a `VITE_LIVE=1` build |
+| Static gates | 16 green |
+
+That local run was the *only* verification available: **GitHub Actions has been billing-blocked since
+2026-08-11**, so all fifteen checks on every one of those PRs reported `FAILURE` without a single job
+starting. See `docs/HANDOFF.md` — a scoreboard that is red because there is no game reads exactly like a
+scoreboard that is red because you are losing.
+
+### What has NOT been audited
+
+Seven of the catalogue's 21 roles have been through a pass. **Fourteen have not:** `reception`, `doctor`,
+`nurse`, `lab`, `radiology`, `procedure_provider`, `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`,
+`case_manager`, `call_center`, `provider_admin`, `policy_admin`, `org_admin`, `super_admin`.
+
+Two live leads are already written down rather than waiting to be rediscovered:
+
+- **The prescriber's portal.** `POST /{rxId}/lines/{lineId}/amend-schedule` and `POST /{rxId}/cancel-lines`
+  are unreached by the SPA. Pass 4 found them and deliberately left them: they carry `rx:write`, the
+  prescriber's authority rather than the counter's, so they belong to a prescribing-portal pass.
+- **The case portal.** `caseTasks()` and `escalations()` carry the same `status: "ok"` crash as finance's
+  `settlements()`. Pass 4 fixed them — one line each, and proven broken — but did **not** audit the portal
+  they belong to. They are fixed, not reviewed, and the distinction is the point.

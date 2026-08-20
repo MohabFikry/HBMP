@@ -42,20 +42,25 @@ cd apps/web && npx vitest run          # 377 tests
 
 Infrastructure: `infra/compose` (Tier 1, single node). Postgres is published on **55432**, not 5432.
 
-## Measured state, 2026-08-01
+## Measured state, 2026-08-20 — `master`, after the stack landed
 
 | | |
 |---|---|
-| Backend suite | **2,500 passed, 0 failed, 0 skipped** (33 assemblies, `--with-db`) — measured 2026-08-01 |
-| Web suite | **449 passed, 0 failed** (38 files) — measured 2026-08-01 |
+| Backend suite | **3,850 passed, 0 failed, 0 skipped** (38 assemblies, `--with-db`) — measured 2026-08-20 |
+| Web suite | **1,487 passed, 0 failed** (116 files, incl. axe over every route x locale x theme) — measured 2026-08-20 |
+| OpenAPI drift | **22 specs match the running services** — measured 2026-08-20 |
+| Migration replay | **247 files, two consecutive passes, exit 0 both** — measured 2026-08-20 |
+| Tenant-isolation fuzzer | **153 tenant-scoped tables proven**, 2 declared RLS-free — measured 2026-08-20 |
 | Domain coverage | **82.5%** against an enforced floor of 58 — *last measured 2026-07-30, not re-run since* |
 | Overall coverage | **50.7%** against an enforced floor of 45 — *last measured 2026-07-30, not re-run since* |
-| CI gates | 18 |
+| Gate scripts in `tools/ci/` | 20 |
 
-The two suite rows were re-measured for this update. The two coverage rows were **not**, and say so rather
-than being carried forward as though they were: restating an old number under a new date is the precise habit
-that made the previous version of this file describe Keycloak and 107 tests. The floors are live in
-`tools/ci/coverage-floors.json`, which remains the source of truth for any figure that disagrees.
+**Seven stacked branches landed on `master` on 2026-08-20** (`2a19354`, `ed659a3`) after the whole gauntlet
+above ran on the merged tree. Everything below the finance pass is now in `master` and nothing is stacked.
+The suite rows and the four gate rows were measured for this update. **The two coverage rows were not**, and
+say so rather than being carried forward under a new date — the habit that made an earlier version of this
+file describe Keycloak and 107 tests. `tools/ci/coverage-floors.json` remains the source of truth for any
+figure that disagrees.
 
 Coverage comes from `tools/ci/coverage-report.py`, which merges cobertura reports as a UNION. The previous
 gate summed them, and `dotnet test` writes one per test assembly, so 161 files were counted more than once
@@ -68,14 +73,33 @@ other number is stale.**
 Written down because a handover that lists only achievements is how the next person rediscovers these the
 expensive way.
 
-- **1,191 rows across 7 tables carry `tenant_id = ''`** and belong to no tenant — invisible to every real
-  tenant, visible to any session binding an empty one. Root cause is upstream: 64 entities declare
-  `public string TenantId { get; set; } = "";`, so a write path that forgets to set it stores an unscoped
-  row. The backfill and a `CHECK (tenant_id <> '')` belong WITH that fix, not before it, or the constraint
-  just moves the failure to insert time in production.
-- **55 outbox call sites** still commit their event separately from the state change it announces, so a
-  crash between the two loses the event with nothing recording it was owed. Ratcheted one-way in
-  `docs/quality/outbox-atomicity-debt.txt` — the number can only go down.
+- **GitHub Actions has not run since 2026-08-11: the account is billing-blocked.** Every job on every open
+  PR reported `FAILURE`, and not one of them started. The annotation is the same on all fifteen: *"The job
+  was not started because recent account payments have failed or your spending limit needs to be increased."*
+  This is worse than a red build and reads identically to one. A red check normally means a gate ran and
+  found something; here the scoreboard is red because there is no game. **Until billing is fixed, the local
+  gauntlet is the only verification that exists** — `./dotnet.sh test HbmpPlatform.sln -c Release --with-db`,
+  the `apps/web` suite, `tools/ci/check-openapi-drift.sh`, `tools/ci/apply-migrations.sh` and the scripts in
+  `tools/ci/`. Two of those cannot run locally at all (see `gate-freshness` below), so "green locally" is a
+  strictly smaller claim than "green in CI" and should be written as the smaller one.
+
+- **`tenant_id = ''` is down to 341 rows in ONE table, and the survivor may not be debt at all.** Measured
+  against the Compose database on 2026-08-20 by asking `information_schema` for every column named
+  `tenant_id` and counting: **`identity.role_scope` = 341, every other table 0.** The entry used to read
+  1,191 rows across 7 tables. `role_scope` is the platform-wide role-to-scope catalogue — reference data
+  that is the same for every tenant — so an empty tenant there is plausibly *correct* and the six real
+  offenders are gone. **That is a question, not a conclusion:** nobody has decided in writing whether
+  `role_scope` is tenant-scoped, and until someone does, the `CHECK (tenant_id <> '')` cannot be written
+  because it would either be wrong or need an exemption nobody has justified. The upstream cause is
+  unchanged and still worth knowing — 64 entities declare `public string TenantId { get; set; } = "";`, so
+  a write path that forgets to set it stores an unscoped row.
+- **Outbox atomicity: 55 call sites became 6, in 4 files.** The ratchet in
+  `docs/quality/outbox-atomicity-debt.txt` worked exactly as intended — the number can only go down, and it
+  went down by 49. What is left, verified against the register on 2026-08-20:
+  `services/admin/Api/BranchAssignmentService.cs` (1), `services/case/Api/Beneficiary360Endpoint.cs` (1),
+  `services/emr/Api/Reminders.cs` (1), `services/pharmacy/Api/Dispensing.cs` (3). Each still commits its
+  event separately from the state change it announces, so a crash between the two loses the event with
+  nothing recording it was owed.
 - ~~**Two invariants are unproven**~~ — **CLOSED, and this entry was stale.** `INV-DEDUPE-SURVIVES-RESTART`
   is proven against the DURABLE store (`ProcessedEventDurabilityTests`), `INV-OUTBOX-SURVIVES-CRASH` by the
   library + architecture pair, and CI has NOT passed `--allow-unproven` since 24.3 — the exit criterion this
@@ -89,13 +113,17 @@ expensive way.
   which is the code most likely to need it, and no gate fails for a module that is simply ABSENT. The tool
   now adopts unfloored modules at measured-minus-1 (`--new-only` separates that from tightening existing
   floors), with a selftest for the case. **`services/inventory:Api` measured 0.0% (0/459)** — see below.
-- **`services/inventory:Api` has NO tests at all** (0 of 459 lines). The endpoint handlers — the branch-reach
-  checks, the required `Idempotency-Key`, the 422 mappings for expired batches and insufficient stock — are
-  covered only by unit tests of the pieces beneath them (`BranchReachGuard`, `MovementService`, `StockRules`)
-  and by a source-scan for the no-PHI rule. Its floor is recorded as 0, which ENFORCES NOTHING and is a
-  placeholder, not a guard: it is there so the module is visible in the list rather than absent from it.
+- ~~**`services/inventory:Api` has NO tests at all** (0 of 459 lines).~~ **CLOSED.** It has an endpoint test
+  host now — `services/inventory/Tests/InventoryApiFactory.cs` and `InventoryEndpointTests.cs`, the
+  `EmrApiFactory` pattern this entry prescribed — and its floor in `coverage-floors.json` reads **83.0**,
+  not the 0 that enforced nothing. Left struck through rather than deleted, per this list's own rule.
   The fix is an endpoint test host (emr's `EmrApiFactory` is the pattern), not a number.
-- **`services/notification:Api` is 60.1% against an 85% floor — the coverage gate is RED on this branch.**
+- **`services/notification:Api`: the 85% floor is now 66.0, and I have NOT re-measured the actual.** The
+  entry below described a red gate at 60.1% against 85. The floor moved, and `check-floor-monotonicity.py`
+  passes, so the decrease was documented as that gate requires. What nobody has re-run is the coverage
+  measurement itself — it needs a full instrumented suite, which was not part of the 2026-08-20 landing.
+  **So the honest status is "unknown", not "green".** The original finding, kept because it explains what
+  the number is about:
   Caused by commit `fe164b6`, which added `DomainEventConsumer.cs` (198 lines) and `EscalationSweeper.cs`
   (102 lines) — 300 of that layer's 550 lines — with tests covering only the parse seam. Verified independent
   of the floor work above: the same failure occurs with `coverage-floors.json` at its previous contents. Two
