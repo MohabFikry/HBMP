@@ -105,6 +105,11 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     // and no test could see it because the fake always succeeded.
     close: vi.fn().mockResolvedValue({ kind: "ok" }),
     history: vi.fn().mockResolvedValue([]),
+    // 32.6 — contact corrections from the call (design 11 §3.1). Default to success; the tests that care
+    // about a refusal override with the specific verdict, because "invalid value" and "not verified" send
+    // the agent to two different places.
+    updateContact: vi.fn().mockResolvedValue({ kind: "ok" }),
+    addContact: vi.fn().mockResolvedValue({ kind: "ok" }),
     ...over,
   };
 }
