@@ -36,7 +36,7 @@ public static class PrescriptionValidator
             findings.Add(QuantityChecks.Evaluate(line, snapshot.PackFacts));
         }
 
-        findings.AddRange(InteractionChecks.Evaluate(request, snapshot.Interactions));
+        findings.AddRange(InteractionChecks.Evaluate(request, snapshot.Interactions, snapshot.ActiveMedications));
         findings.AddRange(DuplicationChecks.Evaluate(request, snapshot.Compositions));
 
         // A second, independent interaction pass over manufacturer label text. Deliberately additive: the
@@ -182,7 +182,10 @@ internal static class InteractionChecks
     /// January 2024, DrugBank's free tier in March 2026). A safety check that depends on an unlicensed free
     /// endpoint is a safety check that disappears without notice (doc 43 §2).
     /// </remarks>
-    internal static IReadOnlyList<Finding> Evaluate(ValidationRequest request, Fetched<InteractionTable> interactions)
+    internal static IReadOnlyList<Finding> Evaluate(
+        ValidationRequest request,
+        Fetched<InteractionTable> interactions,
+        Fetched<ActiveMedications> activeMedications)
     {
         if (interactions is Fetched<InteractionTable>.Unavailable u)
         {
@@ -230,33 +233,69 @@ internal static class InteractionChecks
             }
         }
 
-        // Each line against what the beneficiary is already taking.
+        // Each line against what the beneficiary is ALREADY taking — behind Fetched<T>, so "we could not
+        // ask" is a different answer from "we asked and there is nothing", and neither is silence.
+        //
+        // 32.1: this loop existed from phase 28 and ran zero times, because its input was a plain list on
+        // the request that both call sites passed empty. Every line then fell through to the Ok below and
+        // was reported "no interaction found" — the phase-26 lesson (Unavailable is not Ok) defeated by an
+        // input rather than by a catch.
+        if (activeMedications is Fetched<ActiveMedications>.Unavailable unavailableMeds)
+        {
+            foreach (var line in request.Lines)
+            {
+                findings.Add(Finding.Clinical(
+                    line.LineId, line.DrugId, CheckKind.Interaction, ClinicalState.Unavailable,
+                    $"Interaction check incomplete — the patient's current medications could not be read "
+                    + $"({unavailableMeds.Reason}). The lines being written now were checked against each other.",
+                    $"التحقق من التداخلات غير مكتمل — تعذّرت قراءة أدوية المريض الحالية "
+                    + $"({unavailableMeds.Reason}). تم التحقق من الأسطر المكتوبة الآن مقابل بعضها.",
+                    provenance));
+            }
+
+            return findings;
+        }
+
+        var currentMedications = ((Fetched<ActiveMedications>.Available)activeMedications).Value.Items;
+
         foreach (var line in request.Lines)
         {
-            foreach (var active in request.ActiveMedicationDrugIds.Distinct())
+            foreach (var active in currentMedications.DistinctBy(m => m.DrugId))
             {
-                if (active == line.DrugId) continue;
-                if (!lookup.TryGetValue(Key(line.DrugId, active), out var hit)) continue;
+                // Re-prescribing a medicine the patient is continuing is the ordinary case. Pairing a drug
+                // with itself would report an interaction on every repeat script.
+                if (active.DrugId == line.DrugId) continue;
+                if (!lookup.TryGetValue(Key(line.DrugId, active.DrugId), out var hit)) continue;
 
                 findings.Add(Interaction(line, hit,
-                    "with a medication the patient is already taking",
-                    "مع دواء يتناوله المريض بالفعل", provenance, relatedLineId: null));
+                    $"with {active.DrugName}, which the patient is already taking ({active.Source})",
+                    $"مع {active.DrugName}، وهو دواء يتناوله المريض بالفعل ({active.Source})",
+                    provenance, relatedLineId: null));
                 flagged.Add(line.LineId);
             }
         }
 
-        // A line with no interaction found genuinely was checked, against a non-empty list.
+        // A line with no interaction found genuinely was checked — and the sentence says against WHAT.
+        var medsCoverageEn = currentMedications.Count == 0
+            ? "no current medications recorded for this patient"
+            : $"{currentMedications.Count} current medication(s)";
+        var medsCoverageAr = currentMedications.Count == 0
+            ? "لا توجد أدوية حالية مسجّلة لهذا المريض"
+            : $"{currentMedications.Count} من الأدوية الحالية";
+
         foreach (var line in request.Lines.Where(l => !flagged.Contains(l.LineId)))
         {
             findings.Add(Finding.Clinical(
                 line.LineId, line.DrugId, CheckKind.Interaction, ClinicalState.Ok,
                 // Coverage stated, not implied (doc 44 §8). "No interaction found" against a curated list
                 // of 13 pairs is a much weaker statement than the same words against a licensed database,
-                // and a prescriber is entitled to know which one they are reading.
+                // and a prescriber is entitled to know which one they are reading. 32.1 adds the second
+                // half of the coverage: an empty medication list and a checked one read identically
+                // otherwise, and they are not the same claim.
                 $"No interaction found (checked against Mersal's interaction list: {table.KnownPairCount} "
-                + $"ingredient pairs{Updated(table.RulesUpdatedAt)}).",
+                + $"ingredient pairs{Updated(table.RulesUpdatedAt)}, and {medsCoverageEn}).",
                 $"لم يتم العثور على تداخلات (تم التحقق مقابل قائمة التداخلات لدى مرسال: "
-                + $"{table.KnownPairCount} زوجًا من المواد الفعالة{UpdatedAr(table.RulesUpdatedAt)}).",
+                + $"{table.KnownPairCount} زوجًا من المواد الفعالة{UpdatedAr(table.RulesUpdatedAt)}، و{medsCoverageAr}).",
                 provenance));
         }
 

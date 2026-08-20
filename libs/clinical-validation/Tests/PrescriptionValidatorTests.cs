@@ -225,9 +225,16 @@ public class PrescriptionValidatorTests
         var line = Fx.Line();
         var existing = Guid.NewGuid();
         var result = Fx.Run(
-            Fx.Request([line], activeMedications: [existing]),
-            Fx.Snapshot(interactions: Fx.Interactions(50,
-                new InteractionFact(line.DrugId, existing, ClinicalSeverity.Contraindicated, null))));
+            Fx.Request([line]),
+            Fx.Snapshot(
+                interactions: Fx.Interactions(50,
+                    new InteractionFact(line.DrugId, existing, ClinicalSeverity.Contraindicated, null)),
+                // 32.1 — this argument moved from the request to the snapshot. The test did not change
+                // shape by accident: it is the one test that proved this loop works, and it went on proving
+                // it for months while both production call sites passed an empty list into the parameter it
+                // used to fill. A unit test can only prove the code it is handed.
+                activeMedications: Fx.ActiveMedications(
+                    new ActiveMedication(existing, "Existing medicine", "Prescribed"))));
 
         var finding = result.For(line.LineId, CheckKind.Interaction);
         finding.State.Should().Be(CheckState.Warning);

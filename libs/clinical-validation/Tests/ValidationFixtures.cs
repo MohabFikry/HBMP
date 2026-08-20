@@ -26,10 +26,21 @@ internal static class Fx
     /// <see cref="ValidationRequest"/>. Leaving an ignored parameter behind would let a test say
     /// <c>diagnoses: ["E11.9"]</c>, pass, and prove nothing.
     /// </remarks>
-    public static ValidationRequest Request(
-        IEnumerable<PrescriptionLineInput>? lines = null,
-        IEnumerable<Guid>? activeMedications = null) =>
-        new(Guid.NewGuid(), [.. lines ?? [Line()]], [.. activeMedications ?? []]);
+    public static ValidationRequest Request(IEnumerable<PrescriptionLineInput>? lines = null) =>
+        new(Guid.NewGuid(), [.. lines ?? [Line()]]);
+
+    /// <summary>
+    /// What the beneficiary is already taking, as the ports would have fetched it.
+    /// </summary>
+    /// <remarks>
+    /// Called with no arguments this is an EMPTY list that IS available — "nothing is recorded for this
+    /// patient", which the interaction check reports as Ok while naming that emptiness. That is a different
+    /// fact from <see cref="Fetched.NotAvailable{T}"/>, which means the question could not be asked, and the
+    /// two must never render the same sentence. This parameter used to be on <see cref="Request"/> as a bare
+    /// list of ids, which is exactly how the distinction was lost.
+    /// </remarks>
+    public static Fetched<ActiveMedications> ActiveMedications(params ActiveMedication[] items) =>
+        Fetched.From(new ActiveMedications(items), Provenance);
 
     /// <summary>
     /// The encounter's diagnoses as the SERVER read them.
@@ -149,7 +160,8 @@ internal static class Fx
         Fetched<IReadOnlyDictionary<Guid, DrugComposition>>? compositions = null,
         Fetched<PatientContext>? patient = null,
         Fetched<ContraindicationTable>? contraindications = null,
-        Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>? packFacts = null) =>
+        Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>? packFacts = null,
+        Fetched<ActiveMedications>? activeMedications = null) =>
         new(indications ?? Indications(),
             interactions ?? Interactions(knownPairCount: 100),
             allergies ?? Allergies(recordedCount: 1),
@@ -162,7 +174,11 @@ internal static class Fx
             contraindications ?? Contraindications(),
             // 29.6 — the default is an EMPTY-but-available map, so a test that says nothing about pack facts
             // gets the honest "master data does not record this" rather than a fabricated pack.
-            packFacts ?? PackFacts());
+            packFacts ?? PackFacts(),
+            // Available-and-empty by default: a test that says nothing about current medications is testing
+            // the "nothing recorded" case, which is entitled to Ok. Defaulting to Unavailable would make
+            // every unrelated test assert an outage it is not about.
+            activeMedications ?? ActiveMedications());
 
     /// <summary>Every source down — the outage case.</summary>
     public static ValidationSnapshot DeadSnapshot(string reason = "masterdata unreachable") =>
@@ -176,7 +192,8 @@ internal static class Fx
             Fetched.NotAvailable<IReadOnlyDictionary<Guid, DrugComposition>>(reason),
             Fetched.NotAvailable<PatientContext>(reason),
             Fetched.NotAvailable<ContraindicationTable>(reason),
-            Fetched.NotAvailable<IReadOnlyDictionary<Guid, DrugPackFacts>>(reason));
+            Fetched.NotAvailable<IReadOnlyDictionary<Guid, DrugPackFacts>>(reason),
+            Fetched.NotAvailable<ActiveMedications>(reason));
 
     /// <summary>
     /// 29.6 — the drug pack facts, as master data records them (design 45 §6).
