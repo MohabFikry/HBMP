@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Mersal.ClinicalValidation;
+using Mersal.Pharmacy.Domain;
+using Microsoft.EntityFrameworkCore;
 using Mersal.Pharmacy.Infrastructure;
 
 namespace Mersal.Pharmacy.Api;
@@ -26,6 +28,7 @@ public sealed class HttpClinicalValidationPorts(
     IHttpClientFactory factory,
     IBenefitPreCheck benefitPreCheck,
     IDrugLabelSource labels,
+    IPrescribedMedicationSource prescribed,
     TimeProvider clock) : IClinicalValidationPorts
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -67,10 +70,11 @@ public sealed class HttpClinicalValidationPorts(
         var compositions = FetchCompositionsAsync(drugIds, bearerToken, ct);
         var patient = FetchPatientAsync(beneficiaryId, encounterId, bearerToken, ct);
         var packFacts = FetchPackFactsAsync(drugIds, bearerToken, ct);   // 29.6
+        var activeMedications = FetchActiveMedicationsAsync(beneficiaryId, bearerToken, ct);   // 32.1
 
         await Task.WhenAll(
             indications, interactions, allergies, benefit, labels, diagnoses, compositions, patient,
-            packFacts);
+            packFacts, activeMedications);
 
         // The one source that CANNOT join the parallel wave: a contraindication is a question about the
         // patient's conditions, so it needs the diagnoses and the pregnancy status before it can be asked.
@@ -88,8 +92,45 @@ public sealed class HttpClinicalValidationPorts(
         return new ValidationSnapshot(
             await indications, await interactions, await allergies, dosingRules, await benefit,
             await labels, await diagnoses, await compositions, await patient, contraindications,
-            await packFacts);
+            await packFacts, await activeMedications);
     }
+
+    /// <summary>
+    /// 32.1 — what the beneficiary is already taking: active Mersal lines UNION reported history.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The prescription half is a LOCAL query. Pharmacy owns that table, and crossing a service boundary to
+    /// ask itself a question would be slower and no more correct. The history half is emr's, because a
+    /// medicine bought at a pharmacy Mersal has never heard of cannot be derived from Mersal's own records —
+    /// which is the whole reason <c>medication_history</c> carries a <c>SelfReported</c> and an
+    /// <c>External</c> source.
+    /// </para>
+    /// <para>
+    /// <b>Either half failing makes the WHOLE fact Unavailable.</b> Returning the prescriptions alone when
+    /// emr is down would hand the engine a list that looks complete, and the engine would then report Ok
+    /// against it. A half-list presented as a whole one is the exact failure <c>Fetched&lt;T&gt;</c> exists
+    /// to prevent, and it is worse than no list because it carries the authority of a completed check.
+    /// </para>
+    /// </remarks>
+    private async Task<Fetched<ActiveMedications>> FetchActiveMedicationsAsync(
+        Guid beneficiaryId, string? bearerToken, CancellationToken ct)
+        => await GuardedAsync<ActiveMedications>("current medication list", async token =>
+        {
+            var mersalsOwn = await prescribed.ActiveForAsync(beneficiaryId, clock.GetUtcNow(), token);
+
+            var history = await GetAsync<List<MedicationHistoryDto>>(
+                "emr", $"/api/v1/beneficiaries/{beneficiaryId}/medication-history?status=Active",
+                bearerToken, token) ?? [];
+
+            var items = new List<ActiveMedication>(mersalsOwn);
+            items.AddRange(history.Select(h => new ActiveMedication(h.DrugId, h.DrugName ?? "(unnamed)", h.Source)));
+
+            return ((ActiveMedications)new ActiveMedications(items),
+                new ProvenanceInfo("Mersal prescriptions + recorded medication history", "live", clock.GetUtcNow()));
+        }, ct);
+
+    private sealed record MedicationHistoryDto(Guid DrugId, string? DrugName, string Source);
 
     /// <summary>
     /// The encounter's diagnoses, read from emr rather than taken from the request body.

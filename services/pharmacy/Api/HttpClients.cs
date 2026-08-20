@@ -113,9 +113,12 @@ public sealed class ValidatorBackedPrescribingScreener(
         var snapshot = await ports.FetchAsync(
             beneficiaryId, drugIds, encounterId: null, clientDiagnoses: null, bearerToken, ct);
 
-        // No active-medication list either. It produces NotChecked findings, which are reported rather than
-        // assumed away.
-        var request = new ValidationRequest(Guid.Empty, lines, []);
+        // 32.1 — the active-medication list is no longer an argument this call site can get wrong. It is
+        // fetched with everything else above, and an unreachable source arrives as Unavailable rather than
+        // as an empty list. The comment that used to stand here claimed the empty list "produces NotChecked
+        // findings, which are reported rather than assumed away"; it did not, and that sentence is the
+        // reason the defect survived four audits — the code said the honest thing while doing the other one.
+        var request = new ValidationRequest(Guid.Empty, lines);
         var result = PrescriptionValidator.Validate(request, snapshot, clock.GetUtcNow());
 
         foreach (var finding in result.Findings)

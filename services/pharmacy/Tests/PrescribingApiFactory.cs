@@ -256,6 +256,12 @@ public sealed class StubPorts : IClinicalValidationPorts
     /// <summary>Set to make the encounter-diagnosis fetch fail, the way an emr outage would.</summary>
     public string? DiagnosisFetchFailure { get; set; }
 
+    /// <summary>What the beneficiary is already taking, as the union source would have returned it.</summary>
+    public List<ActiveMedication> ActiveMedications { get; } = [];
+
+    /// <summary>Set to make the current-medication fetch fail, the way an emr or database outage would.</summary>
+    public string? ActiveMedicationFetchFailure { get; set; }
+
     public Task<ValidationSnapshot> FetchAsync(
         Guid beneficiaryId, IReadOnlyList<Guid> drugIds, Guid? encounterId,
         IReadOnlyList<string>? clientDiagnoses, string? bearerToken, CancellationToken ct = default)
@@ -298,7 +304,15 @@ public sealed class StubPorts : IClinicalValidationPorts
             // 29.6 — pack facts (design 45 §6). EMPTY BUT AVAILABLE by default, so the API-level
             // fixture reports the honest "master data records no pack for this drug" rather than a
             // fabricated one. PackFacts lets a test opt into real values.
-            Fetched.From<IReadOnlyDictionary<Guid, DrugPackFacts>>(PackFacts, Source)));
+            Fetched.From<IReadOnlyDictionary<Guid, DrugPackFacts>>(PackFacts, Source),
+            // 32.1 — what the beneficiary is already taking. Empty-but-available by default for the same
+            // reason as pack facts: a test that says nothing about current medications is exercising the
+            // "nothing recorded" case, which is entitled to Ok as long as the sentence says so.
+            // ActiveMedications lets a test opt in, and ActiveMedicationFetchFailure lets one prove the
+            // outage path.
+            ActiveMedicationFetchFailure is { } medsWhy
+                ? Fetched.NotAvailable<ActiveMedications>(medsWhy)
+                : Fetched.From(new ActiveMedications(ActiveMedications), Source)));
 }
 
 /// <summary>Builds a principal from X-Test-* headers, matching the other services' convention.</summary>

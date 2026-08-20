@@ -72,6 +72,7 @@ builder.Services.AddHttpClient("openfda", c =>
     c.DefaultRequestHeaders.UserAgent.ParseAdd("MersalHBMP/1.0 (+https://mersal.foundation)");
 });
 builder.Services.AddScoped<IDrugLabelSource, OpenFdaLabelSource>();
+builder.Services.AddScoped<IPrescribedMedicationSource, DbPrescribedMedicationSource>();
 builder.Services.AddScoped<IClinicalValidationPorts, HttpClinicalValidationPorts>();
 builder.Services.AddScoped<IPrescribingScreener, ValidatorBackedPrescribingScreener>();
 builder.Services.AddScoped<PrescriptionValidationService>();

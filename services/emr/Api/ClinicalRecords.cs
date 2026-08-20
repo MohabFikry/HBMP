@@ -734,6 +734,42 @@ public static class ClinicalEndpoints
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
         .Produces<MedicationHistoryResponse>();
 
+        /* ---- GET /beneficiaries/{beneficiaryId}/medication-history ----------------------------------
+         *
+         * 32.1 — the read that makes the write worth having. The POST above has existed since phase 4.1
+         * with NO caller anywhere: not the SPA, not another service. So the table fed `/clinical`'s
+         * medication list and the FHIR MedicationStatement projection with nothing, and both reported "no
+         * medications" as a fact about every patient on the platform.
+         *
+         * It is also half of the interaction check's missing input. pharmacy's validation ports read this
+         * and union it with Mersal's own active prescriptions: what a patient takes that Mersal prescribed
+         * is derivable from our records, and what they take that Mersal did NOT prescribe is derivable from
+         * nowhere else, which is exactly what MedicationSource.SelfReported and .External are for.
+         *
+         * Gated as `/clinical` is — a medication list is clinical content. */
+        ben.MapGet("/{beneficiaryId:guid}/medication-history", async (
+            Guid beneficiaryId, string? status, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.MedicationHistory,
+                beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var q = db.MedicationHistories.AsNoTracking().Where(m => m.BeneficiaryId == beneficiaryId);
+
+            // An unparseable status filters nothing rather than everything. "?status=nonsense" returning an
+            // empty list would read as "this patient takes nothing", which is the class of false negative
+            // this whole change exists to remove.
+            if (Enum.TryParse<MedicationStatus>(status, ignoreCase: true, out var wanted))
+                q = q.Where(m => m.Status == wanted);
+
+            var rows = await q.OrderByDescending(m => m.StartDate).ToListAsync(ct);
+            await EmitAsync(audit, "medication_history", beneficiaryId, AuditAction.Read, me,
+                $"{{\"returned\":{rows.Count}}}", ct);
+            return Results.Ok(rows.Select(MedicationHistoryResponse.From));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:read"))
+        .Produces<IEnumerable<MedicationHistoryResponse>>();
+
         // ---- FHIR R4 read projection over the canonical tables (interop, treating-gated) ----
         enc.MapGet("/{id:guid}/fhir", async (
             Guid id, EmrDbContext db, ClinicalGate gate, CancellationToken ct) =>
