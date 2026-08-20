@@ -132,8 +132,9 @@ import {
   zClaimsCostView,
   zMedicationHistoryRow,
   zNoteAddendum,
+  zLineNote,
 } from "@mersal/contracts";
-import type { Localized, Period, ServiceAxis } from "@mersal/contracts";
+import type { Localized, Period, ServiceAxis, LineNoteKind, NoteVisibility } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
@@ -202,6 +203,33 @@ const ALLERGEN_CATEGORY = ["Drug", "Food", "Environmental"] as const;
  * where it came from, and `parseOr` is meant to reject that rather than have this mapper invent
  * "SelfReported" to keep a screen quiet — which is the shape of defect this whole pass is closing.</p>
  */
+/**
+ * The path prefix for a line note, by order kind.
+ *
+ * <p>orders-service serves investigation and procedure notes; pharmacy serves prescription notes (32.5).
+ * Three prefixes and one shape, which is the whole point of the shared panel.</p>
+ */
+const lineNoteBase = (kind: LineNoteKind, orderId: string) => {
+  const root = kind === "prescription" ? "/prescriptions"
+    : kind === "procedure" ? "/procedure-orders"
+    : "/investigation-orders";
+  return orderId ? `${root}/${encodeURIComponent(orderId)}` : root;
+};
+
+const toLineNote = (n: any, lineId: string) => ({
+  noteId: n?.noteId,
+  // orders names it orderLineId, pharmacy prescriptionLineId. Neither is guessed: the caller already knows
+  // which line it asked about, so the fallback is the id it asked with rather than a fabricated one.
+  lineId: n?.orderLineId ?? n?.prescriptionLineId ?? lineId,
+  visibility: n?.visibility,
+  body: n?.body ?? "",
+  authorDisplayName: n?.authorDisplayName ?? "",
+  authoredAt: n?.authoredAt,
+  status: n?.status,
+  cancelledAt: n?.cancelledAt ?? null,
+  cancelReason: n?.cancelReason ?? null,
+});
+
 const toMedicationRow = (m: any) => ({
   medHistoryId: m?.medHistoryId,
   beneficiaryId: m?.beneficiaryId,
@@ -1908,6 +1936,35 @@ export class HttpApiClient implements ApiClient {
         plan: r?.plan ?? "",
       },
     });
+  }
+
+  /**
+   * 32.5 — notes on an order or prescription line (design 46 §7b).
+   *
+   * <p>One method, three paths, because one PANEL serves all four order kinds. The alternative — a method
+   * per kind — is how a platform ends up with two behaviours for "cancel a note", which is the outcome doc
+   * 46 §7b names when it insists on a single mechanism.</p>
+   *
+   * <p>A cancelled note still comes back. The screen strikes it through; dropping it would turn "withdrawn
+   * by X because Z" into a gap.</p>
+   */
+  async lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
+    const r = (await getRaw(`${lineNoteBase(kind, orderId)}/lines/${encodeURIComponent(lineId)}/notes`)) as any[];
+    return (r ?? []).map((n) => parseOr(zLineNote, toLineNote(n, lineId)));
+  }
+
+  async writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ) {
+    const r = (await postRaw(
+      `${lineNoteBase(kind, orderId)}/lines/${encodeURIComponent(lineId)}/notes`,
+      { body, visibility: visibility ?? null },
+    )) as any;
+    return parseOr(zLineNote, toLineNote(r, lineId));
+  }
+
+  async cancelLineNote(kind: LineNoteKind, noteId: string, reason: string) {
+    await postRaw(`${lineNoteBase(kind, "")}/notes/${encodeURIComponent(noteId)}/cancel`, { reason });
   }
 
   async medicationHistory(beneficiaryId: string, status?: MedicationStatus) {

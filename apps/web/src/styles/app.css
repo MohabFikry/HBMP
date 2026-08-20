@@ -6582,3 +6582,96 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   justify-content: flex-end;
   gap: var(--sp2);
 }
+
+/* ── 32.5 Line notes (design 46 §7b) ────────────────────────────────────────────────────────────────────
+   One panel, four order kinds — labs, radiology, procedures and prescriptions. It renders inside a
+   prescription row at the counter and inside a modal on the doctor's side, so it carries no width or
+   margin of its own and inherits the density of whatever holds it. */
+.ln-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  align-items: flex-start;
+  margin-block-start: var(--sp2);
+}
+.ln-title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.ln-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+.ln-empty {
+  font-size: 0.8125rem;
+  color: var(--text-3);
+}
+.ln-note {
+  padding: var(--sp2);
+  border-inline-start: 2px solid var(--border-strong);
+  background: var(--surface-1);
+  border-radius: var(--r-sm);
+}
+/* A withdrawn note STAYS. Struck through and dimmed, never removed: "there was a note here and it was
+   withdrawn, by X, because Z" is information, and a gap is not. Two cues, so the state does not rest on
+   colour alone. */
+.ln-note[data-status="Cancelled"] .ln-body {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.ln-body {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+  color: var(--text-1);
+  white-space: pre-wrap;
+}
+.ln-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+.ln-withdrawn {
+  color: var(--st-warn-fg);
+}
+.ln-compose,
+.ln-withdraw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  width: 100%;
+}
+.ln-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
+}
+
+/* The doctor's host: one section per line inside the notes modal, because an instruction belongs to a
+   line — "fasting sample" is about the glucose, not about the three tests beside it. */
+.enc-notes-intro {
+  margin: 0 0 var(--sp3);
+  font-size: 0.875rem;
+  color: var(--text-2);
+}
+.enc-line-notes {
+  padding-block: var(--sp2);
+  border-block-start: 1px solid var(--border);
+}
+.enc-line-notes-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-1);
+}

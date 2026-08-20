@@ -102,6 +102,7 @@ import {
   zAllergyRecord,
   zMedicationHistoryRow,
   zNoteAddendum,
+  zLineNote,
   zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
@@ -141,7 +142,7 @@ import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionK
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { AddMedicationHistoryRequest, MedicationHistoryRow, MedicationStatus } from "@mersal/contracts";
-import type { NoteAddendum } from "@mersal/contracts";
+import type { NoteAddendum, LineNote, LineNoteKind, NoteVisibility } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
 import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -1195,6 +1196,76 @@ export class DevApiClient implements ApiClient {
    * worked — the requester's row was unreachable in production and equally unreachable in the fixture, so
    * no screen test could have found the missing exit.</p>
    */
+  /**
+   * 32.5 — the fixture line notes, keyed by line.
+   *
+   * <p>Seeded with one ToFulfiller instruction on the first prescription line, so the counter's panel has
+   * something to render in the demo. An empty fixture would let both halves of this feature look finished
+   * while the read path was never exercised — which is how the server-side model shipped in 30.5b and went
+   * unseen for two months.</p>
+   */
+  private readonly lineNoteStore = new Map<string, LineNote[]>();
+
+  lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
+    void orderId;
+    return this.gate(() => {
+      if (!this.lineNoteStore.has(lineId)) {
+        this.lineNoteStore.set(lineId, kind === "prescription"
+          ? [ok(zLineNote, {
+              noteId: `note-${lineId}-1`,
+              lineId,
+              visibility: "ToFulfiller",
+              body: "Patient cannot swallow tablets — syrup if available.",
+              authorDisplayName: "Dr Karim Adel",
+              authoredAt: "2026-08-19T09:20:00Z",
+              status: "Active",
+              cancelledAt: null,
+              cancelReason: null,
+            })]
+          : []);
+      }
+      return [...this.lineNoteStore.get(lineId)!];
+    }, []);
+  }
+
+  writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ) {
+    void kind;
+    void orderId;
+    return this.gate(() => {
+      const existing = this.lineNoteStore.get(lineId) ?? [];
+      const note = ok(zLineNote, {
+        noteId: `note-${lineId}-${existing.length + 1}`,
+        lineId,
+        visibility: visibility ?? "ToFulfiller",
+        body,
+        authorDisplayName: "Dr Karim Adel",
+        authoredAt: "2026-08-20T10:00:00Z",
+        status: "Active",
+        cancelledAt: null,
+        cancelReason: null,
+      });
+      this.lineNoteStore.set(lineId, [note, ...existing]);
+      return note;
+    });
+  }
+
+  async cancelLineNote(kind: LineNoteKind, noteId: string, reason: string) {
+    void kind;
+    await this.gate(() => {
+      for (const [lineId, notes] of this.lineNoteStore) {
+        if (!notes.some((n) => n.noteId === noteId)) continue;
+        // Marked, never removed — the same rule the server holds, so the dev path cannot teach a flow where
+        // a withdrawn note disappears.
+        this.lineNoteStore.set(lineId, notes.map((n) => n.noteId === noteId
+          ? { ...n, status: "Cancelled" as const, cancelledAt: "2026-08-20T10:05:00Z", cancelReason: reason }
+          : n));
+      }
+      return undefined;
+    });
+  }
+
   async takeReportAccessUnderReview(requestId: string) {
     void requestId;
     await this.gate(() => undefined);

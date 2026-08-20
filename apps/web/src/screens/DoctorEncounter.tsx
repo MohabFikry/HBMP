@@ -20,6 +20,7 @@ import type {
   Encounter,
   EncounterDiagnosis,
   IcdRef,
+  LineNoteKind,
   Localized,
   NoteAddendum,
   OrderRow,
@@ -41,6 +42,7 @@ import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile, useWhenFilter } from "./_shared";
 import { draftKeys, useUnsentDrafts } from "./draftStore";
 import { ServiceHistoryModal } from "./ServiceHistoryModal";   // 29.4 — one modal, every tab
+import { LineNotesPanel } from "./notes/LineNotesPanel";      // 32.5 — one panel, every order kind
 import { TransactionActionsDialog } from "./TransactionActionsDialog";   // 30.6 — amend/withdraw from the row
 import type { TransactionAction } from "./TransactionActionsDialog";
 import type { AmendReasonOption } from "./AmendLineDialog";
@@ -201,6 +203,12 @@ const S = {
     ar: "هذه الملاحظة موقّعة ولا يمكن تعديلها. سجّل التصحيح كملحق.",
   },
   addAddendum: { en: "Add addendum", ar: "إضافة ملحق" },
+  lineNotes: { en: "Notes", ar: "الملاحظات" },
+  lineNotesFor: { en: "Notes on {ref}", ar: "ملاحظات على {ref}" },
+  lineNotesIntro: {
+    en: "Operational instructions that travel with the order. The provider filling it reads these.",
+    ar: "تعليمات تشغيلية ترافق الطلب. يقرأها مقدّم الخدمة المنفّذ.",
+  },
   saveAddendum: { en: "Save addendum", ar: "حفظ الملحق" },
   addendumTitle: { en: "Addendum", ar: "ملحق" },
   addendumHint: {
@@ -1539,6 +1547,7 @@ function PrescriptionsTab({
   const [viewing, setViewing] = useState<RxRow | null>(null);
   // 30.6 — which transaction is being amended or withdrawn, from the ROW. One at a time.
   const [acting, setActing] = useState<{ rx: RxRow; action: TransactionAction } | null>(null);
+  const [noting, setNoting] = useState<LineNotesTarget | null>(null);
   /** 31.4 — a prescription the doctor asked to copy. Consumed by the composer, then cleared. */
   const [cloning, setCloning] = useState<PrescriptionClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
@@ -1629,6 +1638,19 @@ function PrescriptionsTab({
             })}
           >
             <Icon name="copy" />
+          </Button>
+          {/* 32.5 — annotate, which is NOT amending (design 46 §7b: "adding a note is not an amendment").
+              Its own control beside the pen for exactly that reason: sharing the amend dialog would have
+              made every "fasting sample" look like a change to the script, and the ones that reach the
+              approval queue are changes to the script. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.lineNotes)} — ${r.rxNo}`}
+            onClick={() => setNoting({ ref: r.rxNo, orderId: r.id, kind: "prescription",
+              lines: r.lines.map((l) => ({ id: l.id, label: l.drug ? t(l.drug) : t(S.rxDrugMissing) })) })}
+          >
+            <Icon name="doc" />
           </Button>
           <Button
             variant="ghost"
@@ -1746,6 +1768,7 @@ function PrescriptionsTab({
           onDone={rx.reload}
         />
       )}
+      {noting && <LineNotesModal target={noting} onClose={() => setNoting(null)} />}
     </div>
   );
 }
@@ -2205,5 +2228,43 @@ function AddendumSection({
         </Button>
       )}
     </div>
+  );
+}
+
+/** What a notes modal is opened for: one order or prescription, and the lines it holds. */
+interface LineNotesTarget {
+  kind: LineNoteKind;
+  orderId: string;
+  ref: string;
+  lines: { id: string; label: string }[];
+}
+
+/**
+ * The doctor's line-notes surface (32.5, design 46 §7b).
+ *
+ * <p>Every line of the order at once, each with its own panel, because an instruction belongs to a LINE —
+ * "fasting sample" is about the glucose, not about the other three tests beside it. A single box per order
+ * would have been simpler and would have attached every note to everything.</p>
+ *
+ * <p>Deliberately not part of the amend dialog. Doc 46 §7b: "adding a note is not an amendment" — it does
+ * not supersede the line, create a version, or invalidate an authorisation, and sharing a dialog with the
+ * act that does all three would blur exactly the distinction the design draws.</p>
+ */
+function LineNotesModal({ target, onClose }: { target: LineNotesTarget; onClose: () => void }) {
+  const t = useLoc();
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={t(S.lineNotesFor).replace("{ref}", target.ref)}
+    >
+      <p className="enc-notes-intro">{t(S.lineNotesIntro)}</p>
+      {target.lines.map((l) => (
+        <section key={l.id} className="enc-line-notes">
+          <h3 className="enc-line-notes-title">{l.label}</h3>
+          <LineNotesPanel kind={target.kind} orderId={target.orderId} lineId={l.id} lineLabel={l.label} />
+        </section>
+      ))}
+    </Modal>
   );
 }

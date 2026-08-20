@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LineNotesPanel } from "../notes/LineNotesPanel";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Icon, InlineAlert, InputField, Modal, StatusChip, TextareaField, useTheme, useToast } from "@mersal/design-system";
 import type { Coded, DispenseLine, Localized, Prescription, PrescriptionLine, RxPricing } from "@mersal/contracts";
@@ -682,6 +683,17 @@ function DispenseBody({
                               </Button>
                             </span>
                           )}
+                        {/* 32.5 — the prescriber's instruction, at the counter (design 46 §7b: "prominently
+                            in the fulfiller's queue detail — an instruction nobody reads is worthless").
+                            asFulfiller restricts what may be written to FromFulfiller, matching the 403 the
+                            server returns for anything else. */}
+                        <LineNotesPanel
+                          kind="prescription"
+                          orderId={rx.id}
+                          lineId={l.id}
+                          lineLabel={productName(t(l.drug.label))}
+                          asFulfiller
+                        />
                       </div>
                     </td>
                     <td className="rx-col-act">

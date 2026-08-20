@@ -51,6 +51,9 @@ import type {
   AllergyRecord,
   MedicationHistoryRow,
   NoteAddendum,
+  LineNote,
+  LineNoteKind,
+  NoteVisibility,
   MedicationStatus,
   AddMedicationHistoryRequest,
   BloodGroup,
@@ -409,6 +412,19 @@ export interface ApiClient {
    * 32.4 — Requested → UnderReview. Records the decider and starts the SLA clock, so it is an explicit act
    * rather than something the screen does on render.
    */
+  /**
+   * 32.5 — notes on an order or prescription line (design 46 §7b).
+   *
+   * One method per verb rather than per order kind: labs, radiology, procedures and prescriptions share a
+   * single panel, and a method per kind is how "cancel a note" acquires a second behaviour.
+   */
+  lineNotes(kind: LineNoteKind, orderId: string, lineId: string): Promise<LineNote[]>;
+  writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ): Promise<LineNote>;
+  /** Marks, never deletes. The reason is required — a gap is not information. */
+  cancelLineNote(kind: LineNoteKind, noteId: string, reason: string): Promise<void>;
+
   takeReportAccessUnderReview(requestId: string): Promise<void>;
   /**
    * 32.4 — InfoRequested → UnderReview: the requester answers the reviewer's question. The only exit from
