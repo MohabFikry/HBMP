@@ -43,9 +43,10 @@ public static class PrescriptionEndpoints
             Results.Ok(await db.RefillFrequencies.AsNoTracking()
                 .Where(x => x.IsActive)
                 .OrderBy(x => x.SortOrder).ThenBy(x => x.Code)
-                .Select(x => new { code = x.Code, months = x.Months, nameEn = x.NameEn, nameAr = x.NameAr })
+                .Select(x => new RefillFrequencyView(x.Code, x.Months, x.NameEn, x.NameAr))
                 .ToListAsync(ct)))
-            .RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+            .Produces<IEnumerable<RefillFrequencyView>>();
 
         /*
          * 29.5 — THE SCHEDULE PREVIEW (design 45 §5): "show the computed window schedule with per-window
@@ -100,7 +101,8 @@ public static class PrescriptionEndpoints
                 DurationDays: req.DurationDays,
                 FrequencyMonths: frequency.Months,
                 IsPackSplittable: req.IsPackSplittable ?? pack?.IsPackSplittable,
-                PackSize: req.PackSize ?? pack?.PackSize));
+                // 31.5 — what the box HOLDS, like every other quantity since 31.3.
+                PackContent: req.PackContent ?? pack?.PackContent));
 
             // ABSENCE OF DATA IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED, because
             // "could not compute" on its own sends a prescriber to guess, and a silently wrong quantity is
@@ -114,21 +116,19 @@ public static class PrescriptionEndpoints
             var windows = WindowSchedule.Build(
                 plan.Windows, calendar.Today(), frequency.Months, req.DurationDays, EarlyToleranceDays);
 
-            return Results.Ok(new
-            {
-                total = plan.Total,
-                unit = plan.Unit.ToString(),
-                frequencyMonths = frequency.Months,
-                windows = windows.Select(w => new
-                {
-                    windowNo = w.WindowNo,
-                    scheduledOpen = w.ScheduledOpen.ToString("yyyy-MM-dd"),
-                    opensAt = w.OpensAt.ToString("yyyy-MM-dd"),
-                    closesAt = w.ClosesAt.ToString("yyyy-MM-dd"),
-                    allocatedQuantity = w.AllocatedQuantity,
-                }),
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            return Results.Ok(new ChronicPreviewView(
+                plan.Total,
+                plan.Unit.ToString(),
+                frequency.Months,
+                [.. windows.Select(w => new ChronicWindowView(
+                    w.WindowNo,
+                    w.ScheduledOpen.ToString("yyyy-MM-dd"),
+                    w.OpensAt.ToString("yyyy-MM-dd"),
+                    w.ClosesAt.ToString("yyyy-MM-dd"),
+                    w.AllocatedQuantity))]));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<ChronicPreviewView>();
 
         /*
          * 29.6 — HOW MUCH WILL BE DISPENSED, before the doctor commits (design 45 §6).
@@ -152,14 +152,18 @@ public static class PrescriptionEndpoints
                 ? await drugs.PackAsync(drugId, http.Headers.Authorization.ToString(), ct)
                 : null;
 
+            /*
+             * 31.3 — divided by what the box HOLDS, not by the catalogue's pack size.
+             *
+             * `pack_size` counts the catalogue's minor units, which is the same thing the dose counts only
+             * for tablets and their kin. A box of five insulin pens is `pack_size = 5` and holds 1500 IU; a
+             * 120 ml bottle of syrup is `pack_size = 1`. `pack_content` is the number in the unit the dose is
+             * written in, so one division answers every form.
+             */
             var outcome = QuantityMath.Compute(
                 req.DoseAmount, req.TimesPerDay, req.DurationDays,
                 req.IsPackSplittable ?? pack?.IsPackSplittable,
-                req.PackSize ?? pack?.PackSize,
-                // 31.2 — only where the pack counts the SAME thing the dose does. A box of 5 pens dosed in
-                // IU divides to a box count that is wrong by the pen's contents, and it would be printed
-                // with as much confidence as a correct one.
-                PackUnitRules.PackCounts(pack?.PrescribingUnit));
+                req.PackContent ?? pack?.PackContent);
 
             // ABSENCE IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED — "could not
             // compute" on its own sends a prescriber to guess, and a guessed quantity is a dispensing error
@@ -170,20 +174,20 @@ public static class PrescriptionEndpoints
                     detail: $"'{outcome.MissingField}' is not recorded for this drug, so the quantity to "
                           + "dispense cannot be computed. A silently wrong quantity is a dispensing error.");
 
-            return Results.Ok(new
-            {
-                totalUnits = plan.TotalUnits,
-                dispenseQuantity = plan.DispenseQuantity,
-                packs = plan.Packs,
-                // 31.2 — what the pharmacy actually counts out. NULL where the pack and the dose count
-                // different things; the composer says so rather than showing a number.
-                boxes = plan.Boxes,
-                packSize = plan.PackSize,
-                // What the number is COUNTED IN, so the composer can say "60 Tablet" rather than "60".
-                prescribingUnit = pack?.PrescribingUnit,
-                isPackSplittable = req.IsPackSplittable ?? pack?.IsPackSplittable,
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            return Results.Ok(new QuantityPreviewView(
+                plan.TotalUnits,
+                plan.DispenseQuantity,
+                plan.Packs,
+                // 31.2 — what the pharmacy actually counts out. NULL where the catalogue does not record
+                // what a box holds; the composer says so rather than showing a number.
+                plan.Boxes,
+                plan.PackContent,
+                // What the number is COUNTED IN, so the composer can say "60 tabs" rather than "60".
+                pack?.PrescribingUnit,
+                req.IsPackSplittable ?? pack?.IsPackSplittable));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<QuantityPreviewView>();
 
         v1.MapPost("", async (
             CreatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
@@ -350,7 +354,7 @@ public static class PrescriptionEndpoints
                         DurationDays: l.DurationDays ?? req.DurationDays!.Value,
                         FrequencyMonths: frequency!.Months,
                         IsPackSplittable: pack?.IsPackSplittable,
-                        PackSize: pack?.PackSize));
+                        PackContent: pack?.PackContent));
 
                     // ABSENCE OF DATA IS NEVER A CLEAN RESULT. The field that is missing is named, because
                     // "could not compute" without it sends a prescriber to guess.
@@ -388,6 +392,11 @@ public static class PrescriptionEndpoints
                         PrescriptionLineId = Guid.NewGuid(), DrugId = l.DrugId, DrugName = drugNames[l.DrugId],
                         Dose = l.Dose, Route = l.Route,
                         Frequency = l.Frequency, QuantityPrescribed = l.QuantityPrescribed,
+                        // 31.3 — the unit travels with the number, snapshotted like the drug name above.
+                        QuantityUnit = l.QuantityUnit,
+                        // 31.5 — the numbers the checks above were RUN ON, kept rather than discarded once
+                        // they had been used. `Dose` is the sentence they were formatted into.
+                        DoseAmount = l.DoseAmount, TimesPerDay = l.TimesPerDay,
                         RefillsAllowed = l.RefillsAllowed, DurationDays = l.DurationDays,
                         Status = RxLineStatus.Active,
                     };
@@ -504,10 +513,15 @@ public static class PrescriptionEndpoints
                     tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
                     beneficiaryId = rx.BeneficiaryId, encounterId = rx.EncounterId,
                     requiresApproval = route.RequiresApproval, orderedByUserId = rx.CreatedBy,
+                    // WHAT IS BEING ASKED FOR, added when this event became the routing feed's input
+                    // (ApprovalRoutingFeed). Drug ids, because that is already this domain's vocabulary for an
+                    // approved scope — `AuthorizationScope.Assess` compares `line.DrugId.ToString()` against
+                    // the approved codes on every amendment, and a second vocabulary here would mean a partial
+                    // approval and an out-of-scope check disagreeing about what was approved.
+                    serviceCodes = rx.Lines.Select(l => l.DrugId.ToString()).Distinct(StringComparer.Ordinal).ToArray(),
                 }, ct);
             if (rx.Status == RxStatus.Approved)
                 await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -515,10 +529,25 @@ public static class PrescriptionEndpoints
                 ActorUserId = actor, DecisionOutcome = rx.Status.ToString(), DecisionReasonCode = route.Reason,
                 AfterState = $"{{\"rxNo\":\"{rx.RxNo}\",\"status\":\"{rx.Status}\",\"alerts\":{screening.Alerts.Count}}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             var alertViews = screening.Alerts.Select(a => new AlertView(a.Kind.ToString(), a.Severity, a.Detail)).ToList();
             return Results.Created($"/api/v1/prescriptions/{rx.PrescriptionId}", PrescriptionResponse.From(rx, alertViews));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        /*
+         * 31.5 — THE RESPONSE SHAPE IS PART OF THE CONTRACT, so it is declared.
+         *
+         * The drift gate compares the committed specs against the running services and had been passing
+         * over every response body on this service, because a minimal API that returns `Results.Ok(x)`
+         * publishes no schema for `x`. That is how 31.5 added three fields to a prescription line and the
+         * gate reported "every committed spec matches" — it was comparing requests and routes only.
+         *
+         * Declared on the endpoints that return a TYPED contract, which is the clinical record: what a
+         * prescription is, and what its lines say. Endpoints returning anonymous objects still publish
+         * nothing, and that is stated in BUILD-STATUS rather than left to be discovered the same way.
+         */
+        .Produces<PrescriptionResponse>(StatusCodes.Status201Created);
 
         // ------------------------------------------------------------------ 26.4 step 1: advisory validation
         //
@@ -550,7 +579,9 @@ public static class PrescriptionEndpoints
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(PrescriptionValidationService.ToView(result, request, run.ValidationId));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<ValidationResultView>();
 
         /*
          * 29.4 — THE PRESCRIPTION HALF OF THE SERVICE HISTORY (design 45 §4).
@@ -615,8 +646,10 @@ public static class PrescriptionEndpoints
                 FieldClasses = ["phi"],
             }, ct);
 
-            return Results.Ok(new { items });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+            return Results.Ok(new RxHistoryView(items));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+        .Produces<RxHistoryView>();
 
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
@@ -625,7 +658,7 @@ public static class PrescriptionEndpoints
             var denied = await gate.CheckAsync(PharmacyPolicies.RxRead, "prescription", id.ToString(), rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(PrescriptionResponse.From(rx));
-        });
+        }).Produces<PrescriptionResponse>();
 
         // My prescriptions (prescriber's worklist, US-033) — the e-prescriptions I authored, newest first,
         // scoped by CreatedBy == subject. No treating-gate needed (you always relate to what you prescribed).
@@ -649,7 +682,9 @@ public static class PrescriptionEndpoints
             // succeeded with 201, and the encounter's Prescriptions tab, which reads this endpoint and
             // filters it to the patient in the browser, got a 403 and rendered an empty list. A prescriber
             // had no way to see that their own prescription existed.
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+        .Produces<IEnumerable<PrescriptionResponse>>();
 
         v1.MapPost("/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
@@ -689,6 +724,7 @@ public static class PrescriptionEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(PrescriptionResponse.From(rx));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<PrescriptionResponse>();
     }
 }

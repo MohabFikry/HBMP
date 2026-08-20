@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Icon } from "./Icon";
 import { cx } from "../lib/cx";
+import { Combobox } from "./Combobox";
 import { useTheme } from "../theme/ThemeProvider";
 
 export interface PaginationProps {
@@ -78,22 +79,28 @@ export function Pagination({
       <div className="mrs-pager-controls">
         {onPageSizeChange && (
           <div className="mrs-pager-size">
+            {/*
+              A Combobox, not a native <select>. The scrolls/dropdowns audit scanned `apps/web` for pickers
+              and so did not see this one — which makes it, on a paginated product, quite possibly the native
+              select an operator met most often. An OS-drawn option list ignores `data-theme`, so on the dark
+              theme this opened a light popup under a dark pager, and it ignores the app's RTL treatment too.
+
+              The value is a NUMBER and the control's is a string, so the two are converted at this boundary
+              rather than anywhere further in: `pageSize` is arithmetic everywhere else in this component.
+            */}
             <label className="mrs-label" htmlFor={sizeId}>{perPage}</label>
-            <select
+            <Combobox
               id={sizeId}
-              className="mrs-control"
-              value={pageSize}
-              onChange={(e) => {
+              aria-label={perPage}
+              value={String(pageSize)}
+              onChange={(v) => {
                 // Back to the first page: keeping the page number while the size changes moves the operator
                 // to a different part of the queue than the one they were reading.
-                onPageSizeChange(Number(e.currentTarget.value));
+                onPageSizeChange(Number(v));
                 onPageChange(1);
               }}
-            >
-              {pageSizeOptions.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
+              options={pageSizeOptions.map((n) => ({ value: String(n), label: String(n) }))}
+            />
           </div>
         )}
 

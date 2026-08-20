@@ -260,7 +260,7 @@ export function ReceptionBooking() {
                 value={query}
                 onChange={(e) => setQuery(e.currentTarget.value)}
               />
-              <Button type="submit" variant="secondary" loading={searching}>
+              <Button leadingIcon={<Icon name="search" />} type="submit" variant="secondary" loading={searching}>
                 {t(S.search)}
               </Button>
             </form>

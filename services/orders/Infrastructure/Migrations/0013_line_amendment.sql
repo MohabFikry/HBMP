@@ -91,8 +91,9 @@ ALTER TABLE orders.order_line
     ADD COLUMN IF NOT EXISTS amended_by             uuid NULL,
     ADD COLUMN IF NOT EXISTS amended_at             timestamptz NULL;
 
--- Existing rows are v1 of their own chain.
-UPDATE orders.order_line SET root_line_id = order_line_id WHERE root_line_id IS NULL;
+-- Existing rows are v1 of their own chain. THE BACKFILL ITSELF RUNS AT THE END OF THIS FILE, after the
+-- immutability trigger has been (re)defined — see the note there. Doing it here would run it against
+-- whichever version of the trigger a previous pass installed, which is the version that refuses it.
 -- NOT NULL is DEFERRED to deferred/0014, not applied here. During a rolling deploy an OLD replica
 -- still inserts order_line rows without root_line_id, and a NOT NULL on this column would turn that into a
 -- constraint violation — i.e. an order a doctor cannot place, mid-encounter. Expand now, contract
@@ -172,9 +173,21 @@ BEGIN
             OLD.order_line_id USING ERRCODE = 'raise_exception';
     END IF;
 
+    -- A chain, once established, can never be re-pointed. But ESTABLISHING one is not re-pointing it, and
+    -- `root_line_id` is deliberately nullable during the expand window: the NOT NULL is deferred to
+    -- deferred/0014 precisely because an old replica mid-rolling-deploy still inserts lines without it.
+    --
+    -- Guarding NULL → value along with value → value made this file un-re-runnable. The backfill above
+    -- (`SET root_line_id = order_line_id WHERE root_line_id IS NULL`) is the documented repair for exactly
+    -- that window, and it runs BEFORE this trigger exists on a first pass and AFTER it on every subsequent
+    -- one — so the moment a single line was written without a root, every replay of the migration script
+    -- aborted here. Under `set -e` that stopped every service after `orders/` alphabetically, and surfaced as
+    -- patient-, pharmacy-, policy- and reporting-service tests failing on missing tables.
+    --
+    -- So the chain columns are frozen once SET, not once written. A row that has a root keeps it.
     IF OLD.version_no IS DISTINCT FROM NEW.version_no
        OR OLD.supersedes_id IS DISTINCT FROM NEW.supersedes_id
-       OR OLD.root_line_id  IS DISTINCT FROM NEW.root_line_id THEN
+       OR (OLD.root_line_id IS NOT NULL AND OLD.root_line_id IS DISTINCT FROM NEW.root_line_id) THEN
         RAISE EXCEPTION 'the version chain of line % is immutable', OLD.order_line_id
             USING ERRCODE = 'raise_exception';
     END IF;
@@ -192,6 +205,18 @@ END $$;
 DROP TRIGGER IF EXISTS trg_order_line_signed ON orders.order_line;
 CREATE TRIGGER trg_order_line_signed BEFORE UPDATE ON orders.order_line
     FOR EACH ROW EXECUTE FUNCTION orders.guard_order_line_signed();
+
+-- ---- The version-chain backfill, deliberately AFTER the trigger above -------------------------------------
+--
+-- Existing rows are v1 of their own chain. This ran near the top of the file, which is correct on a first
+-- pass — the trigger does not exist yet — and wrong on every later one: a line written without a root (the
+-- expand window this migration explicitly leaves open, see the deferred NOT NULL above) would be updated
+-- against the PREVIOUS pass's trigger, whose chain guard refused NULL → value. `apply-migrations.sh` runs
+-- under `set -e`, so that one statement stopped every service after `orders/` alphabetically.
+--
+-- Running it here means the repair always executes against the trigger THIS file defines, whatever a
+-- previous pass installed. Idempotent either way: the WHERE clause matches nothing once every line has a root.
+UPDATE orders.order_line SET root_line_id = order_line_id WHERE root_line_id IS NULL;
 
 -- NOTHING IS DELETED, EVER (design 46 §1, invariant 1). 0006 granted DELETE on every table in the schema;
 -- these two are the clinical record, so the grant is withdrawn from the runtime role here.

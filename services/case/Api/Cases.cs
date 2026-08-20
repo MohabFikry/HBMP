@@ -50,7 +50,8 @@ public static class Cases
 
             await Audit(deps, AuditAction.Create, c, "CaseOpened", null, c.Status.ToString());
             return Results.Created($"/api/v1/cases/{c.CaseId}", CaseView.From(c));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<CaseView>();
 
         // --- My Cases (caller's ACTIVE assignments) — cursor paged ------------------------------------------
         v1.MapGet("", async (CaseDeps deps, CancellationToken ct, string? cursor, int? pageSize, string? status) =>
@@ -75,7 +76,9 @@ public static class Cases
             var page = rows.Take(take).ToList();
             var next = rows.Count > take ? page[^1].CaseId.ToString() : null;
             return Results.Ok(new CaseListResponse(page.Select(CaseListItem.From).ToList(), next));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("case:read"))
+        .Produces<CaseListResponse>();
 
         // --- Read one case ----------------------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, CaseDeps deps, CancellationToken ct) =>
@@ -85,7 +88,8 @@ public static class Cases
             var c = await deps.Db.Cases.AsNoTracking().Include(x => x.Assignments)
                 .FirstOrDefaultAsync(x => x.CaseId == id, ct);
             return c is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(CaseView.From(c));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:read"))
+        .Produces<CaseView>();
 
         // --- Update case status -----------------------------------------------------------------------------
         v1.MapPatch("/{id:guid}/status", async (Guid id, UpdateStatusRequest req, CaseDeps deps, CancellationToken ct) =>
@@ -104,7 +108,8 @@ public static class Cases
             catch (DbUpdateConcurrencyException) { return Conflict("This case was updated by someone else."); }
             await Audit(deps, AuditAction.StateChange, c, "CaseStatusChanged", before.ToString(), c.Status.ToString());
             return Results.Ok(CaseView.From(c));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<CaseView>();
 
         // --- Assign / unassign (supervisory — the ABAC access anchor) ---------------------------------------
         v1.MapPost("/{id:guid}/assign", async (Guid id, AssignRequest req, CaseDeps deps, CancellationToken ct) =>
@@ -135,7 +140,8 @@ public static class Cases
             await tx.CommitAsync(ct);
             await Audit(deps, AuditAction.Grant, c, "CaseAssigned", null, req.CaseManagerId.ToString(), AuditSeverity.Notice);
             return Results.Ok(AssignmentView.From(a));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:manage"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:manage"))
+        .Produces<AssignmentView>();
 
         // Unassignment REVOKES access (10 §3.11): set active=false + unassigned_at. The next authz check finds no
         // active assignment → 403 for that manager.
@@ -157,13 +163,13 @@ public static class Cases
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseUnassigned", "case.events",
                 new { caseId = id, caseManagerId = req.CaseManagerId }, ct);
-            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Update,
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
                 DecisionOutcome = "CaseUnassigned", AfterState = $"revoked:{req.CaseManagerId}", Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(HbmpPolicies.Scope("case:manage"));
 
@@ -200,7 +206,8 @@ public static class Cases
             deps.Db.Tasks.Add(t);
             await deps.Db.SaveChangesAsync(ct);
             return Results.Created($"/api/v1/cases/{id}/tasks/{t.TaskId}", TaskView.From(t));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<TaskView>();
 
         v1.MapPatch("/{id:guid}/tasks/{taskId:guid}", async (Guid id, Guid taskId, UpdateTaskRequest req, CaseDeps deps, CancellationToken ct) =>
         {
@@ -227,7 +234,8 @@ public static class Cases
                     new { caseId = id, taskId = t.TaskId, title = t.Title }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(TaskView.From(t));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<TaskView>();
     }
 
     // --- Escalations ---------------------------------------------------------------------------------------
@@ -256,7 +264,8 @@ public static class Cases
                 .Where(r => !TryEscStatus(status, out var want) || r.e.Status == want)
                 .Select(r => EscalationListItem.From(r.e, r.CaseNo, r.BeneficiaryId)).ToList();
             return Results.Ok(items);
-        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:read"))
+        .Produces<IEnumerable<EscalationListItem>>();
 
         v1.MapGet("/{id:guid}/escalations", async (Guid id, CaseDeps deps, CancellationToken ct) =>
         {
@@ -293,15 +302,16 @@ public static class Cases
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseEscalated", "case.events",
                 new { caseId = id, escalationId = e.EscalationId, raisedToRole = e.RaisedToRole, reason = e.Reason }, ct);
-            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Create,
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
                 DecisionOutcome = "CaseEscalated", AfterState = e.RaisedToRole, Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/cases/{id}/escalations/{e.EscalationId}", EscalationView.From(e));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<EscalationView>();
 
         v1.MapPatch("/{id:guid}/escalations/{escId:guid}", async (Guid id, Guid escId, EscalationUpdateRequest req, CaseDeps deps, CancellationToken ct) =>
         {
@@ -318,7 +328,8 @@ public static class Cases
             if (req.Status == EscalationStatus.Resolved) { e.ResolvedAt = now; e.ResolutionNote = req.ResolutionNote; }
             await deps.Db.SaveChangesAsync(ct);
             return Results.Ok(EscalationView.From(e));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
+        .Produces<EscalationView>();
     }
 
     private static async Task Audit(CaseDeps deps, AuditAction action, CaseFile c, string outcome,

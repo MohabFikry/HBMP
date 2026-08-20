@@ -92,6 +92,15 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // counter already ENFORCES, so a stall here delays a status, never a patient.
 builder.Services.AddHostedService<RefillWindowSweeper>();
 
+// THE RETURN LEG OF THE PRIOR-AUTHORIZATION SAGA (23 §3), and the sharpest gap it closes: `IsDispensable`
+// admits only Approved and PartiallyDispensed, and the only path that ever set a prescription Approved was
+// the auto-route at creation — so a script that WAS sent for approval could never be dispensed, whatever the
+// reviewer decided. Its own queue, because the transport is point-to-point and orders needs the same
+// decisions.
+builder.Services.Configure<ApprovalDecisionConsumerOptions>(builder.Configuration.GetSection(ApprovalDecisionConsumerOptions.SectionName));
+builder.Services.AddScoped<PrescriptionApprovalApplier>();
+builder.Services.AddHostedService<ApprovalDecisionConsumer>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

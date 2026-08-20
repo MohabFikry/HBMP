@@ -103,6 +103,7 @@ export function ReportAccessInbox() {
       sortable: true, sortValue: (r) => r.createdAt },
     {
       key: "actions",
+      stickyEnd: true,
       header: t(S.actions),
       cell: (r) => (
         <div style={{ display: "grid", gap: "var(--sp2)", minWidth: "18rem" }}>
@@ -114,9 +115,9 @@ export function ReportAccessInbox() {
             style={{ minHeight: 44 }}
           />
           <div style={{ display: "flex", gap: "var(--sp2)", flexWrap: "wrap" }}>
-            <Button onClick={() => void decide(r, "approve")} disabled={busy === r.requestId}>{t(S.approve)}</Button>
-            <Button variant="secondary" onClick={() => void decide(r, "deny")} disabled={busy === r.requestId}>{t(S.deny)}</Button>
-            <Button variant="ghost" onClick={() => void decide(r, "requestinfo")} disabled={busy === r.requestId}>{t(S.askInfo)}</Button>
+            <Button size="sm" onClick={() => void decide(r, "approve")} disabled={busy === r.requestId}>{t(S.approve)}</Button>
+            <Button size="sm" variant="secondary" onClick={() => void decide(r, "deny")} disabled={busy === r.requestId}>{t(S.deny)}</Button>
+            <Button size="sm" variant="ghost" onClick={() => void decide(r, "requestinfo")} disabled={busy === r.requestId}>{t(S.askInfo)}</Button>
           </div>
         </div>
       ),

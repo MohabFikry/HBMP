@@ -67,6 +67,22 @@ public sealed class RlsConnectionInterceptor(RlsContext context) : DbConnectionI
     /// byte would be a stronger guarantee but Postgres text cannot hold one.</remarks>
     public const string NoTenantSentinel = "(no-tenant)";
 
+    /// <summary>
+    /// The same trick for provider scope, and needed for the opposite reason.
+    ///
+    /// <para>The provider policies read <c>coalesce(current_setting('app.provider_id', true), '') = ''</c> as
+    /// "tenant-wide", which is correct for the Network Team and platform admins — they genuinely have reach
+    /// across every provider. But it makes ABSENCE the grant. A provider-scoped token that arrives without a
+    /// provider_id claim — a mis-provisioned user, a claim-mapping regression, a machine token — binds the
+    /// empty string and is handed tenant-wide read of every provider's rows, which is the exact inverse of
+    /// what the tenant guard above was hardened to prevent.</para>
+    ///
+    /// <para>Binding this instead, whenever the principal is provider-scoped but carries no provider id,
+    /// turns that case into a value no row can equal: such a session reads nothing rather than everything.
+    /// Explicit tenant-wide access still binds the empty string and is unaffected.</para>
+    /// </summary>
+    public const string NoProviderSentinel = "(no-provider)";
+
     private async Task ApplyAsync(DbConnection connection, CancellationToken ct)
     {
         await using var cmd = connection.CreateCommand();

@@ -25,6 +25,20 @@ public sealed class FulfilmentConsumerOptions
     /// copy is sent its own copy; <c>notification.domain-events</c> established this.
     /// </remarks>
     public string FulfilmentQueue { get; set; } = "approvals.fulfilments";
+
+    /// <summary>
+    /// How many times one message may be requeued for a transient failure before it is parked on the
+    /// dead-letter queue instead.
+    /// </summary>
+    /// <remarks>
+    /// Unbounded requeue was the previous behaviour and it is only correct while the failure really is
+    /// transient. A message that fails deterministically AFTER deserialization — a constraint this row can
+    /// never satisfy, a bug on one payload shape — came straight back at prefetch 20 with no delay, pinning
+    /// the consumer on the same message and starving every other fulfilment behind it. Bounding it trades a
+    /// message that might still have recovered for a queue that keeps moving; nothing is lost either way now
+    /// that a dead-letter exchange exists to park it in.
+    /// </remarks>
+    public int MaxRedeliveries { get; set; } = 5;
 }
 
 /// <summary>
@@ -50,6 +64,13 @@ public sealed class FulfilmentConsumer(
 
     private IConnection? _connection;
     private IModel? _channel;
+
+    /// <summary>Requeue attempts per message id. A plain requeue gives the broker nothing to count with —
+    /// <c>ea.Redelivered</c> is a flag, not a tally, and the <c>x-death</c> header only appears once a
+    /// message has already been dead-lettered — so the budget is kept here. It resets on restart, which is
+    /// the right direction to be wrong in: a fresh process gives a message another chance rather than
+    /// inheriting a verdict from one that may itself have been the problem.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, int> _attempts = new();
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -79,6 +100,14 @@ public sealed class FulfilmentConsumer(
 
     private async Task OnReceivedAsync(BasicDeliverEventArgs ea, CancellationToken ct)
     {
+        // The retry budget needs a key that is the SAME message on every redelivery, which the ledger's
+        // event id is not: it falls back to a fresh Guid when the producer sent no message id, so counting
+        // against it would score every redelivery as attempt one and never reach the bound — the hot-loop
+        // this budget exists to stop, reintroduced by its own key. Absent a message id, the body is the
+        // only stable identity the delivery carries.
+        var retryKey = Guid.TryParse(ea.BasicProperties.MessageId, out var messageId)
+            ? messageId
+            : new Guid(System.Security.Cryptography.SHA256.HashData(ea.Body.Span).AsSpan(0, 16));
         try
         {
             var eventId = Guid.TryParse(ea.BasicProperties.MessageId, out var id) ? id : Guid.NewGuid();
@@ -123,6 +152,7 @@ public sealed class FulfilmentConsumer(
                     logger.LogError("fulfilment for {SourceRef} not issued: {Reason}", msg.SourceRef, result.Reason);
             }
 
+            _attempts.TryRemove(retryKey, out _);
             _channel?.BasicAck(ea.DeliveryTag, multiple: false);
         }
         catch (Exception ex)
@@ -130,7 +160,30 @@ public sealed class FulfilmentConsumer(
             // Requeue: this is an infrastructure failure (DB down, transient), not a bad message. The
             // producer's outbox has already committed, so losing it here would lose the only record that
             // the medicine was handed over.
-            logger.LogError(ex, "fulfilment message could not be processed; requeued");
+            //
+            // BOUNDED, though. "Transient" is an assumption about the failure, and a message that breaks
+            // deterministically after deserialization disproves it by coming straight back — at prefetch 20
+            // with no delay, spinning on the same row while every fulfilment behind it waits. Past the
+            // budget it goes to the dead-letter queue, where it is still recoverable, instead of holding
+            // the queue indefinitely on the chance that this time is different.
+            var attempt = _attempts.AddOrUpdate(retryKey, 1, (_, n) => n + 1);
+            if (attempt > options.Value.MaxRedeliveries)
+            {
+                _attempts.TryRemove(retryKey, out _);
+                logger.LogCritical(ex,
+                    "fulfilment message {RetryKey} failed {Attempts} times; dead-lettered rather than " +
+                    "requeued again. The dispense or consume it records HAS happened — replay it from " +
+                    "hbmp.dead-letter once the cause is fixed.", retryKey, attempt);
+                _channel?.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+                return;
+            }
+
+            // A short, growing pause before it comes back. Without it the requeue is immediate and the
+            // retry budget is spent within milliseconds of the first failure, which tests nothing about
+            // whether the dependency recovered.
+            logger.LogError(ex, "fulfilment message could not be processed (attempt {Attempt}); requeued", attempt);
+            try { await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), ct); }
+            catch (OperationCanceledException) { /* shutting down: fall through and hand the message back */ }
             _channel?.BasicNack(ea.DeliveryTag, multiple: false, requeue: true);
         }
     }

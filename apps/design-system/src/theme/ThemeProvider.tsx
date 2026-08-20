@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Lang, Theme } from "../tokens/tokens";
 
-interface ThemeContextValue {
+export interface ThemeContextValue {
   theme: Theme;
   lang: Lang;
   dir: "ltr" | "rtl";
@@ -11,7 +11,9 @@ interface ThemeContextValue {
   toggleLang: () => void;
 }
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
+/** Exported for `useDirection`, which must be able to ask WITHOUT throwing when there is no provider —
+ *  see that hook for why a primitive cannot use `useTheme()`. Screens use `useTheme()`. */
+export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const THEME_KEY = "mersal-theme";
 const LANG_KEY = "mersal-lang";

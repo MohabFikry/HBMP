@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, Icon, InlineAlert, InputField, Modal, SelectField, StatusChip } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, Modal, ComboboxField, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { PolicyApi, PolicyDocumentView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -338,12 +338,12 @@ function DocumentUpload({
           <Button variant="ghost" onClick={onClose} disabled={busy}>{t(S.cancelUpload)}</Button>
           {/* `form` + `type="submit"` so the footer button drives the form's own validation path — the
               required-field messages below are the form's, not a second set written for the dialog. */}
-          <Button type="submit" form="doc-upload" variant="primary" loading={busy}>{t(S.upload)}</Button>
+          <Button leadingIcon={<Icon name="upload" />} type="submit" form="doc-upload" variant="primary" loading={busy}>{t(S.upload)}</Button>
         </>
       }
     >
       <form id="doc-upload" onSubmit={submit} noValidate className="ben-doc-upload" aria-label={t(S.add)}>
-        <SelectField
+        <ComboboxField
           id="doc-type"
           label={t(S.type)}
           required

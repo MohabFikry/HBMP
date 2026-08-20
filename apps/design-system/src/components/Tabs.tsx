@@ -1,6 +1,7 @@
 import * as RadixTabs from "@radix-ui/react-tabs";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
+import { useDirection } from "../lib/useDirection";
 
 export interface TabItem {
   value: string;
@@ -29,8 +30,15 @@ export interface TabsProps {
  * Content is always mounted so SSR/loading never hides a panel unexpectedly.
  */
 export function Tabs({ items, value, onValueChange, className, variant = "underline", ...aria }: TabsProps) {
+  /*
+   * Radix owns the roving focus, so it is Radix that has to be told which way the row runs. Left to itself it
+   * assumes `ltr` — there is no `DirectionProvider` in this app — and in Arabic every tab bar arrowed
+   * backwards. Passed as a prop rather than by adding `@radix-ui/react-direction`: `Root` already accepts it,
+   * and one prop is a smaller thing to keep true than a provider somebody has to remember to mount.
+   */
+  const dir = useDirection();
   return (
-    <RadixTabs.Root value={value} onValueChange={onValueChange} className={className}>
+    <RadixTabs.Root value={value} onValueChange={onValueChange} className={className} dir={dir}>
       <RadixTabs.List
         className={cx("mrs-tabs", variant === "pill" && "mrs-tabs--pill")}
         aria-label={aria["aria-label"]}

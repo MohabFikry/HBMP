@@ -27,13 +27,15 @@ public static class BranchEndpoints
             if (status is not null && Enum.TryParse<BranchStatus>(status, out var s)) q = q.Where(b => b.Status == s);
             var rows = await q.OrderBy(b => b.BranchCode).ToListAsync(ct);
             return Results.Ok(rows.Select(ToView));
-        });
+        })
+        .Produces<IEnumerable<BranchView>>();
 
         read.MapGet("/{id:guid}", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {
             var b = await db.Branches.AsNoTracking().FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
             return b is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(ToView(b));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Create branch → BranchCreated -------------------------------------------------------
         write.MapPost("", async (CreateBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
@@ -63,7 +65,8 @@ public static class BranchEndpoints
             await outbox.EnqueueAsync("BranchCreated", "provider.events", new { branchId = branch.BranchId, branch.BranchCode, branch.NameEn, branch.NameAr }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/branches/{branch.BranchId}", ToView(branch));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Update branch metadata → BranchUpdated ----------------------------------------------
         write.MapPut("/{id:guid}", async (Guid id, UpdateBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
@@ -87,7 +90,8 @@ public static class BranchEndpoints
             await outbox.EnqueueAsync("BranchUpdated", "provider.events", new { branchId = b.BranchId, b.BranchCode }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(ToView(b));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Change status (Active/Suspended/Closed) → BranchStatusChanged -----------------------
         write.MapPost("/{id:guid}/status", async (Guid id, ChangeBranchStatus req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>

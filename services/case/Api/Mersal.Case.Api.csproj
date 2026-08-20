@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup><RootNamespace>Mersal.Case.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../Domain/Mersal.Case.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Case.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />

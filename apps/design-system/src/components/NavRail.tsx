@@ -18,6 +18,15 @@ export interface NavRailProps {
   onNavigate: (key: string) => void;
   "aria-label": string;
   className?: string;
+  /**
+   * Rendered inside the rail, above the first group.
+   *
+   * A slot rather than a prop describing a control, because the rail must not know what sits there. Its one
+   * consumer is the portal switcher, and the reason it goes HERE instead of being rendered beside the rail
+   * by each portal is structural: one slot in one component is what makes "identical in every portal" a
+   * fact about the code rather than a convention twenty-one screens are trusted to keep.
+   */
+  header?: ReactNode;
 }
 
 /**
@@ -25,7 +34,7 @@ export interface NavRailProps {
  * current item marked with accent bar + aria-current="page". Collapses to a bottom tab bar on mobile via CSS.
  * The caller passes ONLY the items the user is allowed to see (min-necessary menus, 0B §6 / 14 §2).
  */
-export function NavRail({ items, current, onNavigate, className, ...aria }: NavRailProps) {
+export function NavRail({ items, current, onNavigate, className, header, ...aria }: NavRailProps) {
   // Preserve order while grouping.
   const groups: Array<{ name?: string; items: NavItem[] }> = [];
   for (const it of items) {
@@ -36,6 +45,7 @@ export function NavRail({ items, current, onNavigate, className, ...aria }: NavR
 
   return (
     <nav className={cx("mrs-rail", className)} aria-label={aria["aria-label"]}>
+      {header}
       {/* Keyed by POSITION, never by the group's display name. Two groups can legitimately share a name
           (the caller controls ordering), and the name is localized — so name-keys collide within a render
           and all change on a language switch, which left React reconciling against stale fragments: the

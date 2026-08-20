@@ -132,7 +132,8 @@ public static class ProfileInvestigationsEndpoint
             }, ct);
 
             return Results.Ok(new ProfileInvestigationsView(rows));
-        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"))
+        .Produces<ProfileInvestigationsView>();
     }
 }
 

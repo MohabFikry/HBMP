@@ -54,8 +54,8 @@ public class BreakGlassIntegrationTests
             approve.Ok.Should().BeTrue();
 
             // Activation requires step-up; without it, denied.
-            (await svc.ActivateAsync(requester, tenant, grant.GrantId, stepUpSatisfied: false)).ReasonCode.Should().Be("step-up-required");
-            (await svc.ActivateAsync(requester, tenant, grant.GrantId, stepUpSatisfied: true)).Ok.Should().BeTrue();
+            (await svc.ActivateAsync(requester, tenant, grant.GrantId, mfaSatisfied: false)).ReasonCode.Should().Be("step-up-required");
+            (await svc.ActivateAsync(requester, tenant, grant.GrantId, mfaSatisfied: true)).Ok.Should().BeTrue();
 
             // In-scope access is granted + audited high.
             (await svc.RecordAccessAsync(requester, tenant, grant.GrantId, "encounter", "enc-9", "read")).Should().BeTrue();
@@ -118,6 +118,31 @@ public class BreakGlassIntegrationTests
             rows.Should().Contain(r => r.SubjectUserId == subject && r.Reason.Contains("Self-approval"));
         }
         finally { await Cleanup(tenant); }
+    }
+
+    /// <summary>
+    /// The activation contract must not let the caller attest to their own authentication.
+    ///
+    /// <para>The service check has always been right given a right argument; the endpoint was handing it
+    /// <c>req.StepUpSatisfied</c>, lifted from the request body. So "requires step-up MFA to activate" was
+    /// satisfied by POSTing <c>{"stepUpSatisfied": true}</c>, and the elevated window — scoped access to
+    /// records the caller is otherwise denied — opened with no second factor anywhere in the flow. The
+    /// endpoint now passes <c>principal.MfaSatisfied</c>, derived by MfaEvaluator from signed acr/amr.</para>
+    ///
+    /// <para>No database, and deliberately a shape assertion: the defect was a field EXISTING to be trusted,
+    /// so the durable guard is that it cannot come back. A boolean on this record has no other purpose.</para>
+    /// </summary>
+    [Fact]
+    public void The_activation_request_carries_no_self_asserted_step_up_flag()
+    {
+        var offenders = typeof(BreakGlassActivateBody).GetProperties()
+            .Where(p => p.PropertyType == typeof(bool) || p.PropertyType == typeof(bool?))
+            .Select(p => p.Name)
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "a caller cannot be asked to attest to their own authentication — step-up evidence has to be " +
+            "read from the token (principal.MfaSatisfied), never accepted from the body");
     }
 
     private static RoleBinding Binding(string tenant, string subject, string role, SensitivityTier tier) => new()

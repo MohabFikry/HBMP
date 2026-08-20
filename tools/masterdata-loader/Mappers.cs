@@ -112,7 +112,16 @@ public static class Mappers
     /// </summary>
     public const string PlaceholderIcd = "Z76";
 
-    public static Drug ToDrugFromXlsx(DrugListXlsxRow r, string release) => new()
+    public static Drug ToDrugFromXlsx(DrugListXlsxRow r, string release) =>
+        ToDrugFromXlsx(r, release, PackMeasurementOverrides.None);
+
+    /// <param name="overrides">
+    /// 31.3 — measurements the workbook omits, supplied per product. Subordinate to the sheet: they fill gaps
+    /// and never contradict it. See <see cref="PackMeasurementOverrides"/> for why this is a curated list
+    /// rather than a rule.
+    /// </param>
+    public static Drug ToDrugFromXlsx(
+        DrugListXlsxRow r, string release, PackMeasurementOverrides overrides) => new()
     {
         DrugId = MasterDataNormalize.DrugId(r.SourceRowId!.Trim()),
         SourceRowId = r.SourceRowId!.Trim(),
@@ -144,29 +153,87 @@ public static class Mappers
         // SPLITTABILITY now comes from the same pair rather than from the dosage form, because the form is
         // wrong in both directions on real rows — it calls a box of three ampoules unsplittable, and it has
         // nothing at all to say about the 38 forms it does not recognise. See PackUnitRules.FromPackUnits.
-        PackSize = PackFactsOf(r).PackSize,
+        PackSize = PackFactsOf(r, overrides).PackSize,
         PackUnit = Clean(r.DosageForm),
-        PrescribingUnit = PackFactsOf(r).PrescribingUnit,
-        IsPackSplittable = PackFactsOf(r).IsPackSplittable,
+        PrescribingUnit = PackFactsOf(r, overrides).PrescribingUnit,
+        IsPackSplittable = PackFactsOf(r, overrides).IsPackSplittable,
+        // 31.3 — how many prescribing units the box HOLDS, from "Volume / Weight" and "Strength". Null where
+        // they do not say; see PackUnitRules.ContentOf for why that is left as null.
+        PackContent = PackFactsOf(r, overrides).PackContent,
         // Rows missing ANY of the three are flagged and LISTED in the load report — "not silently defaulted".
+        // The third is the CONTENT, not the pack size: a syrup with pack_size = 1 looked complete and its
+        // quantity divided a 210 ml course into 210 bottles.
         UnitDataIncomplete = !PackUnitRules.IsComplete(
-            PackFactsOf(r).PrescribingUnit, PackFactsOf(r).PackSize, PackFactsOf(r).IsPackSplittable),
+            PackFactsOf(r, overrides).PrescribingUnit,
+            PackFactsOf(r, overrides).PackContent,
+            PackFactsOf(r, overrides).IsPackSplittable),
     };
 
     /// <summary>
-    /// The three pack facts for one workbook row, from every source in order of authority.
+    /// Every pack fact for one workbook row, from every source in order of authority.
     /// </summary>
     /// <remarks>
-    /// The workbook records no product-level override of either fact today, so both stated arguments are
-    /// null — they are passed explicitly rather than omitted because the override is the design's stated
-    /// intent ("overridable per product") and the seam it will arrive through is this one.
+    /// <para>The workbook records no product-level override of either fact today, so both stated arguments
+    /// are null — they are passed explicitly rather than omitted because the override is the design's stated
+    /// intent ("overridable per product") and the seam it will arrive through is this one.</para>
+    ///
+    /// <para>31.3 adds the last three: the two measurement columns the loader used to read past, and the
+    /// trade name as a fallback source for both. The name is NOT treated as a data column — it is consulted
+    /// only where a column is empty, because "toujeo solostar 300 i.u./ml 1.5 ml 3 pens" states its
+    /// concentration properly while its own Strength cell drops the "/ml".</para>
     /// </remarks>
-    public static DerivedPackFacts PackFactsOf(DrugListXlsxRow r) => PackUnitRules.Resolve(
-        form: r.DosageForm,
-        statedSplittable: null,
-        statedUnit: null,
-        majorUnits: MasterDataNormalize.Price(r.MajorUnits),
-        minorUnits: MasterDataNormalize.Price(r.MinorUnits));
+    public static DerivedPackFacts PackFactsOf(DrugListXlsxRow r) => PackFactsOf(r, PackMeasurementOverrides.None);
+
+    /// <param name="overrides">
+    /// 31.3 — the LAST source consulted, after the volume column and after the trade name. An override that
+    /// could outrank the sheet would be a second, invisible answer to what is in a box; one that only fills a
+    /// silence cannot contradict anything.
+    /// </param>
+    public static DerivedPackFacts PackFactsOf(DrugListXlsxRow r, PackMeasurementOverrides overrides)
+    {
+        /*
+         * THE PRECEDENCE IS PER INPUT, NOT PER OUTCOME.
+         *
+         * Each measurement the derivation needs — the container volume, the IU concentration — is taken from
+         * the sheet's own column, then from the product's name, and only then from the supplied file. Asking
+         * instead whether the sheet produced *a* content would skip the rows that need this most:
+         * "insulin h bio nph 100i.u.vial" drops the "/ml" every other insulin row carries, so the sheet
+         * answers "one vial" — a coherent answer to the wrong question, since nobody doses insulin in vials.
+         *
+         * `overrides.For` is called only where a value is actually TAKEN, so an entry the sheet has since
+         * made redundant is reported as unused rather than silently agreeing with it.
+         */
+        var volume = PackMeasure.Millilitres(r.VolumeWeight) ?? PackMeasure.Millilitres(r.TradeNameEn);
+        var concentration = PackMeasure.IuPerMillilitre(r.Strength)
+            ?? PackMeasure.IuPerMillilitre(r.TradeNameEn);
+
+        if (volume is null || concentration is null)
+        {
+            if (overrides.For(r.SourceRowId) is { } o)
+            {
+                volume ??= PackMeasurementOverrides.Number(o.VolumeMl);
+                concentration ??= PackMeasurementOverrides.Number(o.IuPerMl);
+            }
+        }
+
+        return PackUnitRules.Resolve(
+            form: r.DosageForm,
+            statedSplittable: null,
+            statedUnit: null,
+            majorUnits: MasterDataNormalize.Price(r.MajorUnits),
+            minorUnits: MasterDataNormalize.Price(r.MinorUnits),
+            volumeWeight: volume is { } ml ? Invariant(ml, "ml") : r.VolumeWeight,
+            strength: concentration is { } iu ? Invariant(iu, "iu/ml") : r.Strength,
+            tradeName: r.TradeNameEn);
+    }
+
+    /// <summary>A parsed measurement written back as text, in the form the rules read.</summary>
+    /// <remarks>
+    /// Invariant culture, because a decimal comma would be read back as a different number — and this string
+    /// is re-parsed immediately by the same regexes that produced it.
+    /// </remarks>
+    private static string Invariant(decimal value, string unit) =>
+        $"{value.ToString(System.Globalization.CultureInfo.InvariantCulture)} {unit}";
 
     /// <summary>ATC classification nodes from an xlsx row — same truncation rule as the CSV path.</summary>
     public static IEnumerable<AtcClass> ToAtcClasses(DrugListXlsxRow r, string release)

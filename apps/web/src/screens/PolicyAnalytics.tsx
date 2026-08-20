@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, SelectField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   AnalyticsDelta,
@@ -375,7 +375,7 @@ function FilterBar({
     options: ReadonlyArray<{ value: string; label: string }>,
     opts: { disabled?: boolean; help?: string } = {},
   ) => (
-    <SelectField
+    <ComboboxField
       label={t(label)}
       value={filters[key] ?? ""}
       onChange={(v) => onChange(key, v)}
@@ -396,7 +396,7 @@ function FilterBar({
 
   return (
     <Card className="pol-filterbar" aria-label={t(S.filters)}>
-      <h3>{t(S.filters)}</h3>
+      <h2 className="panel-h">{t(S.filters)}</h2>
       <div className="pol-filtergrid">
         {date("from", S.from)}
         {date("to", S.to)}
@@ -529,7 +529,7 @@ function ViewPanel({
 
       {result && (
         <div className="pol-view-actions">
-          <Button variant="secondary" onClick={exportView}>
+          <Button leadingIcon={<Icon name="download" />} variant="secondary" onClick={exportView}>
             {t(S.export)}
           </Button>
         </div>
@@ -568,7 +568,7 @@ function SeriesCard({ series, onDrill }: { series: AnalyticsSeries; onDrill?: (b
 
   return (
     <Card className="pol-series" data-testid={`series-${series.key}`}>
-      <h3>{title}</h3>
+      <h2 className="panel-h">{title}</h2>
       {/* The text summary is read BEFORE the table, so a screen-reader user can decide whether to read the
           rows at all. It is composed server-side from the plotted data — a caption written here drifts. */}
       <p className="pol-series-summary">{summary}</p>
@@ -663,9 +663,9 @@ function DrillPanel({ drill, onClose }: { drill: { band: string; rows: OutlierRo
 
   return (
     <Card className="pol-drill" data-testid="drill-panel" aria-label={t(S.drillTitle)}>
-      <h3>
+      <h2 className="panel-h">
         {t(S.drillTitle)} — {drill.band}
-      </h3>
+      </h2>
       {/* Said plainly: the list is ids, and turning one into a person is a separate, recorded act. */}
       <InlineAlert tone="info">{t(S.drillHint)}</InlineAlert>
       <DataTable
@@ -675,8 +675,8 @@ function DrillPanel({ drill, onClose }: { drill: { band: string; rows: OutlierRo
         emptyLabel={t(S.empty)}
         columns={[
           { key: "member", header: t(S.memberRef), cell: (r) => r.enrollmentId.slice(0, 8) },
-          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit), numeric: true },
-          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed), numeric: true },
+          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit), numeric: true, sortable: true, sortValue: (r) => r.limit },
+          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed), numeric: true, sortable: true, sortValue: (r) => r.consumed },
         ]}
       />
       <Button variant="ghost" onClick={onClose}>

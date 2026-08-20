@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { PrescribingWorkspace } from "../src/screens/prescribing/PrescribingWorkspace";
 import { seedSession } from "./helpers";
@@ -38,6 +38,9 @@ const DRUG = {
   priceEgp: 30,
   hasIndicationData: true,
   prescribingUnit: "Tablet",
+  // 31.3 — the short form the SERVER derives, which is what the dose field is labelled with. "Tablet" is
+  // the database's word for the same unit and stays out of the label.
+  prescribingUnitShort: "tabs",
   packSize: 30,
   isPackSplittable: true,
 };
@@ -48,7 +51,7 @@ class DosingApi extends DevApiClient {
   submitted: unknown[] = [];
   /** Set to make the preview refuse the way a catalogue gap does. */
   missingField: string | null = null;
-  /** False stands in for the insulin case: the pack counts pens and the dose counts IU. */
+  /** False stands in for a product whose box contents the catalogue does not record. */
   countsInBoxes = true;
   drug = DRUG;
 
@@ -74,9 +77,9 @@ class DosingApi extends DevApiClient {
       totalUnits: total,
       dispenseQuantity: total,
       packs: null,
-      // Null when this fixture is standing in for a product whose pack counts containers, not doses.
+      // Null when this fixture stands in for a product whose box contents are unrecorded.
       boxes: this.countsInBoxes ? Math.ceil(total / 30) : null,
-      packSize: 30,
+      packContent: this.countsInBoxes ? 30 : null,
       prescribingUnit: this.countsInBoxes ? "Tablet" : "IU",
       isPackSplittable: true,
     };
@@ -126,30 +129,34 @@ afterEach(() => vi.unstubAllGlobals());
 describe("29.6 — the dose is counted in the drug's own unit", () => {
   it("labels the dose field with the unit master data records", async () => {
     // "60" beside a medicine is a number whose unit the prescriber has to infer from the product name. The
-    // catalogue records it, so the field says it.
+    // catalogue records it, so the field IS it: 31.3 moved the unit off a chip beside the box and into the
+    // label, in the short form a prescription is written in — "Dose (tabs)", not "Dose" and a chip saying
+    // "Tablet".
     const api = new DosingApi({ latencyMs: 0 });
     const user = renderComposer(api);
     await pickDrug(user);
 
-    expect(await screen.findByText("Tablet")).toBeTruthy();
+    expect(await screen.findByRole("spinbutton", { name: /dose \(tabs\)/i })).toBeTruthy();
   });
 
   it("says nothing about the unit when master data records none", async () => {
     // 838 catalogue rows have no derivable unit. An invented one appears beside the dose field and reads as
-    // data — the composer shows the field bare instead.
+    // data — the composer leaves the label bare instead.
     const api = new DosingApi({ latencyMs: 0 });
-    api.drug = { ...DRUG, prescribingUnit: undefined } as never;
+    api.drug = { ...DRUG, prescribingUnit: undefined, prescribingUnitShort: undefined } as never;
     const user = renderComposer(api);
     await pickDrug(user);
 
+    expect(await screen.findByRole("spinbutton", { name: /^dose$/i })).toBeTruthy();
     expect(screen.queryByText("Tablet")).toBeNull();
   });
 });
 
 describe("29.6 — the quantity is computed, shown, and still editable", () => {
   it("asks the SERVER for the quantity and fills the field in", async () => {
-    // 1 tablet twice a day for 30 days = 60. Computed by `QuantityMath` behind the endpoint, not multiplied
-    // here — see the header.
+    // 1 tablet twice a day for 30 days = 60 tablets, which is TWO boxes of 30 — and boxes are what the
+    // field holds (31.3), because a box is what the patient carries home. Computed by `QuantityMath` behind
+    // the endpoint, not multiplied here — see the header.
     const api = new DosingApi({ latencyMs: 0 });
     const user = renderComposer(api);
     await pickDrug(user);
@@ -158,8 +165,8 @@ describe("29.6 — the quantity is computed, shown, and still editable", () => {
     await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
     await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
 
-    const quantity = await screen.findByRole("spinbutton", { name: /quantity/i });
-    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("60"));
+    const quantity = await screen.findByRole("spinbutton", { name: /quantity \(boxes\)/i });
+    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("2"));
 
     expect(api.previews.length).toBeGreaterThan(0);
     expect(api.previews[api.previews.length - 1]).toMatchObject({
@@ -169,7 +176,7 @@ describe("29.6 — the quantity is computed, shown, and still editable", () => {
 
   it("keeps a quantity the doctor typed rather than overwriting it", async () => {
     // The computed figure is a STARTING POINT. A prescriber who deliberately writes 90 because the patient
-    // is travelling must not watch it snap back to 60 on the next keystroke.
+    // is travelling must not watch it snap back on the next keystroke.
     const api = new DosingApi({ latencyMs: 0 });
     const user = renderComposer(api);
     await pickDrug(user);
@@ -179,7 +186,7 @@ describe("29.6 — the quantity is computed, shown, and still editable", () => {
     await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
 
     const quantity = await screen.findByRole("spinbutton", { name: /quantity/i });
-    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("60"));
+    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("2"));
 
     await user.clear(quantity);
     await user.type(quantity, "90");
@@ -221,7 +228,7 @@ describe("29.6 — the numbers actually reach the server", () => {
     // quantity that arrives after a validation run correctly marks that run stale — the checks were graded
     // against a different number. Real use settles long before a prescriber reaches for Validate.
     const quantity = await screen.findByRole("spinbutton", { name: /quantity/i });
-    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("60"));
+    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("2"));
 
     await user.click(screen.getByRole("button", { name: /validate/i }));
     await user.click(await screen.findByRole("button", { name: /^submit$/i }));
@@ -246,10 +253,11 @@ describe("29.5 — treatment duration comes from the line", () => {
   });
 });
 
-describe("31.2 — the quantity is said in BOXES, which is what leaves the counter", () => {
-  it("states the box count beside the units it was converted from", async () => {
-    // "60" beside a medicine tells a prescriber nothing about what the patient carries home. 60 tablets
-    // from a box of 30 is two boxes — and the units stay in the sentence so the conversion is checkable.
+describe("31.3 — the quantity is said in BOXES, which is what leaves the counter", () => {
+  it("shows the conversion the box count cannot carry on its own", async () => {
+    // The FIELD holds "2". What two means — two boxes of thirty, from a course of sixty tablets — is the
+    // part a prescriber has to be able to check, so it is stated beneath it. Without the box's contents the
+    // number is unverifiable, and a quantity you cannot verify is one you have to trust.
     const api = new DosingApi({ latencyMs: 0 });
     const user = renderComposer(api);
     await pickDrug(user);
@@ -258,13 +266,14 @@ describe("31.2 — the quantity is said in BOXES, which is what leaves the count
     await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
     await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
 
-    expect(await screen.findByText(/60 Tablet — 2 boxes of 30/)).toBeTruthy();
+    expect(await screen.findByText(/60 tabs — 30 tabs per box/i)).toBeTruthy();
   });
 
-  it("REFUSES to count boxes when the pack counts containers rather than doses", async () => {
-    // The Lantus case, and the reason this is not a simple division. The catalogue records "5 pens" per box
-    // and the dose is in IU: 180 IU over a pack of 5 divides to 36 boxes, when 180 IU is less than a single
-    // 300-IU pen. Wrong by two orders of magnitude, and it would print as confidently as a right answer.
+  it("REFUSES to count boxes when the catalogue does not record what a box holds", async () => {
+    // The Lantus case. "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and never its volume,
+    // so how much insulin the box holds is genuinely unknown. Three millilitres per pen is the usual fill
+    // and assuming it would produce a box count that prints as confidently as a right one. The field falls
+    // back to the dose total, and the LABEL stops claiming boxes.
     const api = new DosingApi({ latencyMs: 0 });
     api.countsInBoxes = false;
     const user = renderComposer(api);
@@ -274,7 +283,63 @@ describe("31.2 — the quantity is said in BOXES, which is what leaves the count
     await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
     await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "90");
 
-    expect(await screen.findByText(/pack size counts containers, not the unit/i)).toBeTruthy();
-    expect(screen.queryByText(/boxes of/i)).toBeNull();
+    expect(await screen.findByText(/does not record how much one box of this holds/i)).toBeTruthy();
+    expect(screen.queryByRole("spinbutton", { name: /quantity \(boxes\)/i })).toBeNull();
+  });
+});
+
+describe("31.3 — the quantity's unit travels with the number", () => {
+  it("sends what the quantity COUNTS, not just how many", async () => {
+    /*
+     * THE HAZARD THIS CLOSES. 31.3 made the composer's Quantity field a box count wherever the catalogue
+     * records what a box holds — so a seven-day course of a 24-tablet product is written as "1".
+     *
+     * The dispensing counter renders `quantityPrescribed` as a bare figure and takes the number the
+     * pharmacist hands over against it. A pharmacist reading "1" and giving one TABLET is a dispensing error
+     * that the record, without this field, gave them no way to catch: 1 box and 1 tablet are the same
+     * character. So the unit is snapshotted onto the line at prescribing time, like the drug name.
+     */
+    const api = new DosingApi({ latencyMs: 0 });
+    const user = renderComposer(api);
+    await pickDrug(user);
+
+    await user.type(await screen.findByRole("spinbutton", { name: /^dose/i }), "1");
+    await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
+    await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
+
+    const quantity = await screen.findByRole("spinbutton", { name: /quantity/i });
+    await vi.waitFor(() => expect((quantity as HTMLInputElement).value).toBe("2"));
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+    await user.click(await screen.findByRole("button", { name: /^submit$/i }));
+
+    await vi.waitFor(() => expect(api.submitted.length).toBe(1));
+    const line = (api.submitted[0] as { lines: Record<string, unknown>[] }).lines[0];
+    // The composer hands the API client its DRAFT lines; `HttpApiClient.rxLines` maps them onto the wire.
+    // What this pins is that the unit is on the line at all — see chronic-prescribing-wiring.test.ts for the
+    // assertion that it survives the mapping.
+    expect(line).toMatchObject({ quantity: 2, quantityUnit: "boxes" });
+  });
+
+  it("sends NO unit when nothing was computed, rather than a plausible one", async () => {
+    // Invariant 8 again, at the one place a wrong word is worse than no word. A line whose quantity could
+    // not be computed keeps whatever figure the prescriber last saw; labelling it "boxes" on the strength of
+    // the last drug they looked at would be a unit nobody derived.
+    const api = new DosingApi({ latencyMs: 0 });
+    api.missingField = "is_pack_splittable";
+    const user = renderComposer(api);
+    await pickDrug(user);
+
+    await user.type(await screen.findByRole("spinbutton", { name: /^dose/i }), "1");
+    await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
+    await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
+    await screen.findByText(/is_pack_splittable/);
+
+    await user.click(screen.getByRole("button", { name: /validate/i }));
+    await user.click(await screen.findByRole("button", { name: /^submit$/i }));
+
+    await vi.waitFor(() => expect(api.submitted.length).toBe(1));
+    const line = (api.submitted[0] as { lines: Record<string, unknown>[] }).lines[0];
+    expect(line.quantityUnit).toBeFalsy();
   });
 });

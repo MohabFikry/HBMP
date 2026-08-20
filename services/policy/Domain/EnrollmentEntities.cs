@@ -1,3 +1,5 @@
+using Mersal.Time;
+
 namespace Mersal.Policy.Domain;
 
 // Phase 19.2 + 19.2b — policy_plan, member_group, enrollment, enrollment_event (design 38 §3–§4.2).
@@ -170,5 +172,5 @@ public sealed class EnrollmentEvent
 
     /// <summary>True when this was back-dated — decided after the date it applies from. Supervisory scope is
     /// required for these, and they are the ones an audit will look at first.</summary>
-    public bool IsRetroEffective => EffectiveDate < DateOnly.FromDateTime(OccurredAt.UtcDateTime);
+    public bool IsRetroEffective => EffectiveDate < BusinessCalendar.DateIn(OccurredAt);
 }

@@ -27,18 +27,23 @@ public static class ReportsEndpoints
         v1.MapGet("/approval-tat", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "approval-tat", from, to,
                 (f, t) => cx.Q.ApprovalTatAsync(cx.Tenant, f, t, ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<ApprovalTatReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/pending-approvals", async (ReportContext cx, CancellationToken ct) =>
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
             return denied ?? Results.Ok(await cx.Q.PendingApprovalsAsync(cx.Tenant, ct));
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<PendingApprovalsReport>();
 
         v1.MapGet("/clinic-workload", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "clinic-workload", from, to,
                 (f, t) => cx.Q.ClinicWorkloadAsync(cx.Tenant, f, t, ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<ClinicWorkloadReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/utilization", (string? dimension, string? from, string? to, ReportContext cx, CancellationToken ct) =>
         {
@@ -47,28 +52,38 @@ public static class ReportsEndpoints
                     detail: "dimension must be one of provider|drug|lab|radiology.", type: "urn:hbmp:validation"));
             return cx.RunOrQueue(ReportingPolicies.ReadOperational, "utilization", from, to,
                 (f, t) => cx.Q.UtilizationAsync(cx.Tenant, dim, f, t, ct: ct), ct);
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<UtilizationReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/no-show", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "no-show", from, to,
                 (f, t) => cx.Q.NoShowAsync(cx.Tenant, f, t, ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<NoShowReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/rejected-requests", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "rejected-requests", from, to,
                 (f, t) => cx.Q.RejectedRequestsAsync(cx.Tenant, f, t, ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<RejectedRequestsReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         // ── Clinical-coded zone (NOT finance) ─────────────────────────────────────────────────────────────
         v1.MapGet("/top-diagnoses", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadClinical, "top-diagnoses", from, to,
                 (f, t) => cx.Q.TopCodesAsync(cx.Tenant, CodeKind.Diagnosis, f, t, ct: ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<TopCodesReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/top-medications", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadClinical, "top-medications", from, to,
                 (f, t) => cx.Q.TopCodesAsync(cx.Tenant, CodeKind.Medication, f, t, ct: ct), ct))
-            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<TopCodesReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         // ── Financial zone ──────────────────────────────────────────────────────────────────────────────
         v1.MapGet("/financial-summary", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
@@ -85,7 +100,9 @@ public static class ReportsEndpoints
             if (job is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             JsonElement? result = job.ResultJson is null ? null : JsonSerializer.Deserialize<JsonElement>(job.ResultJson);
             return Results.Ok(new { job.JobId, job.Report, job.Status, job.ProgressPercent, result });
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<FinancialSummaryReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         // ── Audited export (CSV) ─────────────────────────────────────────────────────────────────────────
         v1.MapGet("/{report}/export", async (string report, string? from, string? to, ReportContext cx, CancellationToken ct) =>
@@ -130,7 +147,8 @@ public static class ReportsEndpoints
             var (f, t) = Api.Period.Parse(from, to, cx.Calendar);
             var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, ct);
             return Results.Ok(payload);
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<ExecutiveDashboard>();
 
         // ── System projection seam ───────────────────────────────────────────────────────────────────────
         v1.MapPost("/projections", async (ProjectionRequest req, ReportContext cx, CancellationToken ct) =>

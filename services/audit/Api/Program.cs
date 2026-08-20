@@ -3,6 +3,7 @@ using Mersal.Audit.Domain;
 using Mersal.Audit.Infrastructure;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
@@ -16,9 +17,22 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 // --- Audit infrastructure: DB store, WORM, RabbitMQ ingest, periodic verifier. ---
 builder.Services.AddAuditInfrastructure(builder.Configuration);
 
-// The service emits its own audit events (e.g. audit.read) via the client; in dev this uses the
-// in-memory outbox until libs/events (0.5) provides the durable DB-backed outbox.
-builder.Services.AddHbmpAuditClient("audit-service", useInMemoryOutbox: true);
+// The service emits its own audit events (e.g. audit.read) via the client. That emit used to land in the
+// in-memory outbox — a ConcurrentDictionary nothing drains — on a rationale ("until libs/events provides
+// the durable outbox") that expired when 16.2 shipped it. The flag was not environment-gated, so in
+// production too every record of who read the audit log was held in process memory and dropped on the
+// next restart. 19-audit-strategy makes audit reads auditable; a buffer that forgets is not an audit.
+//
+// The sink is the broker-direct one rather than a transactional outbox because audit.read accompanies a
+// READ: there is no business transaction for it to be atomic with, and this service's least-privilege
+// `hbmp_audit` role deliberately cannot run the DDL an outbox table would need. Publishing to
+// audit.events puts the event through the same single write path as every other service's — its own
+// consumer ingests it, hash-chained and WORM-mirrored. DirectAuditSink fails closed: a publish failure
+// logs Critical and rethrows, so a read of the audit log fails rather than completing unaudited.
+builder.Services.AddHbmpAuditClient("audit-service");
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpEventPublisher();
+builder.Services.AddHbmpDirectAuditSink();
 
 // --- Observability: OpenTelemetry traces → Tempo (OTLP), correlation shared with audit. ---
 builder.Services.AddOpenTelemetry()

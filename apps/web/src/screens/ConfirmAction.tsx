@@ -36,6 +36,16 @@ export interface ConfirmActionProps {
   onConfirm: () => void | Promise<void>;
   /** Renders the confirm button in a destructive tone. */
   destructive?: boolean;
+  /**
+   * The line under the title, saying what KIND of consequence this is. Defaults to "This cannot be undone."
+   *
+   * Overridable because irreversibility is one reason to confirm and not the only one. Revoking a clinician's
+   * last clinic is reversible in the data and immediate in the world — they drop off the booking list the
+   * moment it is done. That deserves a confirmation, and it does not deserve a dialog claiming an undo exists
+   * when it does not, or claiming none exists when one does. Either way the sentence has to be true, because
+   * a dialog that overstates on the reversible cases is one nobody reads on the irreversible ones.
+   */
+  description?: Localized;
 }
 
 const S = {
@@ -46,7 +56,7 @@ const S = {
 } satisfies Record<string, Localized>;
 
 export function ConfirmAction({
-  open, onOpenChange, title, body, requireText, confirmLabel, onConfirm, destructive = true,
+  open, onOpenChange, title, body, requireText, confirmLabel, onConfirm, destructive = true, description,
 }: ConfirmActionProps) {
   const { lang } = useTheme();
   const t = (l: Localized) => (lang === "ar" ? l.ar : l.en);
@@ -74,10 +84,18 @@ export function ConfirmAction({
       open={open}
       onOpenChange={(next) => { if (!next) { setTyped(""); setTouched(false); } onOpenChange(next); }}
       title={t(title)}
-      description={t(S.irreversible)}
+      description={t(description ?? S.irreversible)}
       footer={
         <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t(S.cancel)}</Button>
+          {/*
+            The dismiss takes its weight from what it sits beside. Against an ordinary commit it is `ghost`,
+            so the commit dominates. Against a DESTRUCTIVE one it is `secondary`: backing out is the
+            recommended action there, and it must not be the lighter of the two — which is the same reasoning
+            that made three cancellation dialogs in this product relabel their dismiss to "Keep it".
+          */}
+          <Button variant={destructive ? "secondary" : "ghost"} onClick={() => onOpenChange(false)}>
+            {t(S.cancel)}
+          </Button>
           <Button
             variant={destructive ? "danger" : "primary"}
             onClick={() => void confirm()}

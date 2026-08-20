@@ -30,7 +30,30 @@ public static class DependencyInjection
                 o.Password.RequireUppercase = true;
                 o.Password.RequireLowercase = true;
                 o.Password.RequireDigit = true;
-                o.User.RequireUniqueEmail = false; // username is the primary handle; email optional for staff
+                // ========================================================================================
+                // 28.8 — UNIQUENESS IS ENFORCED, BUT NOT THROUGH THIS FLAG.
+                // ========================================================================================
+                // An email address is now a SIGN-IN CREDENTIAL (`SessionApiEndpoints.ResolveLoginAsync`), so
+                // it must identify exactly one account: two staff sharing a departmental mailbox would mean
+                // `FindByEmailAsync` picking one of them, and which one it picked would decide whose
+                // password was checked. So uniqueness is enforced in two places that can actually hold it:
+                //
+                //   * a UNIQUE INDEX on `normalized_email` (migration 0035) — the only layer without a race,
+                //     since Identity's own check is a read-then-write and two administrators creating the
+                //     same address at the same moment would both pass it;
+                //   * an explicit `FindByEmailAsync` check in the create and update endpoints, which exists
+                //     to produce a 409 with a sentence in it rather than a constraint violation.
+                //
+                // ========================================================================================
+                // WHY THE FLAG ITSELF STAYS OFF
+                // ========================================================================================
+                // `RequireUniqueEmail` conflates UNIQUE with REQUIRED: with it on, `UserValidator` rejects
+                // any user whose email is empty — on every `UpdateAsync`, not just creation. Accounts that
+                // predate 28.8 legitimately have none (service accounts, seeded fixtures), so turning it on
+                // made correcting such an account's DISPLAY NAME fail with "Email is invalid", and made
+                // clearing an address impossible. Requiredness belongs at the create endpoint, where it is
+                // checked explicitly and the message says what is actually wrong.
+                o.User.RequireUniqueEmail = false;
                 o.Lockout.MaxFailedAccessAttempts = 5;
                 o.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
                 o.SignIn.RequireConfirmedAccount = false;

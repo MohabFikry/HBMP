@@ -36,9 +36,25 @@ public static class Worklist
                 return Results.Problem(statusCode: 422, title: "requesting-provider-required",
                     detail: "A non-manual authorization must name the requesting provider.", type: "urn:hbmp:validation");
 
+            // The replay is bound to the BODY, the same rule the decide path applies (migration 0011). A key
+            // reused for a different beneficiary or a different set of service codes would otherwise be
+            // answered with the first authorization — telling the caller their second request had been
+            // raised when nothing had been raised at all, and leaving the real one unmade.
+            var requestHash = IdempotencyKeyRules.Hash(
+                req.Source.ToString(), req.SourceRef ?? "", req.BeneficiaryId.ToString(),
+                req.RequestingProviderId?.ToString() ?? "",
+                string.Join(',', (req.ServiceCodes ?? []).OrderBy(c => c, StringComparer.Ordinal)),
+                req.RequestedScope ?? "", req.Priority.ToString());
+
             var prior = await db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct);
             if (prior is not null)
             {
+                if (!IdempotencyKeyRules.Matches(prior.RequestHash, requestHash))
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different authorization. Answering it with "
+                              + "the earlier one would report a request that was never raised.");
+
                 var existing = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(a => a.AuthorizationId == prior.AuthorizationId, ct);
                 return existing is null ? Results.NoContent() : Results.Ok(AuthorizationStateView.From(existing));
             }
@@ -79,6 +95,7 @@ public static class Worklist
             {
                 IdempotencyKey = idem, Operation = "create-authorization",
                 AuthorizationId = auth.AuthorizationId, StatusCode = 201, CreatedAt = now,
+                RequestHash = requestHash,
             });
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("AuthSubmitted", "approvals.events",
@@ -96,7 +113,6 @@ public static class Worklist
                     // the two facts an approvals dashboard exists to show.
                     priority = auth.Priority.ToString(), slaDueAt = auth.SlaDueAt,
                 }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -105,9 +121,11 @@ public static class Worklist
                 DecisionOutcome = auth.Status.ToString(),
                 AfterState = $"{{\"authNo\":\"{auth.AuthNo}\",\"status\":\"{auth.Status}\",\"source\":\"{auth.Source}\"}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"))
+        .Produces<AuthorizationStateView>();
 
         // ---- Worklist inbox (min-necessary projection). ----
         //
@@ -143,7 +161,8 @@ public static class Worklist
                 : q.OrderBy(a => a.SlaDueAt ?? DateTimeOffset.MaxValue).ThenBy(a => a.SubmittedAt);
             var rows = await ordered.Take(200).ToListAsync(ct);
             return Results.Ok(rows.Select(a => WorklistItemView.From(a, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<WorklistItemView>>();
 
         // ---- What was actually delivered against this authorization (ADR-0034). ----
         // Empty for a review request, which is the honest answer: nothing has been delivered against a
@@ -162,7 +181,8 @@ public static class Worklist
                 .OrderBy(i => i.FulfilledAt)
                 .ToListAsync(ct);
             return Results.Ok(items.Select(AuthorizationItemView.From));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<AuthorizationItemView>>();
 
         // ---- Worklist detail (min-necessary — still NO clinical payload; that is /review only). ----
         v1.MapGet("/{id:guid}", async (
@@ -173,7 +193,8 @@ public static class Worklist
 
             var a = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(x => x.AuthorizationId == id, ct);
             return a is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(WorklistItemView.From(a, clock.GetUtcNow()));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<WorklistItemView>();
 
         // ---- Assign: pick up a request (Submitted → UnderReview), start the SLA timer. ----
         v1.MapPost("/{id:guid}/assign", async (
@@ -225,7 +246,6 @@ public static class Worklist
                     // re-deriving it against a rule set that may since have moved on.
                     queue = auth.RoutedQueue, routedByRule = auth.RoutedByRule,
                 }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -233,8 +253,10 @@ public static class Worklist
                 ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
                 BeforeState = before.ToString(), AfterState = auth.Status.ToString(), DecisionOutcome = "UnderReview",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"))
+        .Produces<AuthorizationStateView>();
     }
 }

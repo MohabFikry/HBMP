@@ -24,7 +24,7 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | Service | Responsibility | Owned data (schema) | Key APIs | Publishes | Consumes |
 |---|---|---|---|---|---|
 | **api-gateway** | Edge routing, authN validation, rate limit, request aggregation entry | none (config) | all `/api/v1/*` proxied | — | — |
-| **identity/auth** | Keycloak (OIDC) integration, RBAC, token/scope issuance, **user↔branch assignment + active-branch context** *(Phase 14)* | `identity` | `/users`, `/roles`, token introspection, `/users/{id}/branch-assignments`, `/me/branches`, `/me/active-branch` | `UserProvisioned`, `RoleAssigned`, `UserBranchAssigned`, `UserBranchRevoked`, `ActiveBranchSwitched`, `BranchScopeDenied` | `ProviderOnboarded`, `BranchCreated`, `BranchStatusChanged` |
+| **identity-service** *(Phase 17 — replaced Keycloak, ADR-0015)* | The in-app issuer: ASP.NET Core Identity + OpenIddict (OIDC/OAuth2, MFA TOTP), RBAC, token/scope issuance, **user↔branch assignment + active-branch context** *(Phase 14)* | `identity` | `/users`, `/roles`, token introspection, `/users/{id}/branch-assignments`, `/me/branches`, `/me/active-branch` | `UserProvisioned`, `RoleAssigned`, `UserBranchAssigned`, `UserBranchRevoked`, `ActiveBranchSwitched`, `BranchScopeDenied` | `ProviderOnboarded`, `BranchCreated`, `BranchStatusChanged` |
 | **patient-service** | Beneficiary master, identifiers, contacts, family | `patient` | `/beneficiaries`, `/beneficiaries/{id}/identifiers` | `BeneficiaryRegistered`, `BeneficiaryStatusChanged` | `DocumentAttached` |
 | **policy-service** | Policies, coverage, limits, benefit categories | `policy` | `/policies`, `/coverages` | `CoverageActivated`, `CoverageLimitChanged` | `BeneficiaryStatusChanged` |
 | **eligibility-service** | Compute + cache eligibility snapshots | `eligibility` | `/eligibility/check` | `EligibilityRecomputed` | `CoverageActivated`, `CoverageLimitChanged`, `OrderLinesConsumed`, `RxLinesDispensed` |
@@ -41,6 +41,11 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | **document-service** | Document metadata + MinIO object-storage orchestration | `document` | `/documents`, `/documents/{id}/content` | `DocumentAttached` | — |
 | **profile-service** *(Phase 20)* | The unified patient profile ([39](39-patient-profile.md)) — **composition only; owns NO data and has no schema**. The platform's ONLY beneficiary aggregation path: case-service's 360 and the call-centre's member 360 both delegate here (20.2). Fans out to ~8 services under the CALLER'S own token and projects the result to the design-39 §4 role × section matrix | **none** | `/patients/{id}/profile`, `/patients/{id}/profile/summary`, `/patients/{id}/photo` | `ProfileViewed`, `ProfileSummaryExported`, `IdentityPhotoViewed` *(audit stream)* | — |
 | **callcentre-service** *(Phase 15; call history added Phase 20.3b)* | Contact-centre interactions, caller verification, member 360, call actions — plus the member's **call history** projected Full / Operational / Meta with a server-generated clipboard block | `callcentre` | `/call-interactions`, `/call-centre/*`, `/beneficiaries/{id}/call-interactions`, `.../copy` | `CallInteractionOpened`, `CallerVerificationRecorded`, `CallInteractionClosed`, `CallSummaryCopied` *(audit stream)* | — |
+| **masterdata-service** *(Phase 26)* | The reference catalogue every clinical screen resolves a code against: ICD-10, ATC/drug list, CPT, allergens, examination types and their `sensitivity_level`. Read-mostly, versioned, and the single answer to "what does this code mean" | `masterdata` | `/search`, `/drugs`, `/cpt-codes`, `/icd`, `/allergens`, `/versions` | `MasterDataVersionPublished` | — |
+| **finance-service** *(Phase 11)* | Utilization facts, provider settlements priced from the contract book, financial summaries and audited exports. Owns no clinical data: a settlement line is a service code, a quantity and an amount | `finance` | `/finance/utilization`, `/finance/settlements`, `/finance/summaries`, `/finance/exports` | `SettlementGenerated`, `SettlementIssued` | `OrderLineConsumed`, `RxDispensed`, `ClaimSettled` |
+| **admin-service** *(Phase 8b)* | Platform administration that is not identity: effective role bindings, segregation-of-duties rules, access-review campaigns, break-glass grants, tenant and programme configuration | `admin` | `/admin/roles`, `/admin/sod`, `/admin/access-reviews`, `/admin/break-glass`, `/admin/programmes` | `RoleBindingChanged`, `BreakGlassGranted`, `AccessReviewCompleted` | `UserProvisioned` |
+| **case-service** *(Phase 20)* | Case management for beneficiaries needing coordination — cases, tasks, escalations and their timeline. Coordination content, deliberately NOT clinical content | `case` | `/cases`, `/cases/{id}/tasks`, `/cases/{id}/escalations` | `CaseOpened`, `CaseEscalated`, `CaseClosed` | `BeneficiaryRegistered`, `AuthorizationRejected` |
+| **interop-service** *(Phase 13.2)* | The outward edge: FHIR R4-aligned exchange with external registries and partner systems, and the inbound mapping that keeps their vocabularies out of the core | `interop` | `/interop/fhir/*`, `/interop/inbound` | `ExternalRecordLinked` | `BeneficiaryRegistered`, `EncounterClosed` |
 
 Supporting infra: **Event Bus** (NATS JetStream domain events), **Object Storage** (MinIO, S3-compatible, WORM), **Relational DB** (self-hosted PostgreSQL, Patroni HA), **Search Engine** (OpenSearch), **Caching** (Valkey), **Message Queue** (RabbitMQ durable/quorum queues for commands/outbox). Secrets/keys in **OpenBao**; orchestration on **k3s** (Docker Compose at Tier 1).
 
@@ -138,7 +143,8 @@ C4Context
 
     System(hbmp, "HBMP Platform", "Benefit administration + EMR for refugee beneficiaries")
 
-    System_Ext(entra, "Keycloak", "Identity provider - OIDC/OAuth2 + MFA")
+    %% The issuer is IN-APP since Phase 17 (ADR-0015) — identity-service, not an external IdP. Kept in the
+    %% diagram as a component of the platform rather than a System_Ext, which is what it stopped being.
     System_Ext(sms, "SMS/Email Gateway", "Notification delivery")
     System_Ext(unhcr, "External Registries", "UNHCR / refugee identity references")
 
@@ -218,7 +224,7 @@ flowchart TB
 
 ## 5. API Gateway & BFF Pattern
 
-- **Kong Gateway (OSS)** is the single ingress (behind Traefik/NGINX Ingress + ModSecurity WAF). It validates JWTs from Keycloak, enforces **rate limits/quotas per consumer (provider/tenant)**, injects correlation IDs, and applies request/response policies (header stripping, PHI redaction on error paths).
+- **Kong Gateway (OSS)** is the single ingress (behind Traefik/NGINX Ingress + ModSecurity WAF). It validates JWTs from identity-service (the in-app issuer; Keycloak was retired in Phase 17, ADR-0015), enforces **rate limits/quotas per consumer (provider/tenant)**, injects correlation IDs, and applies request/response policies (header stripping, PHI redaction on error paths).
 - **BFF layer** — two backends-for-frontends (Web BFF for the staff portal, Mobile BFF for field case workers). BFFs **aggregate** cross-service reads (e.g., a beneficiary "360" view combining patient + coverage + eligibility + recent encounters) so clients make one call. BFFs never own domain data; they orchestrate and shape responses.
 - Downstream service-to-service calls stay **inside the cluster mesh** (Linkerd mTLS), never via the public gateway.
 
@@ -390,7 +396,7 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
 
 - **Tenant model**: single logical tenant (Mersal) with **provider-scoped isolation** as the primary boundary — provider staff see only their own contracts, fulfillments, and dispensing.
 - Enforced in three layers:
-  1. **Keycloak** claims carry `provider_id` for provider users.
+  1. **identity-service** mints claims carrying `provider_id` for provider users.
   2. **Kong** validates scope and injects the tenant/provider context header.
   3. **PostgreSQL RLS** policies filter rows by `provider_id`/case-worker assignment (see [18-security-model.md](18-security-model.md)).
 - Beneficiary clinical data is **not** provider-partitioned (a refugee may be seen by many providers); access is governed by role + care-relationship, audited on every read.

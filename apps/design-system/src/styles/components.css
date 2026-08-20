@@ -87,6 +87,10 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 }
 .mrs-btn.mrs-ghost:hover:not(:disabled) {
   background: var(--accent-tint);
+  /* --accent-PRESS, for the reason spelled out at .mrs-navi[aria-current] below: --accent is 5.2:1 on WHITE
+     and 4.44:1 on this tint, so the moment hover paints the tint the label drops under AA. The active state
+     was fixed when the browser contrast job first ran; the HOVER states it never samples were not. */
+  color: var(--accent-press);
 }
 .mrs-btn.mrs-danger {
   color: var(--st-bad-fg);
@@ -116,10 +120,6 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   background: var(--st-bad-bg);
   border-color: transparent;
   box-shadow: none;
-}
-.mrs-btn.mrs-warn {
-  color: var(--st-warn-fg);
-  border-color: var(--st-warn-fg);
 }
 .mrs-btn:disabled,
 .mrs-btn[aria-disabled="true"] {
@@ -154,7 +154,7 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 }
 .mrs-iconbtn:hover {
   background: var(--accent-tint);
-  color: var(--accent);
+  color: var(--accent-press);   /* 6.72:1 on the tint; --accent is 4.44:1 there — see .mrs-btn.mrs-ghost:hover */
 }
 .mrs-iconbtn svg {
   width: 20px;
@@ -503,14 +503,23 @@ html[dir="rtl"] .mrs-search input {
   padding: var(--sp5) 0;
 }
 
-/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look. */
+/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look.
+ *
+ * The track radius is `--r-lg`, NOT `--r-pill`, and that is the one place this variant deliberately parts
+ * company with `.mrs-seg`. `.mrs-seg` is a handful of short filter labels that stay on one line, so a 999px
+ * radius always resolves to a stadium. A tab bar carries as many labels as the screen has sections and sets
+ * `flex-wrap: wrap` to cope, so its height is not knowable here: the patient profile's seven tabs wrap below
+ * 688px (English) / 780px (Arabic), and at 360px the track is three rows and 156px tall, where a 999px
+ * radius clamps to half the height and draws the whole bar as a lozenge that curves through the first and
+ * last rows. `--r-lg` is correct at every row count. A consumer that knows its bar is one row can restore
+ * the capsule inside its own width query — see `.profile-tabs` in the web app's app.css. */
 .mrs-tabs--pill {
   border-bottom: 0;
   display: inline-flex;
   flex-wrap: wrap;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-lg);
   padding: 3px;
   gap: 3px;
 }
@@ -637,7 +646,7 @@ html[dir="rtl"] .mrs-search input {
   border-collapse: separate;
   border-spacing: 0;
 }
-.mrs-wl th {
+.mrs-wl thead th {
   position: sticky;
   top: 0;
   background: var(--surface-2);
@@ -675,7 +684,7 @@ html[dir="rtl"] .mrs-search input {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.mrs-wl th button.mrs-sort {
+.mrs-wl thead th button.mrs-sort {
   all: unset;
   cursor: pointer;
   display: inline-flex;
@@ -684,15 +693,15 @@ html[dir="rtl"] .mrs-search input {
 }
 /* `all: unset` above strips the focus ring too, so a keyboard user tabbing across the header had no idea
    where they were. Put it back explicitly. */
-.mrs-wl th button.mrs-sort:focus-visible {
+.mrs-wl thead th button.mrs-sort:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
 /* The chevron points the way the column is actually sorted, so direction is legible without reading
    aria-sort — and turns rather than vanishing, so the control never looks disabled. */
-.mrs-wl th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
-.mrs-wl th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
+.mrs-wl thead th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
+.mrs-wl thead th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
 
 /* ---------- Table toolbar (search + filter chips) ---------- */
 .mrs-toolbar {
@@ -857,14 +866,28 @@ html[dir="rtl"] .mrs-search input {
 .mrs-toolbar-extra .mrs-field .mrs-control {
   margin-top: 6px;
 }
-.mrs-wl td {
+/*
+ * A ROW HEADER is a cell to look at and only a different thing to LISTEN to.
+ *
+ * `Column.rowHeader` renders `<th scope="row">` so a screen reader announces whose row is being read with
+ * every cell across it. That `th` is styled here, WITH the `td`s, rather than being un-styled afterwards:
+ * the header rule above is scoped to `thead`, so nothing has to be undone and the two kinds of cell cannot
+ * drift apart. Scoping it that way is what the rule always meant — a sticky, uppercase, 11.5px micro-label
+ * on --surface-2 describes a column heading and was never a claim about `th` in general.
+ */
+.mrs-wl td,
+.mrs-wl tbody th {
   padding: var(--tbl-cell-pad-y) var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  font-weight: inherit;
+  text-align: start;
 }
-.mrs-wl tbody tr:last-child td {
+.mrs-wl tbody tr:last-child td,
+.mrs-wl tbody tr:last-child th {
   border-bottom: 0;
 }
+.mrs-wl.mrs-compact tbody th,
 .mrs-wl.mrs-compact td {
   padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x);
 }
@@ -943,7 +966,9 @@ nav.mrs-rail {
 }
 .mrs-navi:hover {
   background: var(--accent-tint);
-  color: var(--accent);
+  /* The active row below had this fixed and its hover twin did not — so pointing at the row you are already
+     on was AA, and pointing at any OTHER row was 4.44:1. */
+  color: var(--accent-press);
 }
 .mrs-navi[aria-current="page"] {
   background: var(--accent-tint);
@@ -976,9 +1001,18 @@ nav.mrs-rail {
 /* ---------- KPI card ---------- */
 /* A row of KPI cards that is also a definition list. `dd` carries a browser default margin-inline-start of
    40px, which would indent every value away from its own label. */
+/* ONE grid for both KPI layouts. `.mrs-kpilist` is the definition-list flavour; `.mrs-kpigrid` is the same
+   track sizing for screens that lay `KpiCard`s out directly. They were two: this rule at minmax(180px) and a
+   hand-written `style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}` in ClaimsPortal, and
+   the inline one was narrow enough that seven tiles of money clipped their own values.
+
+   200px, not 180: the value is set at up to 34px, and a tile has 2x --sp5 of padding, so 180px leaves ~140px
+   of text room — under what "EGP 0.00" needs at that size, let alone a real figure. At 200 the row wraps one
+   tile sooner on a mid-width screen, which is the correct trade against a clipped number. */
+.mrs-kpigrid,
 .mrs-kpilist {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--sp4);
   margin: 0;
 }
@@ -990,6 +1024,23 @@ nav.mrs-rail {
   padding: var(--sp5);
   position: relative;
   overflow: hidden;
+  /* Label / value / optional delta. The value row takes the slack so it can be pinned to the BOTTOM of it:
+     grid stretches every tile in a row to the tallest, and without this the value sits directly under its own
+     label, so a tile whose label wraps to two lines ("OCR AUTO-MATCH", "RECOVERY OUTSTANDING") drops its
+     number a line below its neighbours' and the row of figures stops being a row. Bottom-aligning costs
+     nothing when every label is one line — the tiles are the same height either way. */
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  /* Makes the tile itself the reference for the `cqi` sizing on the value below. */
+  container-type: inline-size;
+  /* A ceiling on the TILE, not on the grid track. `auto-fit` splits the row between however many tiles there
+     are, which is right for four and absurd for two — a member's utilization panel has exactly two counts and
+     they stretched to 718px each to hold "3" and "12".
+     Capping the TRACK instead was tried and is worse: it quantises the row, and at 22rem four tiles no longer
+     fit on one line (4x352 + 3x16 > 1452) so the cohort panel broke to 3 + 1. Capping the tile leaves every
+     track exactly where it was — four still fill their row, seven still fall 6 + 1 — and only stops a short
+     row from inflating. */
+  max-inline-size: 22rem;
 }
 .mrs-kpi::before {
   content: "";
@@ -1009,7 +1060,9 @@ nav.mrs-rail {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   display: flex;
-  align-items: center;
+  /* `start`, not `center`: a two-line label centred against a one-line icon pushes both off the tile's top
+     edge and reads as mis-set. The icon's own `flex: none` keeps it square. */
+  align-items: start;
   gap: 6px;
 }
 /*
@@ -1069,11 +1122,26 @@ nav.mrs-rail {
 }
 
 .mrs-kpi .mrs-kpi-val {
-  font-size: 34px;
+  /* 34px is the 0B §10b headline size and stays the size on any tile wide enough to hold it. It was a FIXED
+     34px, which is fine for "23" and not for "EGP 483,000.00": at seven tiles across a claims dashboard the
+     number was wider than the tile and `overflow: hidden` above quietly cut it in half — a truncated figure
+     that still looks like a figure, which is the worst way for a number to be wrong.
+     9cqi is 9% of the TILE's width, so the type shrinks with the TILE rather than with the viewport. The
+     factor is set from the worst realistic string rather than picked: a formatted amount like
+     "EGP 483,000.00" is ~14 characters, and tabular digits run about 0.6em, so it needs ~8.4em — which fits
+     a tile's inner width at 11cqi and does not at 16. `cqi` resolves against the container's CONTENT box,
+     so the tile's 2x --sp5 padding is already discounted: a 234px tile lands on the 22px floor and a 351px
+     one is back at the full 34px design size.
+     Wrapping is deliberately left ENABLED as the backstop: if a figure ever does exceed its tile, breaking to
+     a second line is a legible answer, where `nowrap` would hand it back to `overflow: hidden` above and
+     truncate it into a different, plausible-looking number. */
+  font-size: clamp(22px, 11cqi, 34px);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin-top: 8px;
   font-variant-numeric: tabular-nums;
+  /* Sits at the bottom of the slack row — see the grid note on `.mrs-kpi`. */
+  align-self: end;
 }
 .mrs-kpi .mrs-kpi-delta {
   font-size: 12.5px;
@@ -1188,10 +1256,16 @@ nav.mrs-rail {
 .mrs-modal > h2 {
   padding-inline-end: var(--sp10);
 }
+/*
+ * The card's own padding is 20px against the frame's 24px. It was 16px, which is the one measurement on a
+ * modal that a reader perceives as a MISTAKE rather than as a choice: content sat closer to the edge of the
+ * card it is on than the card sits to the edge of the dialog, so the inner box looked overfull while the
+ * outer one looked roomy. Inset content should be no tighter than the thing insetting it.
+ */
 .mrs-modal .mrs-modal-body {
   background: var(--surface-1);
   border-radius: var(--r-md);
-  padding: var(--sp4);
+  padding: var(--sp5);
   margin-top: var(--sp3);
 }
 /*
@@ -1275,91 +1349,33 @@ nav.mrs-rail {
   border-color: var(--st-warn-fg);
 }
 
-/* ── Select (listbox) ────────────────────────────────────────────────────────
-   A native <select> draws its option list in the OS, not the page: the popup arrived system-blue with square
-   corners and ignored every rule we wrote. Select renders the list itself, so it can carry the Mersal
-   surface, radius, elevation and accent — and so the active row is --accent-tint instead of Highlight blue. */
-.mrs-select {
-  position: relative;
-  display: inline-flex;
-}
-.mrs-select-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp2);
-  inline-size: 100%;
-  min-block-size: 40px;
-  padding-inline: var(--sp3);
-  border: 1px solid var(--border-input, var(--border));
-  border-radius: var(--r-md);
-  background: var(--surface-1);
-  color: var(--text-1);
-  font: inherit;
-  font-weight: 500;
-  text-align: start;
-  cursor: pointer;
-}
-.mrs-select--pill .mrs-select-trigger {
-  border-radius: var(--r-pill);
-  padding-inline: var(--sp4) var(--sp3);
-}
-.mrs-select-trigger:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.mrs-select-trigger:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-.mrs-select-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-/* The leading icon lives INSIDE the control so the pair reads as one object. Sized against the 40px trigger
-   rather than left at the 18px an app-bar glyph happened to be. */
-.mrs-select-trigger > svg:first-child {
-  inline-size: 20px;
-  block-size: 20px;
-  flex: none;
-  color: var(--accent);
-}
-.mrs-select-value {
-  flex: 1 1 auto;
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mrs-select-value.is-placeholder {
-  color: var(--text-2);
-  font-weight: 400;
-}
-.mrs-select-hint {
-  color: var(--text-2);
-  font-weight: 400;
-}
-.mrs-select-chevron {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: none;
-  color: var(--text-2);
-  transition: transform 120ms ease;
-}
-.mrs-select-trigger[aria-expanded="true"] .mrs-select-chevron {
-  transform: rotate(180deg);
-}
-@media (prefers-reduced-motion: reduce) {
-  .mrs-select-chevron {
-    transition: none;
-  }
-}
-
-.mrs-select-list {
-  position: absolute;
-  z-index: 40;
-  inset-block-start: calc(100% + var(--sp1));
-  inset-inline-start: 0;
-  min-inline-size: 100%;
-  max-block-size: var(--scroll-picker);
+/*
+ * The surface shared by every anchored popup. One flavour today — the combobox's option list — and written
+ * as a shared rule because the positioning contract below is generic and the next popup should inherit it
+ * rather than restate it.
+ *
+ * <b>What is NOT here.</b> `position`, `top`/`bottom`, `left`/`right` and the inline size arrive as inline
+ * styles from `useAnchoredPopup`, because they are measurements of where the control happens to be on screen
+ * rather than design decisions. Everything a designer would want to change is in this rule.
+ *
+ * This began as fourteen declarations copied verbatim onto two lists. One of those lists has since gone with
+ * the select-only control it belonged to; the rule stays shared for the specific reason it was extracted —
+ * the popup is positioned by JS, and two copies of a positioning contract is two places for the anchoring to
+ * drift apart.
+ *
+ * `pointer-events: auto` is NOT here either, and that one is worth knowing about: Radix's modal dialog sets
+ * `pointer-events: none` on `<body>` while it is open, and a popup portalled to the body inherits it and
+ * swallows every click on an option. It is declared inline by `useAnchoredPopup` so the guarantee cannot be
+ * separated from the portalling that needs it.
+ *
+ * `--popup-avail` is the room actually left between the control and the edge of the viewport, published by
+ * the measurement. `min()` means the design token still decides the popup's normal height and the
+ * measurement can only ever make it shorter — the alternative, writing `max-block-size` from JS, would have
+ * put a layout constant in a component file where nobody would look for it.
+ */
+.mrs-popup {
+  z-index: 85;                /* above `.mrs-overlay` (80), below `.mrs-toastwrap` (90) */
+  max-block-size: min(var(--scroll-picker), var(--popup-avail, 100dvh));
   overflow-y: auto;
   margin: 0;
   padding: var(--sp1);
@@ -1369,43 +1385,15 @@ nav.mrs-rail {
   border-radius: var(--r-md);
   box-shadow: var(--elev-2);
 }
-.mrs-select-option {
-  display: flex;
-  align-items: center;
-  gap: var(--sp2);
-  min-block-size: 40px;
-  padding-inline: var(--sp2);
-  border-radius: var(--r-sm);
-  color: var(--text-1);
-  cursor: pointer;
-  white-space: nowrap;
-}
-/* Keyboard-active and pointer-hover are the same visual state, and it is a tint of OUR accent. */
-.mrs-select-option.is-active {
-  background: var(--accent-tint);
-}
-.mrs-select-option[aria-selected="true"] {
-  font-weight: 600;
-}
-/* Selection is carried by a check, not by colour alone (WCAG 1.4.1 — the active tint is the same hue). */
-.mrs-select-check {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: none;
-  color: var(--accent);
-  visibility: hidden;
-}
-.mrs-select-option[aria-selected="true"] .mrs-select-check {
-  visibility: visible;
-}
-.mrs-select-option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* ── Combobox (editable, filters as you type) ──────────────────────────────────────────────────────────────
-   Deliberately identical in silhouette to `Select`: the two sit side by side in the same form, and a control
-   that is a text box only because its list is long should not also LOOK like a different kind of field. */
+   THE picker. A native <select> draws its option list in the OS, not the page: the popup arrives system-blue
+   with square corners, ignores every rule we write, and ignores `data-theme` and the app's RTL treatment too.
+   This renders the list itself, so it carries the Mersal surface, radius, elevation and accent — and so the
+   active row is --accent-tint rather than Highlight blue.
+
+   It is deliberately a text box that does not LOOK like a different kind of field from the inputs beside it:
+   it is editable because its list can be long, not because it holds free text — see the component's header
+   on why a half-typed query never survives blur. */
 .mrs-combo {
   position: relative;
   inline-size: 100%;
@@ -1429,6 +1417,16 @@ nav.mrs-rail {
   font-size: 1.05rem;
   line-height: 1;
 }
+/* An icon in this slot is sized against the control, not left at whatever an app-bar glyph happened to be —
+   the same treatment and reasoning the select-only control used, so the branch switcher looks identical
+   either side of the conversion. Emoji `leading` (a flag) is unaffected: it is text, and keeps the
+   font-size above. */
+.mrs-combo-leading > svg {
+  display: block;
+  inline-size: 20px;
+  block-size: 20px;
+  color: var(--accent);
+}
 .mrs-combo-control > .mrs-combo-leading {
   position: absolute;
   inset-inline-start: var(--sp3);
@@ -1446,24 +1444,23 @@ nav.mrs-rail {
   pointer-events: none;
   transition: transform 120ms ease;
 }
+/* The app-bar silhouette, with the asymmetric inline padding it needs: the extra room goes on the leading
+   edge, where the pill's curve eats into the text, and the trailing edge already reserves space for the
+   chevron. */
+.mrs-combo--pill .mrs-combo-input {
+  border-radius: var(--r-pill);
+  padding-inline-start: var(--sp4);
+}
+.mrs-combo--pill .mrs-combo-control:has(> .mrs-combo-leading) .mrs-combo-input {
+  padding-inline-start: calc(var(--sp4) + 1.5rem);
+}
 .mrs-combo-input[aria-expanded="true"] ~ .mrs-combo-chevron { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .mrs-combo-chevron { transition: none; } }
 
+/* Surface, height and stacking come from `.mrs-popup`, which this element also carries. Kept as a hook so
+   the option rules below have something to hang off and so a screen can target one flavour of popup. */
 .mrs-combo-list {
-  position: absolute;
-  z-index: 40;
-  inset-block-start: calc(100% + var(--sp1));
-  inset-inline-start: 0;
   min-inline-size: 100%;
-  max-block-size: var(--scroll-picker);
-  overflow-y: auto;
-  margin: 0;
-  padding: var(--sp1);
-  list-style: none;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--elev-2);
 }
 .mrs-combo-option {
   display: flex;
@@ -1565,10 +1562,19 @@ nav.mrs-rail {
   font-weight: 600;
   white-space: nowrap;
 }
+/* The picker sizes to its content in this row, not to the pager. `.mrs-combo` is `inline-size: 100%` — right
+   for a field in a form grid, wrong for a control sitting in a flex row beside the step buttons. The floor
+   is wider than the 72px the native select needed: the same three digits now share the box with a chevron. */
+.mrs-pager-size .mrs-combo {
+  inline-size: auto;
+}
+/* An explicit width, not `auto`. `auto` on an <input> is not shrink-to-fit — it is the intrinsic width of the
+   `size` attribute, which defaults to 20 characters and rendered a 193px box to hold "100". The native select
+   this replaced DID shrink to fit, which is why `auto` was right before and is a trap now. 88px holds three
+   digits with room for the chevron. */
 .mrs-pager-size .mrs-control {
   margin-top: 0;
-  inline-size: auto;
-  min-inline-size: 72px;
+  inline-size: 88px;
 }
 
 .mrs-pager-step {

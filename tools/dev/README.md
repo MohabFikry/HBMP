@@ -21,8 +21,9 @@ psql -h localhost -p 55432 -U hbmp -d hbmp -v ON_ERROR_STOP=1 -f tools/dev/<scri
 | 4 | `seed-branch-management.sql` | Makes every branch-management alert path demonstrable: an expiring licence, an expired one, a roster exception, low stock, and expired batches in quarantine. |
 | 5 | `seed-doctor-account.sql` | Makes the `doctor` login a real practitioner — specialty, two branches, roster, and a day's clinic in mixed states. |
 | 6 | `seed-provider-bound-accounts.sql` | Binds every provider-scoped login to a provider that exists: `pharmacist`, `lab_tech`, `imaging_tech`, `provider_admin`. Adds Nile Pharmacy (PRV-0004), Cairo Central Laboratory (PRV-0005) and Nile Imaging Centre (PRV-0006), and queues one Imaging order so that queue is not empty on arrival. |
+| 7 | `seed-positions.sql` | A job title for every demo login (28.13). Not a role — free text the platform never authorizes on — and deliberately worded so it does not paraphrase the role beside it. Skips any title already set by hand. |
 
-Steps 2–6 are idempotent; step 1 is not, and it is the destructive one.
+Steps 2–7 are idempotent; step 1 is not, and it is the destructive one.
 
 **A login without a provider is a login that cannot work.** Steps 5 and 6 exist for one reason: several roles
 are scoped to something the base seed leaves empty — a doctor is matched to appointments by practitioner id;

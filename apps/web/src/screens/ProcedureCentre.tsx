@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, ProcedureQueueItem } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -18,6 +18,9 @@ import { ApiError } from "../api/http";
  * centres' rows render correctly, which is how audit R3's network-wide pharmacy queue survived unnoticed.</p>
  */
 const S = {
+  queueSearch: { en: "Search", ar: "بحث" },
+  queueSearchHint: { en: "Order number or service code", ar: "رقم الطلب أو رمز الخدمة" },
+  noMatches: { en: "No orders match your search.", ar: "لا توجد طلبات مطابقة لبحثك." },
   queueTitle: { en: "Our queue", ar: "قائمة أعمالنا" },
   counterTitle: { en: "Verify & deliver", ar: "التحقق والتنفيذ" },
   queueEmpty: { en: "No work is currently routed to your centre.", ar: "لا توجد أعمال موجّهة إلى مركزكم حالياً." },
@@ -135,16 +138,15 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
   }
 
   const columns: Column<ProcedureQueueItem>[] = [
-    { key: "orderNo", header: t(S.cOrder), cell: (r: ProcedureQueueItem) => r.orderNo },
+    { key: "orderNo", header: t(S.cOrder), cell: (r: ProcedureQueueItem) => r.orderNo, sortable: true, sortValue: (r) => r.orderNo },
     { key: "code", header: t(S.cService), cell: (r: ProcedureQueueItem) => `${r.code} — ${r.description ?? ""}` },
-    { key: "type", header: t(S.cType), cell: (r: ProcedureQueueItem) => r.procedureTypeCode ?? "—" },
+    { key: "type", header: t(S.cType), cell: (r: ProcedureQueueItem) => r.procedureTypeCode ?? "—", sortable: true, sortValue: (r) => r.procedureTypeCode },
     {
       key: "progress",
       header: t(S.cProgress),
       // The SAME sentence the ordering doctor's worklist shows. A course that reads differently at each end is
       // a course somebody delivers twice.
-      cell: (r: ProcedureQueueItem) => r.progressLabel,
-    },
+      cell: (r: ProcedureQueueItem) => r.progressLabel, sortable: true, sortValue: (r) => r.progressLabel },
     {
       key: "context",
       header: t(S.cContext),
@@ -154,8 +156,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
           // share — and a physiotherapist who reads it the other way treats someone as uncomplicated who
           // is not.
           <span title={t(S.notDisclosedHint)} className="muted">{t(S.notDisclosed)}</span>
-        ),
-    },
+        ), sortable: true, sortValue: (r) => r.sharedClinicalContext },
     {
       key: "action",
       header: t(S.cAction),
@@ -165,7 +166,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
         ) : r.sessionsRemaining <= 0 ? (
           <StatusChip kind="neu" label={t(S.allDelivered)} />
         ) : (
-          <Button
+          <Button size="sm"
             variant="primary"
             disabled={busy === r.orderId}
             onClick={() => void recordSession(r)}
@@ -176,6 +177,17 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
     },
   ];
 
+  /** The centre's own delivery queue — it grows through the day and had no way to find one order in it. */
+  const query = useTableQuery({
+    rows: queue.data ?? [],
+    columns,
+    searchText: (r) => [r.orderNo, r.code, r.description, r.procedureTypeCode].filter(Boolean).join(" "),
+    searchLabel: t(S.queueSearch),
+    searchPlaceholder: t(S.queueSearchHint),
+    pageSize: 25,
+    persistKey: "procedure-queue",
+  });
+
   if (mode === "counter") {
     return (
       <>
@@ -185,7 +197,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
           <InputField label={t(S.fCard)} value={card} onChange={(e) => setCard(e.target.value)} />
           <InputField label={t(S.fMember)} value={member} onChange={(e) => setMember(e.target.value)} />
           <InputField label={t(S.fPassport)} value={passport} onChange={(e) => setPassport(e.target.value)} />
-          <Button variant="primary" onClick={() => void verify()}>{t(S.search)}</Button>
+          <Button leadingIcon={<Icon name="search" />} variant="primary" onClick={() => void verify()}>{t(S.search)}</Button>
           <Button variant="ghost" onClick={clear}>{t(S.clear)}</Button>
         </Card>
 
@@ -205,13 +217,23 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
     );
   }
 
+
   return (
     <>
       <PageHeader title={t(S.queueTitle)} />
       {actionError && <InlineAlert tone="warn">{t(actionError)}</InlineAlert>}
       <Card>
         <AsyncSection state={queue} isEmpty={(rows) => rows.length === 0} emptyLabel={S.queueEmpty}>
-          {(rows) => <DataTable columns={columns} rows={rows} rowKey={(r) => r.orderId} caption={t(S.queueTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={columns}
+              rowKey={(r) => r.orderId}
+              caption={t(S.queueTitle)}
+              emptyLabel={t(S.queueEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, Icon, InlineAlert, InputField, SelectField, StatusChip, TextareaField, useToast,
+  Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, StatusChip, TextareaField, useToast,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { CLINICAL_CODE_SYSTEMS } from "@mersal/contracts";
@@ -333,7 +333,7 @@ function MasterListEditor({
       <h2 className="section-h">{t(S.newVersion)}</h2>
 
       <div className="stack" style={{ marginBlockStart: "var(--sp3)" }}>
-        <SelectField
+        <ComboboxField
           label={t(S.system)}
           value={sys}
           onChange={(v) => setSys(v as ClinicalCodeSystem)}
@@ -405,7 +405,7 @@ function MasterListEditor({
       )}
 
       <div className="pol-editor-actions">
-        <Button variant="secondary" onClick={onCancel}>{t(S.cancel)}</Button>
+        <Button variant="ghost" onClick={onCancel}>{t(S.cancel)}</Button>
         <Button
           variant="primary"
           loading={busy}

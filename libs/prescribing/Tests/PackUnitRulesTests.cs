@@ -209,11 +209,12 @@ public class PackUnitRulesTests
     public void Unit_data_is_incomplete_until_all_three_facts_are_known()
     {
         // The flag drives `NotChecked`, so it must be true whenever ANY of the three is missing — a row with a
-        // unit and a splittability but no pack size still cannot be converted to whole packs.
-        PackUnitRules.IsComplete(unit: "Tablet", packSize: 20m, splittable: true).Should().BeTrue();
-        PackUnitRules.IsComplete(unit: null, packSize: 20m, splittable: true).Should().BeFalse();
-        PackUnitRules.IsComplete(unit: "Tablet", packSize: null, splittable: true).Should().BeFalse();
-        PackUnitRules.IsComplete(unit: "Tablet", packSize: 20m, splittable: null).Should().BeFalse();
-        PackUnitRules.IsComplete(unit: "Tablet", packSize: 0m, splittable: true).Should().BeFalse();
+        // unit and a splittability but no pack CONTENT still cannot be converted to boxes. Content, not pack
+        // size: a 120 ml syrup bottle is `pack_size = 1`, which looked complete and was not (31.3).
+        PackUnitRules.IsComplete(unit: "Tablet", packContent: 20m, splittable: true).Should().BeTrue();
+        PackUnitRules.IsComplete(unit: null, packContent: 20m, splittable: true).Should().BeFalse();
+        PackUnitRules.IsComplete(unit: "Tablet", packContent: null, splittable: true).Should().BeFalse();
+        PackUnitRules.IsComplete(unit: "Tablet", packContent: 20m, splittable: null).Should().BeFalse();
+        PackUnitRules.IsComplete(unit: "Tablet", packContent: 0m, splittable: true).Should().BeFalse();
     }
 }

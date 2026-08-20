@@ -66,7 +66,8 @@ public static class QueueModule
                 }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // GET /queues — ordered, minimum-necessary queue for a clinic/doctor.
         read.MapGet("/queues", async (
@@ -83,7 +84,8 @@ public static class QueueModule
             var tickets = await q.ToListAsync(ct);
             var ordered = QueueRules.Ordered(tickets).ToList();
             return Results.Ok(ordered.Select((t, i) => QueueItemView.From(t, i + 1, now)));
-        });
+        })
+        .Produces<IEnumerable<QueueItemView>>();
 
         // POST /queues/call-next — pop the head (Waiting→InConsultation).
         write.MapPost("/queues/call-next", async (
@@ -108,7 +110,8 @@ public static class QueueModule
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "QueueCallNext",
             }, ct);
             return Results.Ok(QueueItemView.From(head, 0, now));
-        });
+        })
+        .Produces<QueueItemView>();
 
         // POST /queues/{queueId}/requeue — send back to Waiting.
         write.MapPost("/queues/{queueId:guid}/requeue", (Guid queueId, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>

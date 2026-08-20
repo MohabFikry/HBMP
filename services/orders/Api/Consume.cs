@@ -173,6 +173,7 @@ public static class ConsumeEndpoints
                 default:
                     return Results.Problem(statusCode: 400, title: "invalid-consume");
             }
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:consume"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:consume"))
+        .Produces<ConsumeResponse>();
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
@@ -76,8 +77,45 @@ v1.MapPost("", async (
     BeneficiaryRegistrar registrar, PatientDbContext db, IAuditClient audit, IOutbox outbox,
     IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
-    if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
+    var idem = http.Headers["Idempotency-Key"].ToString();
+    if (string.IsNullOrWhiteSpace(idem))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required", type: "urn:hbmp:idempotency-required");
+
+    /*
+     * THE LEDGER THE HEADER HAS ALWAYS DESERVED.
+     *
+     * This endpoint has refused a request without an `Idempotency-Key` since phase 3 and then discarded it —
+     * nothing stored it and nothing read it. So a retry after a dropped response, a double-submitted form or
+     * a client reconnect REGISTERED A SECOND PERSON, and the duplicate-identifier check does not save you:
+     * it fires only when a card or a national id was entered, and registration accepts a person with
+     * neither. Those are the arrivals most likely to be re-submitted on a poor connection.
+     *
+     * Two beneficiary rows for one human is the worst duplicate here — coverage, encounters, prescriptions
+     * and claims all hang off the id, so the two halves of a person's care diverge permanently.
+     *
+     * The hash binds the replay to the BODY (18.A3's rule, migration 0008). A key reused for a DIFFERENT
+     * person is refused rather than answered with the first person's record: a 201 naming somebody else is
+     * worse than the duplicate this prevents.
+     */
+    var requestHash = IdempotencyKeyRules.Hash(
+        body.CardNumber ?? "", body.GivenName ?? "", body.MiddleName ?? "", body.FamilyName ?? "",
+        body.BirthDate?.ToString("O", CultureInfo.InvariantCulture) ?? "", body.Sex ?? "",
+        body.NationalityCode ?? "", body.IdentifierType ?? "", body.IdentifierValue ?? "", body.Phone ?? "");
+
+    if (await db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct) is { } seen)
+    {
+        if (!IdempotencyKeyRules.Matches(seen.RequestHash, requestHash))
+            return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                type: "urn:hbmp:idempotency-key-reuse",
+                detail: "That key was already used to register a different person. Answering it with the "
+                      + "earlier record would return somebody else's beneficiary.");
+
+        var already = await db.Beneficiaries.AsNoTracking()
+            .Include(x => x.Identifiers).Include(x => x.Contacts)
+            .FirstOrDefaultAsync(x => x.BeneficiaryId == seen.EntityId, ct);
+        // 200, not 201: nothing was created this time, and the status says so.
+        return already is null ? Results.NoContent() : Results.Ok(BeneficiaryDto.From(already));
+    }
 
     var req = body.ToDomain();
     var actor = me.Principal?.Subject;
@@ -155,6 +193,16 @@ v1.MapPost("", async (
                     CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
                 });
             }
+            // The ledger row commits WITH the person, inside the same transaction. Written after it rather
+            // than before, so a registration that fails validation or a duplicate check leaves no row
+            // claiming the key — the operator corrects the form and retries with the same key, which is what
+            // a browser's retry button does.
+            db.ProcessedRequests.Add(new ProcessedRequest
+            {
+                IdempotencyKey = idem, TenantId = created.Beneficiary.TenantId,
+                Operation = "register-beneficiary", EntityId = created.Beneficiary.BeneficiaryId,
+                StatusCode = 201, RequestHash = requestHash, CreatedAt = clock.GetUtcNow(),
+            });
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -186,7 +234,8 @@ v1.MapPost("", async (
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");
     }
-});
+})
+        .Produces<BeneficiaryDto>();
 
 // GET /beneficiaries — search by identifier / name / status (cursor-ish paging).
 read.MapGet("", async (string? identifierType, string? identifierValue, string? name, string? status,
@@ -232,8 +281,9 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
         if (await guard.AuthorizeAsync(b, ct) is not null) continue;
         disclosed.Add(await guard.DiscloseAsync(b, "search", ct));
     }
-    return Results.Ok(new { page = p, pageSize = ps, items = disclosed });
-});
+    return Results.Ok(new DisclosedPageView(p, ps, disclosed));
+})
+        .Produces<DisclosedPageView>();
 
 // ================================================================ RESOLVE (26.6, doc 43 §7)
 //
@@ -519,8 +569,9 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
     // `total` counts the queue; `items` is what THIS caller may read of this page. They differ when the
     // engine drops a row, and reporting the post-filter count as the total would silently shrink the queue
     // for a scoped user — a number that says "you are nearly done" when they are not.
-    return Results.Ok(new { page = p, pageSize = ps, total, items });
-});
+    return Results.Ok(new DisclosedQueueView(p, ps, total, items));
+})
+        .Produces<DisclosedQueueView>();
 
 // Create a registration for an existing (Pending) beneficiary — the re-review path (a Rejected application
 // is final, so a fresh look is a fresh row) and the backfill for beneficiaries registered before
@@ -548,8 +599,9 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
     db.Registrations.Add(r);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
-    return Results.Created($"/api/v1/registrations/{r.RegistrationId}", new { r.RegistrationId, status = r.Status.ToString() });
-});
+    return Results.Created($"/api/v1/registrations/{r.RegistrationId}", new RegistrationCreatedView(r.RegistrationId, r.Status.ToString()));
+})
+        .Produces<RegistrationCreatedView>();
 
 // Set step data (documents verified / coverage bound / notes).
 reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>

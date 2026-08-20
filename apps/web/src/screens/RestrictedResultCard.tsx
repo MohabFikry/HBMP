@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Icon, InputField, SelectField, TextareaField, useTheme } from "@mersal/design-system";
+import { Button, Icon, InputField, ComboboxField, TextareaField, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 
 /** Existence-only metadata the server returns for a restricted result (14.7) — NEVER any values. */
@@ -95,10 +95,10 @@ export function RequestAccessDialog({ onSubmit, onCancel }: RequestAccessDialogP
       className="restricted-request"
     >
       {/* The three fields were a bare label+select, label+textarea and label+input, each with its own inline
-          styles. SelectField/TextareaField/InputField carry the label, the help/error wiring and the control
+          styles. ComboboxField/TextareaField/InputField carry the label, the help/error wiring and the control
           height that the hand-written versions each approximated differently. `error` renders the same
           role="alert" the inline <p> did, so the validation contract is unchanged. */}
-      <SelectField
+      <ComboboxField
         id="ra-purpose"
         label={t(L.purpose)}
         placeholder="—"

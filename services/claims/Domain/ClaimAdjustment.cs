@@ -26,6 +26,11 @@ public sealed class ClaimAdjustment
     public bool PendingSecondApproval { get; set; }
     public Guid? ConfirmsAdjustmentId { get; set; }
     public string? IdempotencyKey { get; set; }
+
+    /// <summary>SHA-256 of the canonical request this key produced (migration 0009). Without it a key reused
+    /// across two different amounts returned the first adjustment, so the second correction never happened
+    /// and the batch total stayed wrong by the difference. NULL on pre-0009 rows: treated as a match.</summary>
+    public string? RequestHash { get; set; }
 }
 
 /// <summary>Pure adjustment rules (36 §7). Validates the mandatory fields and reference requirements, and defines the

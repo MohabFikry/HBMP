@@ -681,7 +681,7 @@ export function DoctorResults() {
       header: t(S.result),
       cell: (r) =>
         r.firstLineId ? (
-          <Button variant="secondary" onClick={() => openResult(r)}>
+          <Button size="sm" variant="secondary" onClick={() => openResult(r)}>
             {t(S.viewResult)}
           </Button>
         ) : (

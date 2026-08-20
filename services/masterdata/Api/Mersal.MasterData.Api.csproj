@@ -7,6 +7,10 @@
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <!-- 31.3 — PackUnitRules.ShortUnit. The prescribing-unit VOCABULARY is this service's (its CHECK
+         constraint holds the closed list), and the short form a prescriber writes for each of those words
+         belongs with it rather than being reimplemented in TypeScript beside a dose field. -->
+    <ProjectReference Include="../../../libs/prescribing/Mersal.Prescribing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

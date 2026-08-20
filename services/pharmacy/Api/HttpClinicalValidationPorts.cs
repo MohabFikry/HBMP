@@ -158,14 +158,14 @@ public sealed class HttpClinicalValidationPorts(
 
             var map = (body?.Items ?? []).ToDictionary(
                 i => i.DrugId,
-                i => new DrugPackFacts(i.IsPackSplittable, i.PackSize));
+                i => new DrugPackFacts(i.IsPackSplittable, i.PackSize, i.PackContent));
 
             return ((IReadOnlyDictionary<Guid, DrugPackFacts>)map,
                 new ProvenanceInfo("Mersal drug catalogue", "live", clock.GetUtcNow()));
         }, ct);
 
     private sealed record PackFactsDto(List<PackFactRow>? Items);
-    private sealed record PackFactRow(Guid DrugId, bool? IsPackSplittable, decimal? PackSize);
+    private sealed record PackFactRow(Guid DrugId, bool? IsPackSplittable, decimal? PackSize, decimal? PackContent);
 
     private async Task<Fetched<DiagnosisContext>> FetchDiagnosesAsync(
         Guid? encounterId, IReadOnlyList<string>? clientDiagnoses, string? bearerToken, CancellationToken ct)

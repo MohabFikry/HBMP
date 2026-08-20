@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Mersal.Time;
 
 namespace Mersal.Policy.Api;
 
@@ -130,7 +131,7 @@ public sealed class RegistrationEnrolmentConsumer(
         // that plan as sold under a specific policy — so resolve the live one. If the plan is offered under
         // more than one policy the choice is not ours to make: an arbitrary pick is a coin toss over which
         // payer funds this person's care, so it is refused and left for a human.
-        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var today = BusinessCalendar.DateIn(clock.GetUtcNow());
 
         // policy_plan → plan_version → plan, restricted to live rows under an Active policy.
         var matches = await (

@@ -1,3 +1,4 @@
+import { FIXTURE_MODE } from "@dev/fixture-mode";
 import type { Role } from "./authz/permissions";
 
 /**
@@ -25,9 +26,16 @@ const env = (import.meta as { env?: Record<string, string | undefined> }).env ??
 const fromEnv = (value: string | undefined, fallback: string): string =>
   value !== undefined && value.trim() !== "" ? value : fallback;
 
-/** Live mode. Accepts `1` or `true`: compose and the Dockerfile disagreed on spelling, and the losing
- * spelling silently downgraded the app to fixture mode against a fully working backend. */
-export const LIVE = ["1", "true"].includes((env.VITE_LIVE ?? "").trim().toLowerCase());
+/**
+ * Live mode.
+ *
+ * Derived from WHICH FIXTURE MODULE WAS BUNDLED, not from a second reading of `VITE_LIVE`. `vite.config.ts`
+ * parses that variable once (accepting `1` or `true` — compose and the Dockerfile disagreed on spelling, and
+ * the losing spelling silently downgraded the app to fixture mode against a fully working backend) and uses
+ * it to alias both `@dev/fixture-mode` and `@dev/fixtures`. So "the app believes it is live" and "the demo
+ * backend is not in this bundle" are now one fact. See `src/dev/fixtures.ts` for what that buys.
+ */
+export const LIVE = !FIXTURE_MODE;
 
 /**
  * The origin this bundle is running on, or `""` where there is no document (node, some test runners).
@@ -160,7 +168,7 @@ export function loginOriginsAgree(authority: string, redirectUri: string, appOri
  * issuer uses clinical titles (`lab_tech`, `pharmacist`, …); the portal catalog uses portal keys (`lab`,
  * `pharmacy`, …). The first match (in portal-priority order) wins when a user carries several roles.
  */
-const ROLE_MAP: Array<[string, Role]> = [
+export const ROLE_MAP: Array<[string, Role]> = [
   ["super_admin", "super_admin"],
   ["org_admin", "org_admin"],
   ["medical_director", "medical_director"],
@@ -220,4 +228,45 @@ export function roleFromClaimRoles(roles: readonly string[]): Role | null {
     if (roles.includes(kc)) return role;
   }
   return null;
+}
+
+/**
+ * EVERY portal role the token names, in priority order, deduped.
+ *
+ * {@link roleFromClaimRoles} answers "which portal is this person's primary" and discards the rest — which
+ * was correct while a session could hold one portal and is a silent capability loss now that it can hold
+ * several. A clinics manager who is also an org admin was issued a token naming both and shown one, with
+ * nothing anywhere to suggest the other existed.
+ *
+ * The two functions are kept separate rather than one derived from the other's first element, because the
+ * PRIMARY is a different question from the SET: the primary decides the fallback landing portal and the
+ * audit event's `actorRole`, and it must keep answering exactly as it does today for a single-role token.
+ */
+export function rolesFromClaimRoles(roles: readonly string[]): Role[] {
+  const out: Role[] = [];
+  for (const [kc, role] of ROLE_MAP) {
+    if (roles.includes(kc) && !out.includes(role)) out.push(role);
+  }
+  return out;
+}
+
+/**
+ * The ISSUER's name for a portal role — the inverse of {@link ROLE_MAP}.
+ *
+ * Load-bearing for user administration. The issuer's catalog (`IdentityContract.Roles`) names clinical
+ * titles: `lab_tech`, `pharmacist`, `radiology_tech`, `network_team`. The portal catalog names portals:
+ * `lab`, `pharmacy`, `radiology`, `provider_admin`. An admin screen that let somebody tick "Laboratory" and
+ * POSTed `lab` would get a 422 back for every clinical role in the system — and the tick would look as
+ * though it had worked right up until the save.
+ *
+ * Returns the FIRST issuer name that maps to this portal, which is the canonical one: `radiology_tech`
+ * precedes the `imaging_tech` alias kept alive for the rename's dual-accept window, so a grant made through
+ * this function is always written under the new name (docs/runbooks/radiology-rename.md).
+ */
+export function issuerRoleFor(role: Role): string {
+  const hit = ROLE_MAP.find(([, portalRole]) => portalRole === role);
+  // Every portal role has a row — `ROLE_MAP` and the catalog are asserted equal by the portal-model suite —
+  // so the fallback is unreachable. It is the role's own name because that is right for the fourteen roles
+  // whose issuer name and portal key are already identical.
+  return hit ? hit[0] : role;
 }

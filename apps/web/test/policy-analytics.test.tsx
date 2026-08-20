@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { PolicyAnalytics } from "../src/screens/PolicyAnalytics";
 import { PORTALS } from "../src/portals/catalog";
 import { permissionsForRole } from "../src/authz/permissions";

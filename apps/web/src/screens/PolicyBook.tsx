@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, KpiList, StatusChip, Tabs } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   MemberGroupView,
   PolicyApi,
   PolicyPlanView,
   PolicyQueryRow,
+  QueryPage,
   ScopeUtilizationView,
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -68,6 +69,10 @@ const S = {
     en: "Narrowed to the payers you are assigned to — this is not the whole book.",
     ar: "تم التضييق على الجهات الممولة المسندة إليك — هذه ليست كل الوثائق.",
   },
+  truncated: {
+    en: "More policies matched than could be resolved — this page is a subset, narrow the search.",
+    ar: "تطابق عدد من الوثائق أكبر مما يمكن حصره — هذه الصفحة جزء من النتائج، ضيّق البحث.",
+  },
   unavailable: { en: "Some figures could not be composed:", ar: "تعذّر تجميع بعض الأرقام:" },
   memberNo: { en: "Member no.", ar: "رقم العضو" },
   export: { en: "Export (audited)", ar: "تصدير (مُدقَّق)" },
@@ -85,19 +90,53 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const { lang } = useTheme();
-  const [page, setPage] = useState<{ items: PolicyQueryRow[]; payerScopeApplied: boolean; unavailable: string[] } | null>(null);
+  /*
+    ============================================================================================================
+    THE WHOLE PAGE, NOT THE FIRST 50 OF IT
+    ============================================================================================================
+    This screen asked for `pageSize: 50`, rendered `items`, and dropped `totalCount`, `totalPages` and
+    `identityMatchTruncated` on the floor — so policy 51 was unreachable and nothing on screen said so. An
+    operator searching for a policy that sorts 51st was told, in effect, that it does not exist.
+
+    `MemberAdmin` consumes the identical `QueryPage` envelope off the identical query surface and already does
+    all three things; this is the same wiring, not new capability. As there, SEARCH, SORT AND PAGING ARE THE
+    SERVER'S: `GET /policy-query` accepts `page`, `pageSize` and `sort`, and the book is too big to filter in a
+    browser. The table is therefore driven in CONTROLLED sort mode — its own sort would order the 25 rows it was
+    handed and leave the true first policy several pages away.
+  */
+  const [page, setPage] = useState<QueryPage<PolicyQueryRow> | null>(null);
   const [error, setError] = useState<Localized | null>(null);
   const [selected, setSelected] = useState<PolicyQueryRow | null>(null);
   const [tab, setTab] = useState("plans");
+  const [pageNo, setPageNo] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  // The server's own default, so the first render's order matches `sortedBy` rather than claiming an order the
+  // response was not sorted in (PolicySortFields.Default).
+  const [sort, setSort] = useState<{ field: string; dir: "ascending" | "descending" }>(
+    { field: "policyno", dir: "ascending" });
 
+  const run = useCallback(
+    async (p: number, size: number, sortBy: { field: string; dir: "ascending" | "descending" }) => {
+      setError(null);
+      try {
+        setPage(await api.policyQuery({
+          page: p,
+          pageSize: size,
+          // The server's vocabulary: a leading "-" means descending (SortRequest.TryParse).
+          sort: (sortBy.dir === "descending" ? "-" : "") + sortBy.field,
+        }));
+      } catch (e) {
+        setError(readErrorMessage(e));
+      }
+    },
+    [api],
+  );
+
+  // ONE effect drives every fetch, keyed on the whole query — a per-control handler that also fetched would
+  // race, and the older response can land last.
   useEffect(() => {
-    let live = true;
-    api
-      .policyQuery({ pageSize: 50 })
-      .then((p) => live && setPage(p))
-      .catch((e) => live && setError(readErrorMessage(e)));
-    return () => { live = false; };
-  }, [api]);
+    void run(pageNo, pageSize, sort);
+  }, [run, pageNo, pageSize, sort]);
 
   return (
     <div className="pol-screen">
@@ -110,6 +149,9 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
           {t(S.unavailable)} {page.unavailable.join(", ")}
         </InlineAlert>
       )}
+      {/* A truncated identity match makes the page a SUBSET. Saying so is the difference between a search and
+          a wrong answer — the same disclosure the member roster already makes. */}
+      {page?.identityMatchTruncated && <InlineAlert tone="warn">{t(S.truncated)}</InlineAlert>}
 
       <Card>
         <DataTable
@@ -121,18 +163,43 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onSelect={(r) => setSelected(r)}
           loading={page === null && !error}
           emptyLabel={t(S.noPolicies)}
+          sortKey={sort.field}
+          sortDir={sort.dir}
+          onSort={(key) => {
+            setSort((prev) => (prev.field === key
+              ? { field: key, dir: prev.dir === "ascending" ? "descending" : "ascending" }
+              : { field: key, dir: "ascending" }));
+            // A new order makes the current page meaningless, and the selected row is very likely no longer on
+            // it — leaving the detail panel open under a table it no longer belongs to.
+            setPageNo(1);
+            setSelected(null);
+          }}
+          /*
+            Each key IS the server's sort field (PolicySortFields.Allowed), because that is what `onSort` hands
+            back. Only the six the server accepts are marked sortable: a header that promises an order the
+            server rejects answers with a 400 and an UNKNOWN_SORT_FIELD problem.
+          */
           columns={[
-            { key: "no", header: t(S.policyNo), cell: (r) => r.policyNo },
-            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+            { key: "policyno", header: t(S.policyNo), cell: (r) => r.policyNo, sortable: true },
             {
-              key: "window",
+              key: "status",
+              header: t(S.status),
+              cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />,
+              sortable: true,
+            },
+            {
+              // Sorts by the START of the window — the end date is not the question anyone asks of a policy
+              // list, and `effectiveto` is nullable, so an open-ended policy has nothing to order by.
+              key: "effectivefrom",
               header: t(S.window),
               cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
+              sortable: true,
             },
-            { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
+            { key: "membercount", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true, sortable: true },
+            // NOT sortable: the server offers no `plancount`, and offering it here would 400.
             { key: "plans", header: t(S.plans), cell: (r) => fmt.number(r.planCount), numeric: true },
             {
-              key: "used",
+              key: "percentused",
               header: t(S.used),
               cell: (r) => (
                 <StatusChip
@@ -140,9 +207,22 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
                   label={r.percentUsed != null ? `${Math.round(r.percentUsed)}% · ${r.utilizationBand}` : r.utilizationBand}
                 />
               ),
+              sortable: true,
             },
           ]}
         />
+        {/* Shown always, for the reason the membership book gives: "Showing 1–25 of 25" answers "how big is
+            this book?", which is a question operators ask of a register even when it fits on one page. */}
+        {page && (
+          <Pagination
+            page={pageNo}
+            pageSize={pageSize}
+            total={page.totalCount}
+            onPageChange={(p) => { setPageNo(p); setSelected(null); }}
+            onPageSizeChange={(n) => { setPageSize(n); setPageNo(1); setSelected(null); }}
+            pageSizeOptions={[10, 25, 50, 100]}
+          />
+        )}
       </Card>
 
       {!selected && <InlineAlert tone="info">{t(S.select)}</InlineAlert>}
@@ -201,9 +281,9 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
               </>
             ),
           },
-          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
+          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true, sortable: true, sortValue: (r) => r.memberCount },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -233,11 +313,11 @@ function PolicyGroupsTab({ api, policyId }: { api: PolicyApi; policyId: string }
         loading={rows === null && !error}
         emptyLabel={t(S.noGroups)}
         columns={[
-          { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode },
-          { key: "name", header: t(S.groupName), cell: (r) => r.nameEn },
-          { key: "type", header: t(S.groupType), cell: (r) => r.groupType },
-          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+          { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
+          { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+          { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
+          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -285,7 +365,16 @@ export function ScopeUtilizationPanel({
   );
 
   return (
-    <Card data-testid="scope-utilization">
+    // `Card` is a SURFACE — background, border, radius, shadow, and no padding; every screen that uses one
+    // supplies its own (the filter card above this does). This one supplied none, so the KPI tiles sat flush
+    // against the card's own border with their labels reading as clipped, and the member meters ran edge to
+    // edge and collided with the tiles above them. The gap matters as much as the padding: four stacked
+    // children (alerts, KPIs, meters, outlier table) with nothing between them is what made it look crammed
+    // rather than merely tight.
+    <Card
+      data-testid="scope-utilization"
+      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+    >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (
         <>
@@ -325,10 +414,10 @@ export function ScopeUtilizationPanel({
                 rowKey={(r) => r.enrollmentId}
                 density="compact"
                 columns={[
-                  { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo },
-                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true },
+                  { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo, sortable: true, sortValue: (r) => r.memberNo },
+                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true, sortable: true, sortValue: (r) => r.totalConsumed },
                   { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)), numeric: true },
-                  { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—") },
+                  { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—"), sortable: true, sortValue: (r) => r.percentUsed },
                 ]}
               />
             </>
@@ -410,28 +499,25 @@ export function UtilizationScreen({
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       <Card style={{ padding: "var(--sp4)", display: "flex", gap: "var(--sp4)", alignItems: "end", flexWrap: "wrap" }}>
-        {/* QA P1-11: the label ran into a zero-width bare select. Real field markup, a minimum width, and
-            an explicit empty option — an empty select must LOOK empty, not collapsed. */}
-        <div className="mrs-field" style={{ minWidth: 280 }}>
-          <label className="mrs-label" htmlFor="util-policy">{t(S.policyNo)}</label>
-          <select
-            className="mrs-control"
-            id="util-policy"
-            value={scopeId}
-            onChange={(e) => {
-              setScope("policies");
-              setScopeId(e.target.value);
-            }}
-          >
-            {policies.length === 0 ? <option value="">—</option> : null}
-            {policies.map((p) => (
-              <option key={p.policyId} value={p.policyId}>
-                {p.policyNo}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Button variant="secondary" onClick={exportCsv} disabled={!scopeId}>
+        {/* QA P1-11 fixed the label running into a zero-width bare select by hand-building the field markup
+            around it. `ComboboxField` IS that markup, so the wrapper goes and the width stays.
+            Searchable, and this is the case the audit was loudest about: the list is every policy on the
+            book, and first-letter typeahead over policy numbers means arrowing to find one. The empty
+            `<option>` that had to exist so an empty control looked empty is now a placeholder — "nothing
+            chosen" stops being a selectable row reading "—". */}
+        <ComboboxField
+          id="util-policy"
+          label={t(S.policyNo)}
+          style={{ minWidth: 280 }}
+          placeholder="—"
+          value={scopeId || null}
+          onChange={(v) => {
+            setScope("policies");
+            setScopeId(v);
+          }}
+          options={policies.map((p) => ({ value: p.policyId, label: p.policyNo }))}
+        />
+        <Button leadingIcon={<Icon name="download" />} variant="secondary" onClick={exportCsv} disabled={!scopeId}>
           {t(S.export)}
         </Button>
       </Card>
@@ -490,17 +576,15 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <PageHeader title={t(S.groupsTitle)} />
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       <Card style={{ padding: "var(--sp4)" }}>
-        <div className="mrs-field" style={{ maxWidth: 320 }}>
-          <label className="mrs-label" htmlFor="grp-policy">{t(S.policyNo)}</label>
-          <select className="mrs-control" id="grp-policy" value={policyId ?? ""} onChange={(e) => setPolicyId(e.target.value)}>
-            {policies.length === 0 ? <option value="">—</option> : null}
-            {policies.map((p) => (
-              <option key={p.policyId} value={p.policyId}>
-                {p.policyNo}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ComboboxField
+          id="grp-policy"
+          label={t(S.policyNo)}
+          style={{ maxWidth: 320 }}
+          placeholder="—"
+          value={policyId}
+          onChange={setPolicyId}
+          options={policies.map((p) => ({ value: p.policyId, label: p.policyNo }))}
+        />
       </Card>
       <Card>
         <DataTable
@@ -512,10 +596,10 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onSelect={(r) => setSelected(r.groupId)}
           emptyLabel={t(S.noGroups)}
           columns={[
-            { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode },
-            { key: "name", header: t(S.groupName), cell: (r) => r.nameEn },
-            { key: "type", header: t(S.groupType), cell: (r) => r.groupType },
-            { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
+            { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
+            { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+            { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
+            { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
           ]}
         />
       </Card>

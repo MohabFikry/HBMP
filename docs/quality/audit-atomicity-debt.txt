@@ -1,0 +1,2 @@
+# Files that emit an audit event AFTER committing the transaction that made the change.
+# One-way ratchet: a file may shrink or vanish, never grow. See AuditAtomicityTests.

@@ -47,7 +47,20 @@ public sealed record QueueItemResponse(
 public sealed record CreateSlotsRequest(
     Guid ProviderId, Guid LocationId, Guid? DoctorId,
     DayOfWeek DayOfWeek, TimeOnly StartTime, TimeOnly EndTime, int SlotMinutes,
-    DateOnly FromDate, DateOnly ToDate, Guid? BranchId = null);
+    DateOnly FromDate, DateOnly ToDate, Guid? BranchId = null,
+    // 0025 — the daily cap carried on the rule this call upserts. NULL leaves an existing rule's cap alone
+    // rather than clearing it: this endpoint materializes a calendar, and silently uncapping a clinic as a
+    // side effect of regenerating its slots is not something anyone asked for. Clearing a cap is a PUT on
+    // /provider-availability, where it is the thing being done rather than a by-product.
+    int? MaxPerDay = null);
+
+/// <summary>0025 — create or replace the weekly rule itself, as an administered record rather than as a
+/// by-product of materializing a calendar. <see cref="MaxPerDay"/> null means uncapped, and here that IS
+/// the instruction: a PUT states the rule in full.</summary>
+public sealed record UpsertAvailabilityRequest(
+    Guid ProviderId, Guid LocationId, Guid? DoctorId,
+    DayOfWeek DayOfWeek, TimeOnly StartTime, TimeOnly EndTime, int SlotMinutes,
+    Guid? BranchId = null, int? MaxPerDay = null);
 
 /// <summary>Book an appointment. Provide <see cref="SlotId"/> to hold a specific slot; omit it (non-walk-in)
 /// to auto-take the earliest open slot. Walk-ins may be slotless (uses <see cref="ScheduledStart"/>).</summary>

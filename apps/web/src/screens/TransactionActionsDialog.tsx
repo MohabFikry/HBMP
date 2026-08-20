@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Icon, InlineAlert, Modal, Select, StatusChip, TextareaField } from "@mersal/design-system";
+import { Button, Icon, InlineAlert, Modal, ComboboxField, StatusChip, TextareaField } from "@mersal/design-system";
 import type { Localized, WithdrawResult } from "@mersal/contracts";
 import type { AmendReasonOption } from "./AmendLineDialog";
 import { useLoc } from "./_shared";
@@ -38,6 +38,15 @@ export interface TransactionLine {
   /** What the doctor would call it — a medicine name or a procedure description. Never a uuid. */
   label: string;
   quantity: number;
+  /**
+   * 31.3 — what `quantity` COUNTS: "boxes", or the prescribing unit. Empty where the record does not say.
+   *
+   * <p>A prescription's quantity is a box count wherever the catalogue records what a box holds, and the
+   * dose total where it does not — so "1" against a 24-tablet box and "2250" against a box of insulin pens
+   * are both correct and count different things. This dialog EDITS that number, which makes showing it
+   * without its unit worse than showing it in a read-only list.</p>
+   */
+  quantityUnit?: string | null;
   /** Why this line cannot be changed, in the doctor's words. Null ⇒ it can. */
   locked: string | null;
 }
@@ -186,7 +195,13 @@ export function TransactionActionsDialog({
   if (result) {
     const stillLive = result.lines.filter((l) => !l.withdrawn);
     return (
-      <Modal open wide onOpenChange={(o) => { if (!o) { onDone(); onCancel(); } }} title={title}>
+      <Modal
+        open
+        wide
+        onOpenChange={(o) => { if (!o) { onDone(); onCancel(); } }}
+        title={title}
+        footer={<Button variant="secondary" onClick={() => { onDone(); onCancel(); }}>{t(S.close)}</Button>}
+      >
         <div data-testid="withdraw-result">
           {result.withdrawn === result.total && result.total > 0 && (
             <InlineAlert tone="ok">{t(S.resultAll)}</InlineAlert>
@@ -204,7 +219,6 @@ export function TransactionActionsDialog({
               </ul>
             </>
           )}
-          <Button variant="secondary" onClick={() => { onDone(); onCancel(); }}>{t(S.close)}</Button>
         </div>
       </Modal>
     );
@@ -213,11 +227,72 @@ export function TransactionActionsDialog({
   const missingReason = touched && reasonCode === "";
   const noChange = action === "amend" && touched && changed.length === 0 && removing.size === 0;
 
+  async function confirm() {
+    setTouched(true);
+    if (reasonCode === "") return;
+    if (action === "amend" && changed.length === 0 && removing.size === 0) return;
+    // A zero would be refused by the write path with nothing the doctor can act on. The alert in the body
+    // already says what to do instead.
+    if (action === "amend" && anyZero) return;
+
+    setBusy(true);
+    setFailed(false);
+    const text = reasonText.trim() === "" ? undefined : reasonText.trim();
+    try {
+      if (action === "withdraw") {
+        setResult(await onWithdraw({ reasonCode, reasonText: text }));
+      } else {
+        // Withdrawals FIRST. If a later amendment fails, the lines the doctor asked to remove are already
+        // gone rather than left live behind a half-applied edit — and removal is the safety-relevant half
+        // of this change.
+        for (const id of removing) {
+          await onWithdrawLine({ lineId: id, reasonCode, reasonText: text });
+        }
+        // Only what CHANGED. Superseding five lines because the dialog was opened would put four
+        // amendments into the record that nobody made.
+        for (const l of changed) {
+          await onAmend({ lineId: l.id, quantity: Number(quantities[l.id]), reasonCode, reasonText: text });
+        }
+        onDone();
+        onCancel();
+      }
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     // WIDE. Each row carries a medicine name, an editable quantity and a control, and at 520px the name
     // wrapped to three lines while the quantity box sat alone in a column of its own.
-    <Modal open wide onOpenChange={(o) => { if (!o) onCancel(); }} title={title}>
-      <div data-testid="transaction-dialog">
+    <Modal
+      open
+      wide
+      onOpenChange={(o) => { if (!o) onCancel(); }}
+      title={title}
+      /*
+       * The actions belong to the DIALOG, not to the last paragraph of its content. Written as the final
+       * children they rendered inside the opaque body card, tucked against its bottom-left corner with no
+       * separation from the notes box above — on a modal whose every other edge is 24px clear. The footer
+       * slot is where a Modal puts them: below the card, right-aligned, with its own spacing.
+       */
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>{t(S.back)}</Button>
+          <Button
+            variant="danger"
+            disabled={busy || (action === "amend" && !anyAmendable)}
+            onClick={() => void confirm()}
+          >
+            {t(action === "amend" ? S.confirmAmend : S.confirmWithdraw)}
+          </Button>
+        </>
+      }
+    >
+      {/* One spacing rule for the whole column. Without it the paragraph, the item list, the reason picker
+          and the notes box each contributed whatever margin their own element type happened to carry. */}
+      <div className="stack-3" data-testid="transaction-dialog">
         <p>{t(action === "amend" ? S.amendBody : S.withdrawBody)}</p>
 
         <h3 className="section-h">{t(S.items)}</h3>
@@ -229,13 +304,15 @@ export function TransactionActionsDialog({
                 <label className="rx-field">
                   {/* The line's own name is IN the field's accessible name: five boxes all called
                       "Quantity" is five boxes a screen-reader user cannot tell apart. */}
-                  <span className="rx-field-label">{t(S.quantity)}</span>
+                  <span className="rx-field-label">
+                    {t(S.quantity)}{l.quantityUnit ? ` (${l.quantityUnit})` : ""}
+                  </span>
                   <input
                     className="rx-field-input"
                     type="number"
                     min={1}
                     inputMode="decimal"
-                    aria-label={`${t(S.quantity)} — ${l.label}`}
+                    aria-label={`${t(S.quantity)}${l.quantityUnit ? ` (${l.quantityUnit})` : ""} — ${l.label}`}
                     // Disabled, never hidden, with the reason beside it (design 46 §10). A line marked for
                     // withdrawal has no quantity to state, so its box goes quiet too.
                     disabled={l.locked !== null || removing.has(l.id) || busy}
@@ -248,7 +325,9 @@ export function TransactionActionsDialog({
                   />
                 </label>
               ) : (
-                <span className="tnum">{l.quantity}</span>
+                <span className="tnum">
+                  {l.quantity}{l.quantityUnit ? ` ${l.quantityUnit}` : ""}
+                </span>
               )}
               {l.locked && (
                 <span id={`txnlock-${l.id}`}>
@@ -292,10 +371,14 @@ export function TransactionActionsDialog({
 
         {action === "amend" && !anyAmendable && <InlineAlert tone="info">{t(S.nothingAmendable)}</InlineAlert>}
 
-        <label htmlFor="txn-reason">{t(S.reason)}</label>
-        <Select
+        {/* ComboboxField, not a bare <label> beside a bare picker: the pair had no field wrapper, so the
+            word "Reason" sat on the control's baseline hard against the dialog's inner edge while every
+            other control on the same form stacked its label above itself with the system's own gap. It was
+            `SelectField` until the scrolls/dropdowns audit; the reason list is a server catalogue, and this
+            dialog is one of the 12 places a picker sat inside a modal whose `overflow: auto` clipped it. */}
+        <ComboboxField
           id="txn-reason"
-          aria-label={t(S.reason)}
+          label={t(S.reason)}
           placeholder={t(S.reasonPlaceholder)}
           options={options}
           value={reasonCode === "" ? null : reasonCode}
@@ -315,49 +398,6 @@ export function TransactionActionsDialog({
           value={reasonText}
           onChange={(e) => setReasonText(e.target.value)}
         />
-
-        <Button variant="secondary" onClick={onCancel}>{t(S.back)}</Button>
-        <Button
-          variant="danger"
-          disabled={busy || (action === "amend" && !anyAmendable)}
-          onClick={async () => {
-            setTouched(true);
-            if (reasonCode === "") return;
-            if (action === "amend" && changed.length === 0 && removing.size === 0) return;
-            // A zero would be refused by the write path with nothing the doctor can act on. The alert
-            // above already says what to do instead.
-            if (action === "amend" && anyZero) return;
-
-            setBusy(true);
-            setFailed(false);
-            const text = reasonText.trim() === "" ? undefined : reasonText.trim();
-            try {
-              if (action === "withdraw") {
-                setResult(await onWithdraw({ reasonCode, reasonText: text }));
-              } else {
-                // Withdrawals FIRST. If a later amendment fails, the lines the doctor asked to remove are
-                // already gone rather than left live behind a half-applied edit — and removal is the
-                // safety-relevant half of this change.
-                for (const id of removing) {
-                  await onWithdrawLine({ lineId: id, reasonCode, reasonText: text });
-                }
-                // Only what CHANGED. Superseding five lines because the dialog was opened would put four
-                // amendments into the record that nobody made.
-                for (const l of changed) {
-                  await onAmend({ lineId: l.id, quantity: Number(quantities[l.id]), reasonCode, reasonText: text });
-                }
-                onDone();
-                onCancel();
-              }
-            } catch {
-              setFailed(true);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {t(action === "amend" ? S.confirmAmend : S.confirmWithdraw)}
-        </Button>
       </div>
     </Modal>
   );

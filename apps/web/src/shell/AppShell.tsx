@@ -12,21 +12,16 @@ import {
 } from "@mersal/design-system";
 import { useAuth } from "../auth/AuthProvider";
 import { useApi } from "../api/ApiProvider";
-import { portalForRole, type Localized, type Section } from "../portals/catalog";
+import { portalsForRoles, type Localized, type Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationPane } from "./NotificationPane";
 import { UserPane } from "./UserPane";
 import { BranchSwitcher } from "./BranchSwitcher";
+import { PortalSwitcher } from "./PortalSwitcher";
+import { AppUserButton } from "./AppUserButton";
+import { useMyProfile } from "./useMyProfile";
 import { useBranchContext } from "./useBranchContext";
-
-/** Two-letter initials for the app-bar avatar placeholder. */
-function initials(name: string): string {
-  const p = name.trim().split(/\s+/).filter(Boolean);
-  if (p.length === 0) return "?";
-  if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
-  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
-}
 
 function useLocalized() {
   const { lang } = useTheme();
@@ -96,7 +91,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tr = useLocalized();
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const portal = session?.role ? portalForRole(session.role) : null;
+  /**
+   * The portals this caller holds, and which of them the current URL is in.
+   *
+   * The active portal is READ OFF THE ADDRESS BAR rather than held in state. A stored "current portal" is a
+   * second answer to a question the URL already answers, and the two disagree the moment somebody follows a
+   * link, uses the back button, or opens a second tab — which is exactly what a person with several portals
+   * does all day. Falling back to the first held portal covers the paths that belong to no portal at all
+   * (a cross-portal patient deep link, `/patients/{id}`).
+   */
+  const myPortals = useMemo(() => portalsForRoles(session?.roles ?? []), [session?.roles]);
+  const activeBase = location.pathname.split("/")[1] ?? "";
+  const portal = myPortals.find((p) => p.base === activeBase) ?? myPortals[0] ?? null;
   const accessible: Section[] = useMemo(
     () => (portal ? portal.sections.filter((s) => can(s.permission)) : []),
     [portal, can],
@@ -104,6 +110,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canNotify = !!portal && can("notification.read");
   // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
   const branchCtx = useBranchContext(session?.role ?? undefined);
+  // 28.13 — the job title under the name in the app bar. Fails soft; see the hook.
+  const { profile, loaded: profileLoaded } = useMyProfile(session?.userId);
   const [paneOpen, setPaneOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);   // 18.F2 — ⌘K / Ctrl+K
   const [searchText, setSearchText] = useState("");
@@ -248,23 +256,35 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </button>
           )}
-          <button
+          {/*
+            28.13 — the line under the name is the person's POSITION, not the portal's eyebrow.
+
+            It used to read "Org Admin" — the label of the portal being looked at — so it CHANGED as somebody
+            moved between their portals. That made a caption about the PAGE wear the shape of a caption about
+            the PERSON. A job title does not change when you switch workspace, and that constancy is the
+            whole point of the line.
+
+            Falls back to the portal label when no title is recorded, which is most accounts today: an empty
+            second line leaves the button looking broken rather than looking sparse.
+          */}
+          <AppUserButton
             ref={avatarRef}
-            type="button"
-            className="app-userbtn"
-            aria-haspopup="dialog"
-            aria-expanded={userPaneOpen}
+            displayName={session.displayName}
+            userId={session.userId}
+            /*
+              28.14 — the fallback waits for the answer.
+
+              This read `profile?.position ?? tr(portal.eyebrow)`, and `profile` is null while the request is
+              in flight as well as when no title exists. So every load painted the PORTAL's label and then
+              replaced it with the person's title a moment later — reintroducing, as a flicker, the very
+              thing moving to `position` was meant to stop. An empty caption for one frame is invisible; a
+              wrong one that changes under the reader is not.
+            */
+            secondary={profileLoaded ? (profile?.position ?? tr(portal.eyebrow)) : ""}
+            expanded={userPaneOpen}
+            label={L.accountOpen[lang]}
             onClick={() => setUserPaneOpen((v) => !v)}
-            aria-label={`${L.accountOpen[lang]} — ${session.displayName}`}
-          >
-            <span className="app-avatar" aria-hidden="true">
-              {initials(session.displayName)}
-            </span>
-            <span className="app-userbtn-text">
-              <span className="app-userbtn-name">{session.displayName}</span>
-              <span className="app-userbtn-role">{tr(portal.eyebrow)}</span>
-            </span>
-          </button>
+          />
         </div>
       </header>
 
@@ -282,6 +302,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         items={navItems}
         current={activePath}
         onNavigate={(key) => navigate(`/${portal.base}/${key}`)}
+        // One shared switcher, in one slot, for every portal — and only for callers who have somewhere to
+        // switch to. See PortalSwitcher for why it is hidden rather than disabled below two portals.
+        /*
+          28.13 — ALWAYS rendered, including for somebody who holds exactly one portal.
+
+          It used to appear only above two, on the reasoning that a control offering one choice is not a
+          choice. That reasoning was about the PICKER, and it does not carry here: this block is also the
+          only thing on screen that names which workspace you are in, so hiding it left the single-portal
+          user — most of the platform — with a nav rail whose heading was the product's name and nothing
+          about their own context.
+
+          For a one-portal holder the sub-label still reads "Change portal" and still works: it opens the
+          picker, which shows their one card. That is a dead end by construction rather than by accident, and
+          the alternative — a control that is present but inert — is worse.
+        */
+        header={<PortalSwitcher portal={portal} />}
       />
 
       <main id="main" className="app-main" tabIndex={-1}>
@@ -309,7 +345,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           avatarRef.current?.focus();
         }}
         displayName={session.displayName}
+        userId={session.userId}
         roleLabel={portal.eyebrow}
+        position={profileLoaded ? profile?.position : undefined}
         onSignOut={() => void logout("user")}
       />
 

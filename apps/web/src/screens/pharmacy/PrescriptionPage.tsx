@@ -425,6 +425,8 @@ function DispenseBody({
   }, [api, rx.id]);
 
   const remaining = (l: PrescriptionLine) => Math.max(0, l.quantity - l.dispensed);
+  /** The unit every quantity on this line is counted in, as a suffix. Empty where the record does not say. */
+  const unit = (l: PrescriptionLine) => (l.quantityUnit ? ` ${l.quantityUnit}` : "");
   const qty = (id: string) => draft[id]?.quantity ?? 0;
 
   /**
@@ -583,7 +585,7 @@ function DispenseBody({
           <InlineAlert tone="info">{t(S.authNote)}</InlineAlert>
         )}
 
-        <div className="rx-dispense-scroll">
+        <div className="rx-dispense-scroll mrs-scroll mrs-scroll-focusable" tabIndex={0}>
           <table className="rx-dispense-table">
             <thead>
               <tr>
@@ -674,9 +676,13 @@ function DispenseBody({
                         )
                         : money(price)}
                     </td>
-                    <td className="rx-num tnum">{l.quantity}</td>
-                    <td className="rx-num tnum">{l.dispensed}</td>
-                    <td className="rx-num tnum">{left}</td>
+                    {/* 31.3 — WITH THE UNIT. A prescription's quantity is a box count wherever the
+                        catalogue records what a box holds, and the dose total where it does not. "1" against
+                        a 24-tablet box and "21" against the same box are both things a prescriber writes,
+                        and only the unit tells this counter which was meant. */}
+                    <td className="rx-num tnum">{l.quantity}{unit(l)}</td>
+                    <td className="rx-num tnum">{l.dispensed}{unit(l)}</td>
+                    <td className="rx-num tnum">{left}{unit(l)}</td>
                     <td className="rx-col-qty">
                       {l.outOfStock ? (
                         <StatusChip kind="warn" label={t(S.outOfStock)} />
@@ -694,7 +700,12 @@ function DispenseBody({
                               field says what is wrong, and Submit refuses until it is fixed rather than
                               sending it for the server to reject with a 422. */}
                           <InputField
-                            label={`${t(S.dispenseNow)} — ${productName(t(l.drug.label))}`}
+                            // The unit is IN the accessible name, parenthesised. A screen-reader user
+                            // types into this box hearing only its label, and "Dispense now — Panadol" over
+                            // a field that counts BOXES is the one place the unit cannot be left to the
+                            // column header they cannot see.
+                            label={`${t(S.dispenseNow)}${l.quantityUnit ? ` (${l.quantityUnit})` : ""}`
+                              + ` — ${productName(t(l.drug.label))}`}
                             hideLabel
                             type="number"
                             min={0}

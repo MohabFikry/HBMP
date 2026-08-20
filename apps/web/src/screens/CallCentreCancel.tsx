@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Button, Icon, InlineAlert, Modal } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import type { CcApi } from "./CallCentre";
 
@@ -133,7 +133,7 @@ export function CallCentreCancelButton({
       // flow would send a second cancel for an appointment that is already gone.
       if (!cancelled.current) {
         const outcome = await api.cancel(interaction.current, row.id, reason);
-        if (outcome !== "ok") { setError(S.failed); return; }
+        if (outcome.kind !== "ok") { setError(S.failed); return; }
         cancelled.current = true;
       }
 
@@ -141,7 +141,7 @@ export function CallCentreCancelButton({
       // `.catch(() => {})`, so every cancellation taken here left its interaction Open on the server — and an
       // open interaction is still bound to that member, still disclosing.
       const closed = await api.close(interaction.current, "Resolved", summaryFor(reason));
-      if (closed !== "ok") { setError(S.closeFailed); return; }
+      if (closed.kind !== "ok") { setError(S.closeFailed); return; }
 
       interaction.current = null;
       cancelled.current = false;
@@ -189,15 +189,13 @@ export function CallCentreCancelButton({
 
           <div className="cc-field">
             <span id="cc-cancel-reason-code">{t(S.reasonStep)}</span>
-            <select
+            <Combobox
               aria-labelledby="cc-cancel-reason-code"
-              className="mrs-control"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            >
-              <option value="">—</option>
-              {CANCEL_REASONS.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+              value={reason || null}
+              onChange={setReason}
+              placeholder="—"
+              options={CANCEL_REASONS.map((code) => ({ value: code, label: code }))}
+            />
           </div>
 
           {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}

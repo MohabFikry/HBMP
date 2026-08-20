@@ -58,7 +58,8 @@ public static class AnalyticsEndpoints
                 parsed.ToString(), series, deltas,
                 PayerScopeApplied: !permitted.IsUnrestricted,
                 Unavailable: []));
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+        .Produces<AnalyticsViewResult>();
 
         // ── Drill-down: the member rows behind an outlier segment ──────────────────────────────────────────
         //

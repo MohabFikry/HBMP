@@ -90,7 +90,8 @@ public static class ProfileSectionEndpoints
 
             await AuditAsync(audit, me, "prescriptions", beneficiaryId, rows.Count, ownOnly, ct);
             return Results.Ok(new ProfilePrescriptionsView(rows));
-        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"))
+        .Produces<ProfilePrescriptionsView>();
 
         // ---- Referrals ------------------------------------------------------------------------------------
         app.MapGet("/api/v1/referrals/for-beneficiary/{beneficiaryId:guid}", async (
@@ -126,7 +127,8 @@ public static class ProfileSectionEndpoints
 
             await AuditAsync(audit, me, "referrals", beneficiaryId, rows.Count, ownOnly: false, ct);
             return Results.Ok(new ProfileReferralsView(rows));
-        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"))
+        .Produces<ProfileReferralsView>();
     }
 
     private static ValueTask AuditAsync(

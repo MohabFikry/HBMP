@@ -40,10 +40,13 @@ public sealed record SettlementLineView(
     string ServiceLine,
     int DeliveredQty,
     decimal AgreedUnitPrice,
-    decimal LineTotal) : IFinanceProjection
+    decimal LineTotal,
+    /// <summary>"Contract" or "ObservedFloor" — whether a tariff priced this line. Projected rather than
+    /// kept internal: it is the question a reviewer has to answer before issuing the draft.</summary>
+    string PriceSource) : IFinanceProjection
 {
     public static SettlementLineView From(SettlementLine l) =>
-        new(l.ServiceCode, l.ServiceLine, l.DeliveredQty, l.AgreedUnitPrice, l.LineTotal);
+        new(l.ServiceCode, l.ServiceLine, l.DeliveredQty, l.AgreedUnitPrice, l.LineTotal, l.PriceSource);
 }
 
 /// <summary>A settlement view — header + priced lines. Provider is a reference; no beneficiary PII, no clinical.</summary>

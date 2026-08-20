@@ -127,7 +127,7 @@ v1.MapPost("/check", async (
 
         var priced = await pricing.PriceAsync(
             new TierPricingRequest(planVersionId, req.BenefitCategory, query,
-                Mersal.Money.Money.Egp(req.EstimatedAmount ?? 0m)),
+                Mersal.Amounts.Money.Egp(req.EstimatedAmount ?? 0m)),
             bearer, ct);
 
         if (priced.Pricing is { } quote)
@@ -180,13 +180,34 @@ v1.MapPost("/check", async (
     }, ct);
 
     return Results.Ok(EligibilityCheckResponse.From(outcome.Result, outcome.ExpiresAt, outcome.FromCache, preview));
-});
+})
+        .Produces<EligibilityCheckResponse>();
 
 // Lightweight member-status read for visit gating (2.3): emr-service reads this before creating a visit.
+//
+// AUDITED, because it is a PHI read. It was not, and "lightweight" was the reason it looked exempt: it
+// returns three fields and no clinical content. But the three are a named person's membership status and
+// member number, and the question this endpoint answers — "is this individual a member, and in good
+// standing?" — is precisely the one a disclosure enquiry asks about. It sits on the path emr calls before
+// every visit, so it is also among the most-called reads on the platform; a surface that answers about a
+// person that often and records nothing is where an unexplained lookup would hide.
+//
+// A MISS is audited too. "Is this person one of yours?" answered no is still an answer about them, and on an
+// identifier lookup it is a disclosure — an absent record cannot be the one case that leaves no trace.
 v1.MapGet("/members/{beneficiaryId:guid}/status", async (
-    Guid beneficiaryId, EligibilityDbContext db, CancellationToken ct) =>
+    Guid beneficiaryId, EligibilityDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me,
+    CancellationToken ct) =>
 {
     var m = await db.Members.AsNoTracking().FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
+
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = "member", EntityId = beneficiaryId.ToString(), Action = AuditAction.Read,
+        ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
+        DecisionOutcome = m is null ? "NotFound" : "Allow",
+        DecisionReasonCode = "member-status", FieldClasses = ["coverage"],
+    }, ct);
+
     return m is null
         ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found")
         : Results.Ok(new { beneficiaryId, status = m.Status, memberNo = m.MemberNo });
@@ -224,7 +245,8 @@ reception.MapGet("/search", async (
 
     var hint = cards.Count == 0 ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary." : null;
     return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
-});
+})
+        .Produces<ReceptionSearchResponse>();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

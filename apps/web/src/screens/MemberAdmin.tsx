@@ -6,14 +6,16 @@ import {
   Icon,
   InlineAlert,
   InputField,
+  KpiList,
   Modal,
   Pagination,
-  SelectField,
+  ComboboxField,
   StatusChip,
   Tabs,
   TextareaField,
   useTheme,
 } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { BeneficiaryEdit, BeneficiaryRow, Localized } from "@mersal/contracts";
 import type {
   CategoryCoverageDetail,
@@ -668,12 +670,16 @@ const BANDS = ["Low", "Medium", "High", "Exhausted"] as const;
  * ============================================================================================================
  * This used to wrap a NATIVE `<select>` in the field markup by hand, with a note saying the design system's
  * `Select` was "wrong here" because ten filters need visible labels bound to their control. The objection was
- * fair and is now answered: `SelectField` is that control with that label. A native select cannot style its
+ * fair and is now answered: `ComboboxField` is that control with that label. A native select cannot style its
  * own option list — the popup is drawn by the OS — so every one of these opened a system-blue list with square
  * corners, and sat at a slightly different height from the `InputField`s beside it.
  *
+ * It became `ComboboxField` — the SEARCHABLE one — in the scrolls/dropdowns pass. Ten filters over member
+ * data is exactly the case the audit was about: a plan or a group list is as long as the deployment makes it,
+ * and first-letter typeahead over it is a walk rather than a search.
+ *
  * Kept as a named wrapper rather than replaced at ~15 call sites: the filter grid's contract is
- * `value: string` where `""` means "Any", and `SelectField`'s is `string | null` where null means "nothing
+ * `value: string` where `""` means "Any", and `ComboboxField`'s is `string | null` where null means "nothing
  * chosen". Those are different ideas and the translation belongs in one place.
  */
 function FilterSelect({
@@ -688,7 +694,7 @@ function FilterSelect({
   options: ReadonlyArray<{ value: string; label: string }>;
 }) {
   return (
-    <SelectField
+    <ComboboxField
       label={label}
       value={value}
       onChange={onChange}
@@ -1033,7 +1039,7 @@ export function MemberDetail({
           title={t(S.profileTitle)}
           closeLabel={t(S.close)}
           wide
-          footer={<Button variant="ghost" onClick={() => setProfileOpen(false)}>{t(S.close)}</Button>}
+          footer={<Button variant="secondary" onClick={() => setProfileOpen(false)}>{t(S.close)}</Button>}
         >
           <Suspense fallback={<div className="async-loading" role="status" aria-live="polite"><span className="mrs-spin" aria-hidden="true" /></div>}>
             <PatientProfile beneficiaryId={row.beneficiaryId} />
@@ -1220,27 +1226,22 @@ function FamilyModal({
 
       {view !== null && alone && <InlineAlert tone="info">{t(S.familyAlone)}</InlineAlert>}
 
+      {/*
+        A DataTable, not hand-written markup. It was the latter — complete with its own `<caption
+        class="sr-only">`, its own `<th scope>` row and its own focusable scroll wrapper, which is the
+        component's pattern reimplemented — and the only visible difference was that it sat at `.pol-grid`'s
+        8/12px padding while every other table in the product sits at 14/16px.
+
+        The NAME column keeps `scope="row"`: a household table is read across, and "plan, Standard" without a
+        name attached is the wrong six words to hear.
+      */}
       {view !== null && !alone && (
-        <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
-          <table className="pol-grid" data-testid="family-table">
-            <caption className="sr-only">{t(S.familyTitle)}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{t(S.name)}</th>
-                <th scope="col">{t(S.memberNo)}</th>
-                <th scope="col">{t(S.relationship)}</th>
-                <th scope="col">{t(S.plan)}</th>
-                <th scope="col">{t(S.from)}</th>
-                <th scope="col">{t(S.status)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.members.map((member) => (
-                <FamilyRow key={member.enrollmentId} member={member} fmt={fmt} t={t} enumLabel={enumLabel} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          caption={t(S.familyTitle)}
+          rows={view.members}
+          rowKey={(m) => m.enrollmentId}
+          columns={familyColumns(t, fmt, enumLabel)}
+        />
       )}
 
       {/* Both of these are said out loud rather than left to be inferred from a short list. */}
@@ -1254,38 +1255,49 @@ function FamilyModal({
   );
 }
 
-function FamilyRow({
-  member,
-  fmt,
-  t,
-  enumLabel,
-}: {
-  member: CoveredFamilyMember;
-  fmt: ReturnType<typeof useFormat>;
-  t: (value: Localized) => string;
-  enumLabel: (value: string) => string;
-}) {
-  const name = [member.givenName, member.familyName].filter(Boolean).join(" ");
-  return (
-    <tr data-testid="family-row" data-subject={member.isSubject || undefined}>
-      <th scope="row">
-        {name || <span className="muted">{t(S.nameUnavailable)}</span>}
-        {/* Two different facts, and a row can carry both: who the cover belongs to, and which row you came
-            from. Words, not styling — a bold row says nothing to a screen reader. */}
-        {member.isPrincipal && <StatusChip kind="info" label={t(S.principal)} />}
-        {member.isSubject && <StatusChip kind="neu" label={t(S.thisMember)} />}
-      </th>
-      <td className="tnum">{member.memberNo}</td>
-      <td>{enumLabel(member.relationship)}</td>
-      <td>{member.planLabel ?? "—"}</td>
-      <td className="tnum">
-        {member.effectiveFrom ? fmt.date(member.effectiveFrom) : "—"}
-        {" → "}
-        {member.effectiveTo ? fmt.date(member.effectiveTo) : "—"}
-      </td>
-      <td><StatusChip kind={statusKind(member.status)} label={enumLabel(member.status)} /></td>
-    </tr>
-  );
+function familyColumns(
+  t: (value: Localized) => string,
+  fmt: ReturnType<typeof useFormat>,
+  enumLabel: (value: string) => string,
+): Column<CoveredFamilyMember>[] {
+  return [
+    {
+      key: "name",
+      header: t(S.name),
+      rowHeader: true,
+      cell: (m) => {
+        const name = [m.givenName, m.familyName].filter(Boolean).join(" ");
+        return (
+          <>
+            {name || <span className="muted">{t(S.nameUnavailable)}</span>}
+            {/* Two different facts, and a row can carry both: who the cover belongs to, and which row you
+                came from. Words, not styling — a bold row says nothing to a screen reader. */}
+            {m.isPrincipal && <StatusChip kind="info" label={t(S.principal)} />}
+            {m.isSubject && <StatusChip kind="neu" label={t(S.thisMember)} />}
+          </>
+        );
+      },
+    },
+    { key: "memberNo", header: t(S.memberNo), cell: (m) => <span className="tnum">{m.memberNo}</span> },
+    { key: "relationship", header: t(S.relationship), cell: (m) => enumLabel(m.relationship) },
+    { key: "plan", header: t(S.plan), cell: (m) => m.planLabel ?? "—" },
+    {
+      key: "from",
+      header: t(S.from),
+      cell: (m) => (
+        <span className="tnum">
+          {m.effectiveFrom ? fmt.date(m.effectiveFrom) : "—"}
+          {" → "}
+          {m.effectiveTo ? fmt.date(m.effectiveTo) : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: t(S.status),
+      cell: (m) => <StatusChip kind={statusKind(m.status)} label={enumLabel(m.status)} />,
+    },
+  ];
 }
 
 // ── The identity record ─────────────────────────────────────────────────────────────────────────────────
@@ -1383,7 +1395,7 @@ function BeneficiaryPanel({
           <h3>{t(P.title)}</h3>
           <p className="pol-muted">{t(P.intro)}</p>
         </div>
-        <Button variant="secondary" onClick={() => setEditing(true)} aria-haspopup="dialog">{t(P.edit)}</Button>
+        <Button variant="secondary" leadingIcon={<Icon name="pen" />} onClick={() => setEditing(true)} aria-haspopup="dialog">{t(P.edit)}</Button>
       </div>
 
       <dl className="reg-kv">
@@ -1502,7 +1514,7 @@ function EditDetailsModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>{t(P.cancel)}</Button>
-          <Button variant="primary" onClick={submit} loading={write.busy} disabled={write.busy}>{t(P.save)}</Button>
+          <Button variant="primary" leadingIcon={<Icon name="check2" />} onClick={submit} loading={write.busy} disabled={write.busy}>{t(P.save)}</Button>
         </>
       }
     >
@@ -1688,23 +1700,39 @@ function MemberUtilizationTab({ api, beneficiaryId }: { api: PolicyApi; benefici
   );
 
   return (
-    <Card data-testid="member-utilization">
+    // Same as `scope-utilization` in PolicyBook: `Card` is a surface and carries no padding of its own, so
+    // without this the meters and KPIs sat flush against its border. Found while fixing that one — it is the
+    // same panel, over one member instead of a cohort.
+    <Card
+      data-testid="member-utilization"
+      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+    >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (
         <>
           {!view.reconciliation.reconciled && <InlineAlert tone="bad">{t(S.reconcileBad)}</InlineAlert>}
           <LimitMeters caption={t(S.utilizationCaption)} rows={meters} />
-          <dl className="pol-kpis">
-            <div>
-              <dt>{t(S.encounters)}</dt>
-              {/* null means "could not ask", never "zero" — an em dash says so. */}
-              <dd>{fmt.number(view.external.encounters ?? undefined)}</dd>
-            </div>
-            <div>
-              <dt>{t(S.authorizations)}</dt>
-              <dd>{fmt.number(view.external.authorizationsRaised ?? undefined)}</dd>
-            </div>
-          </dl>
+          {/*
+           * `KpiList`, not the `pol-kpis` definition list this used to be — the same migration the cohort
+           * panel in PolicyBook made, for the same reason. That treatment is a dt at 0.82rem over a dd at
+           * 1.25rem: plain text with a size difference, which on a member's utilization tab put "how many
+           * encounters has this person had" in something smaller than the body copy beside it. `KpiList`
+           * keeps the definition-list semantics — two terms describing one subject, announced as pairs —
+           * and takes the hairline, the uppercase micro-label and the tabular numerals from the same classes
+           * `KpiCard` uses, so this panel and the cohort one cannot drift into two different-looking KPIs.
+           *
+           * Order is deliberately unchanged: for ONE member the meters are the headline and these two counts
+           * are context, which is the reverse of the cohort panel, where the totals lead.
+           *
+           * `fmt.number(null)` renders an em dash, so "could not ask" still reads as a dash and never as a
+           * zero — the distinction survives the change of treatment because it lives in the formatter.
+           */}
+          <KpiList
+            items={[
+              { label: t(S.encounters), value: fmt.number(view.external.encounters ?? undefined) },
+              { label: t(S.authorizations), value: fmt.number(view.external.authorizationsRaised ?? undefined) },
+            ]}
+          />
           {view.external.unavailable.length > 0 && (
             <InlineAlert tone="warn">
               {t(S.unavailable)} {view.external.unavailable.join(", ")}
@@ -1887,7 +1915,7 @@ function MembershipDialog({
         * as plain — it reads as a control somebody forgot to finish.
         */}
       {kind === "changeGroup" && (
-        <SelectField
+        <ComboboxField
           id="dlg-group"
           label={t(S.group)}
           value={groupId === "" ? null : groupId}
@@ -1896,14 +1924,20 @@ function MembershipDialog({
           placeholder={t(S.none)}
           options={[
             { value: "", label: t(S.none) },
-            ...groups.map((g) => ({ value: g.groupId, label: `${g.groupCode} — ${g.nameEn}` })),
+            // Localized, and the code goes in `keywords` so it stays findable by typing it. This read
+            // `nameEn` regardless of language while `nameAr` sat on the schema unused.
+            ...groups.map((g) => ({
+              value: g.groupId,
+              label: `${g.groupCode} — ${t({ en: g.nameEn, ar: g.nameAr })}`,
+              keywords: g.groupCode,
+            })),
           ]}
         />
       )}
 
       {kind === "changePlan" && (
         <>
-          <SelectField
+          <ComboboxField
             id="dlg-plan"
             label={t(S.targetPlan)}
             value={policyPlanId === "" ? null : policyPlanId}

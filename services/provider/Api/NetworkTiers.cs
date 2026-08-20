@@ -73,7 +73,8 @@ public static class NetworkTierEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/network-tiers/{tier.NetworkTierId}", NetworkTierView.From(tier));
-        });
+        })
+        .Produces<NetworkTierView>();
 
         read.MapGet("", async (ProviderDbContext db, string? status, CancellationToken ct) =>
         {
@@ -81,13 +82,15 @@ public static class NetworkTierEndpoints
             if (status is not null && Enum.TryParse<NetworkTierStatus>(status, out var s)) q = q.Where(t => t.Status == s);
             var rows = await q.OrderBy(t => t.Rank).ToListAsync(ct);
             return Results.Ok(rows.Select(NetworkTierView.From));
-        });
+        })
+        .Produces<IEnumerable<NetworkTierView>>();
 
         read.MapGet("/{id:guid}", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {
             var tier = await db.NetworkTiers.AsNoTracking().FirstOrDefaultAsync(t => t.NetworkTierId == id && !t.IsDeleted, ct);
             return tier is null ? NotFound() : Results.Ok(NetworkTierView.From(tier));
-        });
+        })
+        .Produces<NetworkTierView>();
 
         // Labels and rank may be corrected. tier_code and is_out_of_network may NOT: both are referenced by
         // benefit_rule_tier rows and by already-adjudicated claims, so changing them rewrites the meaning of
@@ -115,7 +118,8 @@ public static class NetworkTierEndpoints
                 new { tenantId = tier.TenantId, networkTierId = tier.NetworkTierId, tier.TierCode }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(NetworkTierView.From(tier));
-        });
+        })
+        .Produces<NetworkTierView>();
 
         // Retire, never delete: a claim adjudicated last year was priced at this tier and that history has to
         // stay readable. Retiring frees the tier's rank for a successor.
@@ -152,7 +156,8 @@ public static class NetworkTierEndpoints
                 new { tenantId = tier.TenantId, networkTierId = tier.NetworkTierId, tier.TierCode }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(NetworkTierView.From(tier));
-        });
+        })
+        .Produces<NetworkTierView>();
     }
 
     // ---- Assignments -------------------------------------------------------------------------------------
@@ -207,7 +212,8 @@ public static class NetworkTierEndpoints
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/network-tiers/assignments/{assignment.AssignmentId}",
                 TierAssignmentView.From(assignment, tier.TierCode));
-        });
+        })
+        .Produces<TierAssignmentView>();
 
         read.MapGet("/{id:guid}/assignments", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {
@@ -215,7 +221,8 @@ public static class NetworkTierEndpoints
                 .Where(a => a.NetworkTierId == id && !a.IsDeleted)
                 .OrderByDescending(a => a.EffectiveFrom).ToListAsync(ct);
             return Results.Ok(rows.Select(a => TierAssignmentView.From(a, null)));
-        });
+        })
+        .Produces<IEnumerable<TierAssignmentView>>();
 
         // Withdrawing an assignment is THREE acts, not two, and the response says which one happened.
         //
@@ -351,7 +358,8 @@ public static class NetworkTierEndpoints
                     "No assignment matched and no Active out-of-network tier is configured to fall back to.");
 
             return Results.Ok(TierResolutionView.From(resolved, providerId, locationId, serviceCode, serviceDate));
-        });
+        })
+        .Produces<TierResolutionView>();
     }
 
     // ---- helpers -----------------------------------------------------------------------------------------

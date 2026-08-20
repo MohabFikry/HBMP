@@ -38,7 +38,13 @@ public interface IDrugValidator
 /// it beside the dose field, and a bare "60" next to a medicine is a number whose unit the prescriber has to
 /// infer from the product name. Null is honest: 838 catalogue rows have no derivable unit.
 /// </param>
-public sealed record DrugPack(bool? IsPackSplittable, decimal? PackSize, string? PrescribingUnit = null);
+/// <param name="PackContent">
+/// 31.3 — how many prescribing units one BOX holds: 24 tablets, 120 ml, 1500 IU. THE divisor for every
+/// quantity. <paramref name="PackSize"/> is the catalogue's own count and is the same number only for the
+/// countable forms — for a 120 ml bottle of syrup it is 1, and dividing a 210 ml course by it said 210 packs.
+/// </param>
+public sealed record DrugPack(
+    bool? IsPackSplittable, decimal? PackSize, string? PrescribingUnit = null, decimal? PackContent = null);
 
 public sealed class AllowAllDrugValidator : IDrugValidator
 {

@@ -46,11 +46,11 @@ export function ApprovalsSla() {
   const t = useLoc();
   const state = useAsync<TatSummary>(() => api.slaSummary(), []);
   const cols: Column<TatSummary["byStatus"][number]>[] = [
-    { key: "status", header: t(S.status), cell: (r) => r.status },
-    { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
+    { key: "status", header: t(S.status), cell: (r) => r.status, sortable: true, sortValue: (r) => r.status },
+    { key: "count", header: t(S.count), cell: (r) => r.count, numeric: true, sortable: true, sortValue: (r) => r.count },
     { key: "avg", header: t(S.avg), cell: (r) => fmt.number(Math.round(r.avgMinutes)), numeric: true },
     { key: "p95", header: t(S.p95), cell: (r) => fmt.number(Math.round(r.p95Minutes)), numeric: true },
-    { key: "breaches", header: t(S.breaches), cell: (r) => <span className="tnum">{r.breaches}</span> },
+    { key: "breaches", header: t(S.breaches), cell: (r) => r.breaches, numeric: true, sortable: true, sortValue: (r) => r.breaches },
   ];
   return (
     <>
@@ -152,9 +152,9 @@ export function ApprovalsEmergency() {
   }
 
   const cols: Column<ApprovalItem>[] = [
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
-    { key: "service", header: t(S.service), cell: (r) => <span className="tnum">{r.service.code}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
+    { key: "service", header: t(S.service), cell: (r) => <span className="tnum">{r.service.code}</span>, sortable: true, sortValue: (r) => r.service.code },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "act",
       header: "",

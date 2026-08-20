@@ -37,19 +37,28 @@ jobs:
       - name: Guard selftest (a checker that cannot fail is not a check)
         run: python3 tools/ci/check-gate-freshness.py --selftest
 
-      # actions/download-artifact only reaches artifacts from the CURRENT run, and the heartbeats are
-      # written by backend-ci. Ask the API for backend-ci's most recent run instead.
+      # actions/download-artifact only reaches artifacts from the CURRENT run, so ask the API for the most
+      # recent run of each workflow that writes heartbeats. TWO of them since the live-bundle gate: it needs
+      # a built SPA, so it runs in frontend-ci and records into gate-heartbeats.frontend.json. Both land in
+      # the same directory and check-gate-freshness.py merges every gate-heartbeats*.json it finds.
+      #
+      # Each download is independent: one workflow having no artifact yet must not cost us the other's
+      # heartbeats — that would report every gate as never-run and bury the one that actually went quiet.
       - name: Download the most recent gate heartbeats
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .ci-state
-          run_id=$(gh run list --workflow backend-ci --limit 1 --json databaseId -q '.[0].databaseId' || true)
-          if [ -n "$run_id" ]; then
-            gh run download "$run_id" -n gate-heartbeats -D .ci-state || \
-              echo "no gate-heartbeats artifact on run $run_id (first run after this change?)"
-          fi
+          for pair in "backend-ci:gate-heartbeats" "frontend-ci:gate-heartbeats-frontend" \
+                      "security-ci:gate-heartbeats-secret-scan" "security-ci:gate-heartbeats-sca"; do
+            workflow=${pair%%:*}; artifact=${pair##*:}
+            run_id=$(gh run list --workflow "$workflow" --limit 1 --json databaseId -q '.[0].databaseId' || true)
+            if [ -n "$run_id" ]; then
+              gh run download "$run_id" -n "$artifact" -D .ci-state || \
+                echo "no $artifact artifact on $workflow run $run_id (first run after this change?)"
+            fi
+          done
 
       - name: Gate freshness (a gate that has not run in 7 days is a failing gate)
         run: python3 tools/ci/check-gate-freshness.py --state-dir .ci-state --max-age-days 7

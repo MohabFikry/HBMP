@@ -68,7 +68,8 @@ public static class CoordinationEndpoints
                 CoverageCategory: coverage?.BenefitCategory,
                 AnnualLimit: annual,
                 RemainingLimit: remaining));
-        });
+        })
+        .Produces<CoverageSummaryResponse>();
     }
 
     private static IEnumerable<LimitRow> ParseLimits(string json)

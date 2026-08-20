@@ -349,6 +349,84 @@ invariants:
       - Mersal.Architecture.Tests.OutboxAtomicityTests.A_state_change_and_its_event_share_one_transaction
       - Mersal.Architecture.Tests.OutboxAtomicityTests.The_debt_register_has_no_stale_entries
 
+  - id: INV-AUDIT-SURVIVES-CRASH
+    statement: >-
+      A mutation's audit record survives a process kill between the business commit and the emit: the audit
+      event is staged in the same transaction as the state change, so a change the platform made can never
+      be a change it cannot prove it made.
+    source: CLAUDE.md § Audit; 19-audit-strategy.md
+    severity: Critical
+    # The audit twin of INV-OUTBOX-SURVIVES-CRASH, and the sharper of the two. A lost domain event is a
+    # projection that falls behind and can be rebuilt from the source of truth; a lost audit event is a hole
+    # in the hash chain's coverage, discovered by whoever is trying to answer for the decision. IAuditClient
+    # writes through the service's own outbox, so EfOutbox.EnqueueRawAsync commits on its own SaveChanges and
+    # atomicity is a property of the CALL SITE — exactly as it is for domain events. 24 sites across 21 files
+    # emitted after their commit; all are fixed, and docs/quality/audit-atomicity-debt.txt holds the
+    # one-way ratchet at zero.
+    tests:
+      - Mersal.Architecture.Tests.AuditAtomicityTests.An_audit_event_is_emitted_before_its_transaction_commits
+      - Mersal.Architecture.Tests.AuditAtomicityTests.The_detector_reads_handlers_and_not_proximity
+      - Mersal.Architecture.Tests.AuditAtomicityTests.The_debt_register_has_no_stale_entries
+
+  - id: INV-DATE-IS-CAIRO
+    statement: >-
+      A business date is the Egyptian calendar date, never the UTC one — so a decision taken between
+      midnight and 02:00 Cairo is judged on the day the person standing at the counter is living in.
+    source: CLAUDE.md § Naming and conventions (display Africa/Cairo); libs/time/BusinessCalendar
+    severity: High
+    # The gap the no-bare-clock rule left. That rule made every service take an injected TimeProvider and
+    # then said nothing about the CONVERSION, so `DateOnly.FromDateTime(now.UtcDateTime)` passed it while
+    # being exactly as wrong. Twenty sites in twelve files; the 2026-08-09 audit named two of them. The
+    # pharmacy pair is the one with a person in front of it: a chronic refill window opening today read as
+    # not yet open turns a patient away on the morning they were right to come, and a lot expiring today
+    # read as in-date hands over expired medicine. Four sites are legitimate offset probes — converting to
+    # Cairo needs Cairo's offset ON that date, and the UTC date is the only key available first — and each
+    # says so inline with `// cairo-date: offset-probe (reason)` rather than exempting a whole file.
+    tests:
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.No_business_date_is_read_off_a_UTC_instant
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.The_detector_tells_a_UTC_date_from_a_converted_one
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
+      - Mersal.Pharmacy.Tests.CairoDateAtTheCounterTests.A_lot_expiring_today_is_refused_at_half_past_midnight
+      - Mersal.Pharmacy.Tests.CairoDateAtTheCounterTests.A_lot_expiring_tomorrow_is_still_dispensable
+
+  - id: INV-ONE-ROUNDING-MODE
+    statement: >-
+      Every amount on this platform rounds half-to-even at two decimal places, so a figure computed in one
+      service equals the same figure computed in another.
+    source: libs/money/Money.cs (Scale, banker's rounding); 22-data-dictionary numeric(14,2)
+    severity: Medium
+    # Mersal.Money rounds ToEven and says why: half-away-from-zero biases every .005 upward, which across a
+    # settlement batch of thousands of lines is a systematic overpayment. But Money is adopted by claims and
+    # eligibility only, and policy's tier limits and reporting's per-member-per-month were bare decimals
+    # rounding AwayFromZero — so a dashboard could sit a piastre above the settlement beside it with nobody
+    # able to say which was wrong. The rule is scale-based rather than type-based, which is what lets it hold
+    # across four services that have not migrated to the type: 1dp rounds are displayed percentages and are
+    # left alone, and the one 2dp non-amount (a month count) acknowledges itself inline.
+    tests:
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.An_amount_is_rounded_half_to_even
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.The_detector_reads_the_scale_and_the_mode
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
+      - Mersal.Claims.Tests.TheTwoClampsAgreeTests.The_decimal_clamp_and_the_Money_clamp_produce_the_same_amount
+      - Mersal.Claims.Tests.TheTwoClampsAgreeTests.Neither_clamp_treats_a_missing_tariff_as_no_ceiling
+
+  - id: INV-AMOUNTS-CARRY-THEIR-CURRENCY
+    statement: >-
+      Money arithmetic is done in the Money type: each product rounds once at the settlement scale, a total
+      cannot disagree with the sum of the lines it is displayed above, and two currencies cannot be added.
+    source: libs/money/Money.cs (phase 18.F1); ADR-0043 (where it is adopted)
+    severity: Medium
+    # ADR-0043 settles the question the 2026-08-09 audit raised as "adopt Money in four services". Reading
+    # them found that only two do money ARITHMETIC: finance's settlement generator and pharmacy's high-cost
+    # routing estimate. Policy stores cost-share terms and hands them to CostShareCalculator, which has been
+    # typed since 18.F1; reporting's aggregates are SQL sum(numeric) computed by Postgres, and its one derived
+    # figure is a division, which Money deliberately does not have. The type is in the CALCULATIONS, not the
+    # schema — there is no migration, and the ADR is why a reader will not find one.
+    tests:
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.A_settlements_currency_is_typed_and_an_unknown_code_is_refused_at_the_boundary
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.The_total_equals_the_sum_of_the_lines_where_a_decimal_sum_would_not
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.A_line_cannot_be_added_to_one_in_another_currency
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.Rounding_is_bankers_at_the_settlement_scale
+
   - id: INV-DEDUPE-SURVIVES-RESTART
     statement: >-
       Consumer idempotency survives a restart — a redelivered event is not applied twice after the process
@@ -2128,7 +2206,7 @@ invariants:
     # omission is the false assurance the five-state model exists to prevent.
     tests:
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.Unknown_splittability_yields_NotChecked_NAMING_the_field
-      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.A_missing_pack_size_yields_NotChecked_NAMING_the_field
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.A_missing_pack_CONTENT_yields_NotChecked_NAMING_the_field
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_reports_Unavailable_when_master_data_could_not_be_reached
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_never_BLOCKS_a_prescription
 
@@ -2146,3 +2224,99 @@ invariants:
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.The_COUNTER_refuses_a_collection_outside_its_window_and_names_the_date
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_ACUTE_script_is_unchanged_and_carries_no_schedule
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_unknown_or_inactive_refill_frequency_is_refused_rather_than_producing_no_windows
+
+  - id: INV-A-BOX-COUNT-IS-DIVIDED-BY-WHAT-THE-BOX-HOLDS
+    statement: >-
+      A course is converted into boxes by dividing it by how many PRESCRIBING units the box holds — never by
+      the catalogue's pack size, which counts containers for every measured form. Where the box's contents
+      are not recorded, no box count is offered and the composer says so.
+    source: 45-encounter-and-prescription-adjustments.md §6
+    severity: Critical
+    # The two numbers are the same only for tablets and their kin, and the catalogue is mostly not tablets.
+    # A 120 ml bottle of syrup is `pack_size = 1`, so a 210 ml course divided to 210 BOTTLES; a box of five
+    # insulin pens is `pack_size = 5` and could not be divided at all. Both failures were printed with the
+    # same confidence as a correct answer, at a dispensing counter.
+    #
+    # And the withheld case is half the invariant: "Lantus Solostar 100 I.U./ML 5 Pens" states its
+    # concentration and never its volume. Three millilitres is the usual fill of an insulin pen; assuming it
+    # would produce a box count that is right most of the time, which is the worst kind (invariant 8).
+    tests:
+      - Mersal.Prescribing.Tests.BoxCountTests.A_bottle_of_syrup_is_counted_in_BOTTLES_not_in_millilitres
+      # 31.5 — the CHRONIC path, which 31.3 changed the acute half of and missed. A ninety-day syrup was
+      # allocated as 1,800 "packs" across its windows.
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.A_chronic_syrup_is_allocated_in_BOTTLES_not_in_millilitres
+      - Mersal.Prescribing.Tests.BoxCountTests.A_course_of_insulin_is_counted_in_boxes_once_the_pen_s_contents_are_known
+      - Mersal.Prescribing.Tests.BoxCountTests.An_unknown_pack_content_yields_no_box_count_and_no_guess
+      - Mersal.Prescribing.Tests.PackContentTests.An_IU_product_with_no_volume_anywhere_derives_NO_content
+      - Mersal.Prescribing.Tests.PackContentTests.Two_columns_that_contradict_each_other_derive_NO_content
+      # 31.3 — and where a measurement IS supplied, it is supplied as reviewable data subordinate to the
+      # workbook, never as a rule in code that would apply itself to the next product that is different.
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.The_WORKBOOK_wins_wherever_it_speaks
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.A_product_with_no_override_derives_nothing_and_says_nothing
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.An_entry_that_matched_nothing_is_REPORTED_rather_than_ignored
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.The_shipped_file_parses_and_every_entry_states_a_basis
+
+  - id: INV-A-LIST-RULE-DOES-NOT-RESTYLE-A-POPUP-INSIDE-IT
+    statement: >-
+      A stylesheet rule written for a list's own rows is scoped to them, so a listbox opened from inside a
+      row keeps its own layout.
+    source: apps/web/test/popup-not-restyled.test.ts
+    severity: Medium
+    # `.dx-staged-list li` also matched `li.mrs-select-option`, because a Select renders its popup inside the
+    # row that owns it. Every option inherited a four-column grid, the label landed in a track that resolved
+    # to 0px, and the rank picker on the diagnosis modal opened a list of two BLANK rows. Nothing was wrong
+    # with the data, the markup or the component — and jsdom performs no layout, so no rendering test in the
+    # suite could have seen it. What is checkable without a layout engine is whether the selector MATCHES.
+    tests:
+      - apps/web/test/popup-not-restyled.test.ts::a listbox inside .dx-staged-list keeps its own layout
+      - apps/web/test/popup-not-restyled.test.ts::has lists to check (a guard over an empty set is a guard that passed by finding nothing)
+
+  - id: INV-A-QUANTITY-IS-NEVER-SHOWN-WITHOUT-ITS-UNIT
+    statement: >-
+      A prescribed quantity carries what it COUNTS — "boxes", or the prescribing unit — from the composer,
+      through the record, onto the dispensing counter. Where the unit is unknown, no unit is shown.
+    source: 45-encounter-and-prescription-adjustments.md §6; ADR-0040 addendum (31.3)
+    severity: Critical
+    # 31.3 made the Quantity field a BOX COUNT wherever the catalogue records what a box holds, because a box
+    # is what the patient carries home. That is the right number to write and the wrong number to store
+    # unlabelled: a seven-day course of a 24-tablet product is "1", the dispensing screen renders the figure
+    # alone, and 1 box and 1 tablet are the same character. The unit is snapshotted onto the line at
+    # prescribing time, like drug_name, so what the catalogue says next year cannot change what a
+    # prescription meant.
+    tests:
+      - apps/web/test/chronic-prescribing-wiring.test.ts::sends quantityUnit beside quantityPrescribed
+      - apps/web/test/chronic-prescribing-wiring.test.ts::sends no unit rather than a plausible one when nothing was computed
+      - apps/web/test/unit-aware-dosing.test.tsx::sends what the quantity COUNTS, not just how many
+      - apps/web/test/unit-aware-dosing.test.tsx::sends NO unit when nothing was computed, rather than a plausible one
+
+  - id: INV-COPYING-A-TRANSACTION-WRITES-NOTHING
+    statement: >-
+      The Copy action on a prescription or order row fills the composer with a new draft and raises nothing.
+      It never discards work already composed, and it says so when it can copy nothing.
+    source: apps/web/test/encounter-transaction-actions.test.tsx
+    severity: High
+    # A control on a row of a clinical record that silently created a second prescription would be the worst
+    # kind of convenience — and the row it sits on already carries two controls that DO change the record, so
+    # the one that does not has to be provably inert rather than merely intended to be.
+    tests:
+      - apps/web/test/encounter-transaction-actions.test.tsx::offers Copy on the row, and copying writes nothing
+      - apps/web/test/encounter-transaction-actions.test.tsx::fills the composer from the copied transaction
+      - apps/web/test/encounter-transaction-actions.test.tsx::says so when there is nothing on the row it can copy
+
+  - id: INV-A-PRESCRIPTION-KEEPS-THE-NUMBERS-IT-WAS-WRITTEN-FROM
+    statement: >-
+      The dose and frequency a prescriber sent are stored on the line, come back on every read, and carry onto
+      a superseding version. Where they were never sent they read as absent, never as 1.
+    source: 45-encounter-and-prescription-adjustments.md §6; docs/BUILD-STATUS.md 31.5
+    severity: Critical
+    # They used to be spent and discarded: the daily-dose rule and the quantity check ran on them, and the row
+    # kept only `dose` — a sentence this application formatted. So a written script could not be re-checked
+    # against the numbers it was graded on except by parsing display text, and a copy could not carry a dose.
+    # The absent case is half the invariant: a default of 1 looks like an ordinary once-daily prescription and
+    # would be one nobody wrote (invariant 8).
+    tests:
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.The_dose_and_frequency_a_prescriber_sent_come_back_on_the_line
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.A_line_written_WITHOUT_them_reports_null_rather_than_one
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.They_survive_an_amendment_onto_the_new_version
+      - apps/web/test/encounter-transaction-actions.test.tsx::carries the dose, the frequency and the duration into the copy
+

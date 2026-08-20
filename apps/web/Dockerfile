@@ -39,7 +39,7 @@ ENV VITE_API_BASE=$VITE_API_BASE \
     VITE_OIDC_REDIRECT=$VITE_OIDC_REDIRECT
 RUN pnpm --filter @mersal/web build
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 # 28.2 — a TEMPLATE, not a finished conf. The nginx image runs envsubst over /etc/nginx/templates/*.template
 # at startup, which is how the gateway upstream and the CSP become deployment configuration instead of
 # something baked into an image.
@@ -74,4 +74,20 @@ ENV NGINX_ENVSUBST_FILTER="^(KONG_UPSTREAM|CSP_POLICY)" \
     CSP_POLICY="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; frame-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'"
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 8080
-# nginx:alpine already runs worker processes unprivileged; the image's default entrypoint is kept.
+
+# Runs as an unprivileged user, not root (Trivy DS-0002).
+#
+# The previous base was `nginx:1.27-alpine`, and the note here said "nginx:alpine already runs worker
+# processes unprivileged". That was true and beside the point: the MASTER process still ran as root, which is
+# the process an nginx compromise gets you. The stock image needs root because it binds :80 and writes its
+# pid and caches to root-owned paths — none of which this container does. It already listens on 8080
+# (nginx.conf.template, EXPOSE above, and the compose port map), so nothing had to be re-plumbed.
+#
+# `nginxinc/nginx-unprivileged` is the same nginx from the same maintainers, laid out so every path the
+# server writes at runtime — /var/cache/nginx, /tmp, /etc/nginx/conf.d for the rendered template — is owned
+# by uid 101. The envsubst templating above is unchanged; it is the same entrypoint.
+#
+# The USER line is redundant with the base image, which already sets it, and is here anyway: Trivy reads the
+# Dockerfile rather than the built image, so an inherited USER is invisible to it. Stating it keeps the gate
+# honest instead of teaching the next person to suppress the rule.
+USER 101

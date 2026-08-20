@@ -234,7 +234,8 @@ public static class BeneficiaryIntakeEndpoints
                     existing.BeneficiaryId, existing.Status.ToString(), existing.MemberNo,
                     Created: false, Changed: changed));
             })
-            .RequireAuthorization(HbmpPolicies.Scope("patient:write"));
+            .RequireAuthorization(HbmpPolicies.Scope("patient:write"))
+        .Produces<IntakeResult>();
     }
 
     /// <summary>

@@ -17,7 +17,7 @@ public enum AllocationUnit
 /// </summary>
 /// <param name="IsPackSplittable">Null ⇒ the drug master does not say. NOT assumed true: assuming splittable
 /// is the dangerous default, because it silently permits a fractional inhaler.</param>
-/// <param name="PackSize">How many prescribing units are in one pack. Required only when the pack cannot be
+/// <param name="PackContent">How many prescribing units one BOX HOLDS. Required only when the pack cannot be
 /// split, because that is the only case where the conversion needs it.</param>
 public sealed record AllocationRequest(
     decimal DosePerAdministration,
@@ -25,7 +25,7 @@ public sealed record AllocationRequest(
     int DurationDays,
     int FrequencyMonths,
     bool? IsPackSplittable,
-    decimal? PackSize);
+    decimal? PackContent);
 
 /// <summary>
 /// The computed schedule, or a stated refusal to compute one.
@@ -122,8 +122,12 @@ public static class ChronicAllocation
         if (request.IsPackSplittable is null)
             return NotChecked("is_pack_splittable");
 
-        if (request.IsPackSplittable == false && request.PackSize is not > 0)
-            return NotChecked("pack_size");
+        // 31.5 — `pack_content`, not `pack_size`. 31.3 established that the catalogue's pack size counts
+        // CONTAINERS for every measured product and replaced the divisor in `QuantityMath`; this path was
+        // missed. A 120 ml bottle of syrup is `pack_size = 1`, so a ninety-day course at 10 ml twice a day
+        // allocated eighteen hundred "packs" across its windows, and the composer would have shown it.
+        if (request.IsPackSplittable == false && request.PackContent is not > 0)
+            return NotChecked("pack_content");
 
         // ---- 1. The total, in prescribing units ----------------------------------------------------------
         var totalUnits = request.DosePerAdministration * request.TimesPerDay * request.DurationDays;
@@ -143,7 +147,7 @@ public static class ChronicAllocation
         {
             // Non-splittable: convert to whole packs, rounding UP. A patient who needs 360 puffs and is given
             // one 200-puff canister runs out; the rounding direction is not a matter of taste.
-            total = Math.Ceiling(totalUnits / request.PackSize!.Value);
+            total = Math.Ceiling(totalUnits / request.PackContent!.Value);
             unit = AllocationUnit.WholePacks;
         }
 

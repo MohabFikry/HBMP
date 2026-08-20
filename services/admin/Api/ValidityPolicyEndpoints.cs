@@ -60,7 +60,8 @@ public static class ValidityPolicyEndpoints
 
             return Results.Ok(new ValidityPolicyView(tenant, ValidityPolicy.DefaultDays,
                 ValidityPolicy.MinDays, ValidityPolicy.MaxDays, items));
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+        .Produces<ValidityPolicyView>();
 
         app.MapPut("/api/v1/admin/validity-policy", async (
             SetValidityPolicyRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
@@ -92,15 +93,12 @@ public static class ValidityPolicyEndpoints
             // shortens the window and expects yesterday's prescriptions to expire tonight has to learn that
             // from somewhere, and the alternative — retroactive expiry — would strand patients holding a
             // valid prescription they were told to come back with.
-            return Results.Ok(new
-            {
-                artefact = artefact.ToString(),
-                days = req.Days,
-                appliesTo = "prescriptions and orders written from now on; existing ones keep the expiry they were issued with",
-                version = result.Config!.VersionNo,
-                effectiveFrom = result.Config.EffectiveFrom,
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("admin:write"));
+            return Results.Ok(new ValidityPolicyChangeView(
+            artefact.ToString(), req.Days,
+            "prescriptions and orders written from now on; existing ones keep the expiry they were issued with",
+            result.Config!.VersionNo, result.Config.EffectiveFrom));
+        }).RequireAuthorization(HbmpPolicies.Scope("admin:write"))
+        .Produces<ValidityPolicyChangeView>();
     }
 }
 

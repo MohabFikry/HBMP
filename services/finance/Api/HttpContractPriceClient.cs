@@ -7,7 +7,8 @@ namespace Mersal.Finance.Api;
 /// <summary>Reads the in-effect agreed price book from provider-service (<c>provider_contract</c> /
 /// <c>contract_service_line</c>, 22 §5.3) with the caller's bearer token — finance READS these prices, it never
 /// duplicates or mutates contract data. Fail-soft: if the provider price API can't be reached the book is empty and
-/// settlement lines fall back to the observed unit cost (never a fabricated price).</summary>
+/// settlement lines fall back to the LOWEST observed unit cost for the code in the period (never a
+/// fabricated price, and never the average — see SettlementPriceSource).</summary>
 public sealed class HttpContractPriceClient(HttpClient http) : IContractPriceProvider
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

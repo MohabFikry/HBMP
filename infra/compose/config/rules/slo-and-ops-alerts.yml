@@ -36,6 +36,18 @@ groups:
           summary: "Event-bus backlog > 5k ready messages"
           runbook: docs/runbooks/event-bus-backlog.md
 
+      - alert: DeadLetterQueueNotEmpty
+        # A dead-lettered message is a domain event that was NOT applied — a benefit accumulator that did
+        # not move, a fulfilment authorization never issued. Until the dead-letter exchange existed these
+        # were dropped and this alert had nothing to fire on; the whole point of parking them is that
+        # somebody is told. Any depth at all is worth a ticket: the queue's normal state is empty.
+        expr: sum(rabbitmq_queue_messages_ready{queue="hbmp.dead-letter"}) > 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Dead-lettered events are parked and unapplied ({{ $value }} messages)"
+          runbook: docs/runbooks/failed-consume-replay.md
+
       - alert: ServiceSaturationCPU
         expr: rate(process_cpu_seconds_total[5m]) > 0.9
         for: 10m

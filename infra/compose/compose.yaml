@@ -71,6 +71,16 @@ services:
       Issuer__PublicUrl: "http://localhost:8090/"
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
+      # 28.11 — how long a SPENT OAuth token's row is kept before TokenPruner deletes it.
+      #
+      # Stated here rather than left to the code default so the number is visible to whoever is asked what
+      # the retention actually is. 30 days is the conservative end of the 30–90 day "transient" class in
+      # 20-compliance-checklist §6; the DPO can move it without a rebuild.
+      #
+      # It cannot sign anybody out at any value: OpenIddict prunes only what is already expired or spent, so
+      # this governs how far back the token table can answer a forensic question — and `identity.login_attempt`
+      # plus the hash-chained audit store answer that better, for 6–7 years.
+      Issuer__TokenRetentionDays: "30"
       # 28.1 — how many proxies sit between the browser and this service. Kong alone today, so 1.
       #
       # Stated rather than defaulted, because it is the number the credential rate limiter counts back through
@@ -193,6 +203,46 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+    networks: [hbmp]
+
+  # ------------------------------------------------------- RabbitMQ dead-letter topology (one-shot)
+  # Every consumer on this platform rejects a failed message with requeue:false and its comments call
+  # that "dead-lettering". It was not: no queue declared x-dead-letter-exchange and no dead-letter
+  # exchange existed, so the broker did the only other thing it can with a rejected, non-requeued
+  # message — dropped it. A transient database blip while applying OrderLinesConsumed destroyed a
+  # benefit-accumulator movement; a dropped BeneficiaryRegistered left a person unknown at every desk.
+  # Nothing alarmed, because from the broker's point of view nothing had gone wrong.
+  #
+  # A POLICY, not queue arguments: arguments are immutable after declaration, so adding
+  # x-dead-letter-exchange to the twelve QueueDeclare call sites would fail every service with
+  # PRECONDITION_FAILED against the queues already on the broker. A policy attaches to queues that
+  # already exist and to any queue a later service adds without it having to remember this rule.
+  #
+  # A one-shot container, not load_definitions: RabbitMQ skips RABBITMQ_DEFAULT_USER creation when a
+  # definitions file is loaded, so that route silently leaves the broker with no users at all — and
+  # putting the credentials in the definitions file to compensate would commit them to the repo.
+  # This reads them from the environment like every other service.
+  rabbitmq-init:
+    image: rabbitmq:3.13-management
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        A="rabbitmqadmin -H rabbitmq -u $$RABBITMQ_USER -p $$RABBITMQ_PASSWORD"
+        $$A declare exchange name=hbmp.dlx type=fanout durable=true
+        $$A declare queue name=hbmp.dead-letter durable=true
+        $$A declare binding source=hbmp.dlx destination=hbmp.dead-letter destination_type=queue
+        # The DLQ is excluded from its own policy: a queue that dead-letters to the exchange feeding it
+        # would loop a poison message forever instead of parking it.
+        $$A declare policy name=hbmp-dead-letter pattern='^(?!hbmp\.dead-letter$$).*' \
+          apply-to=queues priority=0 definition='{"dead-letter-exchange":"hbmp.dlx"}'
+        echo "dead-letter topology applied"
+    restart: "no"
     networks: [hbmp]
 
   # ---------------------------------------------------------------- NATS JetStream (event stream)
@@ -362,6 +412,10 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8090/"
       Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Messaging__Queue: "audit.events"
+      # Messaging__* is the ingest consumer; Events__RabbitUri is the publisher this service now uses to
+      # emit its OWN audit.read events onto the same queue. Both point at the same broker; without this
+      # the publisher would fall back to the guest:guest default and fail to connect.
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Worm__Endpoint: "http://minio:9000"
       Worm__AccessKey: "${MINIO_ROOT_USER}"
       Worm__SecretKey: "${MINIO_ROOT_PASSWORD}"

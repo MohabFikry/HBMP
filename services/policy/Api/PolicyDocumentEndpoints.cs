@@ -153,7 +153,8 @@ public static class PolicyDocumentEndpoints
             return Results.Ok(new IdentityPhotoView(
                 photo.LinkId, photo.VersionNo, url.ToString(),
                 clock.GetUtcNow().Add(IdentityPhotoRules.SignedUrlTtl)));
-        });
+        })
+        .Produces<IdentityPhotoView>();
     }
 
     // ---- Attach ------------------------------------------------------------------------------------------
@@ -226,7 +227,7 @@ public static class PolicyDocumentEndpoints
                 var onFile = await db.PolicyDocuments.AsNoTracking()
                     .Where(d => d.Scope == NoteScope.Member && d.ScopeRef == id)
                     .ToListAsync(ct);
-                if (!IdentityPhotoRules.ConsentSatisfied(onFile, DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime)))
+                if (!IdentityPhotoRules.ConsentSatisfied(onFile, BusinessCalendar.DateIn(clock.GetUtcNow())))
                     return ProblemResults.Unprocessable("PHOTO_CONSENT_REQUIRED", IdentityPhotoRules.ConsentMissing);
             }
 
@@ -311,7 +312,7 @@ public static class PolicyDocumentEndpoints
             await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/documents/{link.LinkId}",
-                PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
+                PolicyDocumentView.For(link, principal.Roles, BusinessCalendar.DateIn(now)));
         }).DisableAntiforgery();
     }
 
@@ -446,7 +447,7 @@ public static class PolicyDocumentEndpoints
             await outbox.EnqueueAsync("DocumentWithdrawn", "policy.events",
                 new { tenantId = link.TenantId, linkId, reason = req.Reason, by = principal.Subject }, ct);
             await tx.CommitAsync(ct);
-            return Results.Ok(PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
+            return Results.Ok(PolicyDocumentView.For(link, principal.Roles, BusinessCalendar.DateIn(now)));
         });
 
         write.MapPost("/documents/{linkId:guid}/verify", async (Guid linkId, VerifyDocument req,
@@ -477,7 +478,7 @@ public static class PolicyDocumentEndpoints
             await outbox.EnqueueAsync("DocumentVerified", "policy.events",
                 new { tenantId = link.TenantId, linkId, by = principal.Subject }, ct);
             await tx.CommitAsync(ct);
-            return Results.Ok(PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
+            return Results.Ok(PolicyDocumentView.For(link, principal.Roles, BusinessCalendar.DateIn(now)));
         });
     }
 

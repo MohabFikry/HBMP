@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
 import { AppRouter } from "../src/routing/AppRouter";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { seedSession } from "./helpers";
 
@@ -75,6 +75,12 @@ async function setTreatmentDuration(user: ReturnType<typeof userEvent.setup>, da
   await user.type(duration, days);
 }
 
+/** The refill-frequency picker is a Combobox: open the list, then click the option. */
+async function chooseFrequency(user: ReturnType<typeof userEvent.setup>, option: RegExp) {
+  await user.click(await screen.findByLabelText(/refill frequency|تكرار الصرف/i));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("29.5 — the acute/chronic toggle", () => {
   it("offers Acute and Chronic on the prescriptions composer", async () => {
     await openPrescriptions();
@@ -107,12 +113,15 @@ describe("29.5 — the acute/chronic toggle", () => {
     const user = await openPrescriptions();
 
     await user.click(await screen.findByRole("radio", { name: /chronic|مزمنة/i }));
-    const select = await screen.findByLabelText(/refill frequency|تكرار الصرف/i);
+    // A Combobox, not a native <select>: its options exist only while the list is open, and the list is
+    // portalled to <body>, so they are read off `screen` rather than from inside the control.
+    await user.click(await screen.findByLabelText(/refill frequency|تكرار الصرف/i));
+    const offered = screen.getAllByRole("option").map((o) => o.textContent ?? "").join("|");
 
-    expect(within(select).getByRole("option", { name: /monthly/i })).toBeInTheDocument();
-    expect(within(select).getByRole("option", { name: /every 3 months/i })).toBeInTheDocument();
+    expect(offered).toMatch(/monthly/i);
+    expect(offered).toMatch(/every 3 months/i);
     // Seeded INACTIVE — offering it would compose a script the write path refuses.
-    expect(within(select).queryByRole("option", { name: /every 6 months/i })).not.toBeInTheDocument();
+    expect(offered).not.toMatch(/every 6 months/i);
   });
 });
 
@@ -121,7 +130,7 @@ describe("29.5 — the schedule the doctor sees before submitting", () => {
     const user = await openPrescriptions();
 
     await user.click(await screen.findByRole("radio", { name: /chronic|مزمنة/i }));
-    await user.selectOptions(await screen.findByLabelText(/refill frequency|تكرار الصرف/i), "Monthly");
+    await chooseFrequency(user, /^monthly$/i);
     await setTreatmentDuration(user, "90");
 
     // Three collections, and the schedule says so in dates and quantities rather than in prose.
@@ -135,7 +144,7 @@ describe("29.5 — the schedule the doctor sees before submitting", () => {
     const user = await openPrescriptions();
 
     await user.click(await screen.findByRole("radio", { name: /chronic|مزمنة/i }));
-    await user.selectOptions(await screen.findByLabelText(/refill frequency|تكرار الصرف/i), "Monthly");
+    await chooseFrequency(user, /^monthly$/i);
     await setTreatmentDuration(user, "90");
 
     // The row header specifically, not the prose beneath the table — which also says "total" and would let
@@ -151,7 +160,7 @@ describe("29.5 — the schedule the doctor sees before submitting", () => {
     const user = await openPrescriptions();
 
     await user.click(await screen.findByRole("radio", { name: /chronic|مزمنة/i }));
-    await user.selectOptions(await screen.findByLabelText(/refill frequency|تكرار الصرف/i), "Monthly");
+    await chooseFrequency(user, /^monthly$/i);
     await setTreatmentDuration(user, "14");
 
     expect(await screen.findByText(/more than one month|أكثر من شهر/i)).toBeInTheDocument();

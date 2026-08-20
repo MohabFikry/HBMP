@@ -40,8 +40,9 @@ public static class RxAmendmentEndpoints
 
         v1.MapGet("/amendment-reasons", () =>
                 Results.Ok(AmendmentReasons.For(ReasonScope.Prescription)
-                    .Select(r => new { code = r.Code, nameEn = r.NameEn, nameAr = r.NameAr })))
-            .RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+                    .Select(r => new AmendmentReasonView(r.Code, r.NameEn, r.NameAr))))
+            .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+            .Produces<IEnumerable<AmendmentReasonView>>();
 
         // ---- Cancel ONE line ---------------------------------------------------------------------------
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/cancel", async Task<IResult> (
@@ -141,8 +142,13 @@ public static class RxAmendmentEndpoints
                             previousQuantity = line.QuantityPrescribed,
                             amendedQuantity = req.QuantityPrescribed,
                             // The care timeline maps RxSubmitted to a step ONLY when this flag is set, which
-                            // is exactly right here: the script really has gone back for approval.
+                            // is exactly right here: the script really has gone back for approval. The
+                            // routing feed reads the same flag to decide whether to raise an authorization.
                             requiresApproval = true,
+                            // The amended LINE's drug and only it — the re-review is about what left the
+                            // approved scope, and offering the whole script would invite a partial approval
+                            // that silently re-scopes drugs nobody amended.
+                            serviceCodes = new[] { line.DrugId.ToString() },
                             reason = "amended-beyond-approved-scope",
                             reasonCode = record.ReasonCode,
                             orderedByUserId = record.AmendedBy.ToString(),
@@ -215,6 +221,8 @@ public static class RxAmendmentEndpoints
                             previousDurationDays = line.DurationDays,
                             amendedDurationDays = req.DurationDays,
                             requiresApproval = true,
+                            // See the quantity twin above: the amended line's drug, and only it.
+                            serviceCodes = new[] { line.DrugId.ToString() },
                             reason = "amended-beyond-approved-scope",
                             reasonCode = record.ReasonCode,
                             orderedByUserId = record.AmendedBy.ToString(),
@@ -350,11 +358,12 @@ public static class RxAmendmentEndpoints
 
             var cancelled = reports.Count(r => r.Cancelled);
             return cancelled == 0
-                ? Results.Json(new { rxId, cancelled, lines = reports }, statusCode: 409)
+                ? Results.Json(new CancelLinesResultView(rxId, cancelled, [.. reports]), statusCode: 409)
                 : cancelled < reports.Count
-                    ? Results.Json(new { rxId, cancelled, lines = reports }, statusCode: 207)
-                    : Results.Ok(new { rxId, cancelled, lines = reports });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+                    ? Results.Json(new CancelLinesResultView(rxId, cancelled, [.. reports]), statusCode: 207)
+                    : Results.Ok(new CancelLinesResultView(rxId, cancelled, [.. reports]));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<CancelLinesResultView>();
     }
 
     /// <summary>Design 45 §5's default. Held here rather than read from system_config for the same reason the

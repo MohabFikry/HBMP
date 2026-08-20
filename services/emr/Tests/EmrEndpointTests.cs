@@ -76,6 +76,69 @@ public class EmrEndpointTests
         finally { await app.CleanupAsync(); }
     }
 
+    /// <summary>
+    /// 0025 — the same window twice UPDATES one rule; it does not mint a second.
+    ///
+    /// The test above has always passed, and it is why this defect survived: it counts SLOTS, and slot
+    /// materialization has been deduplicated since 3.1. The RULES behind them were not. Every call did
+    /// `new ProviderAvailability { AvailabilityId = Guid.NewGuid(), … }`, so a clinic whose calendar was
+    /// regenerated monthly accumulated a live rule per regeneration — each one a source slot generation
+    /// honours, and no way to see or remove any of them.
+    /// </summary>
+    [SkippableFact]
+    public async Task Materializing_the_same_window_twice_leaves_exactly_ONE_availability_rule()
+    {
+        Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EmrApiFactory();
+        try
+        {
+            using var reception = app.ReceptionClient();
+            var req = Slots();
+
+            (await reception.PostAsJsonAsync("/api/v1/appointment-slots", req, Web))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            // Widened window on the second call: the rule must be CORRECTED, not duplicated — which is the
+            // half of "administered record" that a plain idempotency check would miss.
+            var widened = req with { EndTime = new TimeOnly(13, 0), MaxPerDay = 8 };
+            (await reception.PostAsJsonAsync("/api/v1/appointment-slots", widened, Web))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var db = EmrApiFactory.Ctx();
+            var rules = await db.ProviderAvailabilities
+                .Where(a => a.ProviderId == req.ProviderId && a.TenantId == app.Tenant).ToListAsync();
+
+            rules.Should().ContainSingle("one rule per practitioner, per clinic, per weekday");
+            rules[0].EndTime.Should().Be(new TimeOnly(13, 0));
+            rules[0].MaxPerDay.Should().Be(8);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    /// <summary>An omitted cap LEAVES an existing one alone. Regenerating a calendar is not a way to uncap a
+    /// clinic by not mentioning it.</summary>
+    [SkippableFact]
+    public async Task Regenerating_a_calendar_without_naming_a_cap_does_not_clear_the_cap()
+    {
+        Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EmrApiFactory();
+        try
+        {
+            using var reception = app.ReceptionClient();
+            var req = Slots() with { MaxPerDay = 12 };
+            (await reception.PostAsJsonAsync("/api/v1/appointment-slots", req, Web))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            (await reception.PostAsJsonAsync("/api/v1/appointment-slots", req with { MaxPerDay = null }, Web))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var db = EmrApiFactory.Ctx();
+            var rule = await db.ProviderAvailabilities
+                .SingleAsync(a => a.ProviderId == req.ProviderId && a.TenantId == app.Tenant);
+            rule.MaxPerDay.Should().Be(12);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
     [SkippableFact]
     public async Task An_availability_window_that_makes_no_sense_is_refused()
     {

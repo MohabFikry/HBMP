@@ -1,0 +1,27 @@
+{
+  "_comment": "Per-service count of operations declaring a response body. RATCHET: these only go up. Raise them with --update after declaring more; a change that lowers one fails the build. See check-response-schemas.py for why this is a floor and not a target.",
+  "declared": {
+    "admin": 28,
+    "approvals": 18,
+    "audit": 0,
+    "callcentre": 7,
+    "case": 10,
+    "claims": 12,
+    "document": 0,
+    "eligibility": 3,
+    "emr": 26,
+    "finance": 8,
+    "identity": 1,
+    "interop": 0,
+    "inventory": 2,
+    "masterdata": 7,
+    "notification": 4,
+    "orders": 19,
+    "patient": 7,
+    "pharmacy": 19,
+    "policy": 42,
+    "profile": 0,
+    "provider": 18,
+    "reporting": 11
+  }
+}

@@ -1120,7 +1120,7 @@ internal static class QuantityChecks
          * field named in the words a data administrator can act on.
          */
         var outcome = QuantityMath.Compute(
-            line.DoseAmount, line.TimesPerDay, line.DurationDays, pack.IsPackSplittable, pack.PackSize);
+            line.DoseAmount, line.TimesPerDay, line.DurationDays, pack.IsPackSplittable, pack.PackContent);
 
         if (outcome.Plan is not { } plan)
         {
@@ -1131,11 +1131,15 @@ internal static class QuantityChecks
                     + "quantity cannot be computed. A guessed quantity is a dispensing error.",
                     "لم يتم التحقق — لا تسجّل البيانات المرجعية 'is_pack_splittable' لهذا الدواء، لذلك يتعذّر "
                     + "حساب الكمية. الكمية المُخمّنة خطأ في الصرف."),
-                "pack_size" => (
-                    "Not checked — this pack cannot be split and master data does not record 'pack_size', "
-                    + "so the number of whole packs cannot be computed.",
-                    "لم يتم التحقق — لا يمكن تجزئة هذه العبوة ولا تسجّل البيانات المرجعية 'pack_size'، "
-                    + "لذلك يتعذّر حساب عدد العبوات الكاملة."),
+                // 31.3 — the column NAMED is the one a data administrator has to fill: for a syrup it is
+                // the workbook's "Volume / Weight", which is what pack_content is derived from. `pack_size`
+                // is populated on this row and is not the number that was missing.
+                "pack_content" => (
+                    "Not checked — this pack cannot be split and master data does not record 'pack_content' "
+                    + "for this drug (how much one box holds), so the number of whole packs cannot be "
+                    + "computed.",
+                    "لم يتم التحقق — لا يمكن تجزئة هذه العبوة ولا تسجّل البيانات المرجعية 'pack_content' "
+                    + "لهذا الدواء (سعة العبوة الواحدة)، لذلك يتعذّر حساب عدد العبوات الكاملة."),
                 _ => (
                     "Not checked — this line has no numeric dose, frequency and duration to compute a "
                     + "quantity from.",
@@ -1147,9 +1151,9 @@ internal static class QuantityChecks
         if (plan.Packs is { } packs)
         {
             return Clinical(line, ClinicalState.Ok,
-                $"{plan.TotalUnits:0.##} units required — {packs:0} whole pack(s) of {plan.PackSize:0.##} "
+                $"{plan.TotalUnits:0.##} units required — {packs:0} whole pack(s) of {plan.PackContent:0.##} "
                 + $"({plan.DispenseQuantity:0.##} units). This pack cannot be split.",
-                $"المطلوب {plan.TotalUnits:0.##} وحدة — {packs:0} عبوة كاملة سعة {plan.PackSize:0.##} "
+                $"المطلوب {plan.TotalUnits:0.##} وحدة — {packs:0} عبوة كاملة سعة {plan.PackContent:0.##} "
                 + $"({plan.DispenseQuantity:0.##} وحدة). لا يمكن تجزئة هذه العبوة.",
                 provenance);
         }

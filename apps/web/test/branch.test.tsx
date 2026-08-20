@@ -21,7 +21,10 @@ describe("14.8 — branch switcher", () => {
     // A combobox, not a native <select>: the OS draws a native option list itself, so it could never wear
     // the app's surface/accent. Closed, it must contribute no listbox at all.
     const combo = screen.getByRole("combobox", { name: /active branch/i });
-    expect(combo).toHaveTextContent(/Maadi · Home/);
+    // `toHaveValue`, not `toHaveTextContent`: this is a searchable Combobox now, so the control is an <input>
+    // and the branch is its value. "· Home" is still there because the switcher passes `hintWhenClosed` —
+    // the qualifier saying which of the branches is this operator's own.
+    expect(combo).toHaveValue("Maadi · Home");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     await userEvent.click(combo);
@@ -39,9 +42,11 @@ describe("14.8 — branch switcher", () => {
     renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={onSwitch} />);
     const combo = screen.getByRole("combobox", { name: /active branch/i });
 
-    // A real <button>, so it is in the tab order without a tabindex of its own (the harness renders a skip
-    // link ahead of it, so reach it directly rather than counting tab stops).
-    expect(combo.tagName).toBe("BUTTON");
+    // A real <input>, so it is in the tab order without a tabindex of its own (the harness renders a skip
+    // link ahead of it, so reach it directly rather than counting tab stops). It was a <button> while this
+    // was a `Select`; what the assertion is about — a natively focusable element rather than a div with a
+    // tabindex bolted on — is true of both, so the element name is checked rather than assumed.
+    expect(combo.tagName).toBe("INPUT");
     expect(combo).not.toHaveAttribute("tabindex");
     combo.focus();
     expect(combo).toHaveFocus();
@@ -71,10 +76,22 @@ describe("14.8 — branch switcher", () => {
   it("has no serious/critical a11y violations with the list OPEN", async () => {
     // The listbox only exists while open, so the closed-state sweep above never sees the new markup —
     // aria-activedescendant, the option roles and the required-children relationship all live here.
-    const { container } = renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={vi.fn()} />);
+    //
+    // Swept over `document.body`, NOT over `container`, and that is load-bearing rather than incidental: the
+    // list is portalled out of the control (see `Popup.tsx`), so a sweep scoped to the render container no
+    // longer contains the markup this test exists to check. It would still have passed — over nothing. The
+    // relationships being validated span the portal (`aria-controls` and `aria-activedescendant` on the input
+    // point at ids inside the list), so both halves have to be in scope for the check to mean anything.
+    renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={vi.fn()} />);
     await userEvent.click(screen.getByRole("combobox", { name: /active branch/i }));
     expect(screen.getByRole("listbox")).toBeInTheDocument();
-    expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+    // `region` is off for this one sweep only. It is a PAGE-structure rule — "all content sits inside a
+    // landmark" — and the harness renders a component, not a page, so at document scope it fires on the skip
+    // link and on the switcher itself and says nothing about either. Scoping to `container` used to dodge it
+    // by accident; now that the scope has to be the document, the dodge has to be deliberate and named.
+    expect(await axe(document.body, {
+      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    })).toHaveNoViolations();
   });
 });
 

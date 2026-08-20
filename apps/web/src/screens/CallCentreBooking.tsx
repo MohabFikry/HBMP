@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { L } from "../i18n/strings";
 import { PageHeader, useOpenProfile } from "./_shared";
@@ -8,7 +8,7 @@ import { BookingForm, NOTE_MAX, type BookingSelection } from "./booking/BookingF
 import { CallSummaryDraft } from "./CallNotes";
 import { MemberSearch } from "./CallCentreSearch";
 import { useRestorableState } from "./useRestorableState";
-import { CALL_REASONS, createHttpCcApi, type CcApi, type CcDirection, type CcMatch } from "./CallCentre";
+import { CALL_REASONS, createHttpCcApi, withReason, type CcApi, type CcDirection, type CcMatch } from "./CallCentre";
 import { useApi } from "../api/ApiProvider";
 import type { BranchSummary } from "@mersal/contracts";
 
@@ -162,11 +162,15 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
       doctorId: sel.doctorId,
       note: sel.note || undefined,
     });
-    setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    setAnnounce(
+      outcome.kind === "ok" ? t(L.ccBooked)
+      : outcome.kind === "conflict" ? t(L.ccSlotTaken)
+      : withReason(t(L.ccBookFailed), outcome),
+    );
     // Both a success and a 409 invalidate the times: one consumed the slot, the other proves someone else
     // did. Re-read them WITHOUT resetting the agent's branch/specialty/doctor — they are still what the
     // caller asked for, and making the agent re-enter them mid-call is a cost paid for someone else's race.
-    if (outcome !== "error") setReloadToken((k) => k + 1);
+    if (outcome.kind !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, openedFor, sel, t]);
 
   /**
@@ -178,12 +182,12 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   const finish = useCallback(async () => {
     if (!interactionId) return;
     const result = await api.close(interactionId, "Resolved", wrapSummary.trim(), reason);
-    if (result !== "ok") {
-      setSummaryError(result === "summary-required");
+    if (result.kind !== "ok") {
+      setSummaryError(result.kind === "summary-required");
       setAnnounce(
-        result === "summary-required" ? t(L.ccSummaryRequired)
-        : result === "not-your-call" ? t(L.ccNotYourCall)
-        : t(L.ccCloseFailed),
+        result.kind === "summary-required" ? t(L.ccSummaryRequired)
+        : result.kind === "not-your-call" ? t(L.ccNotYourCall)
+        : withReason(t(L.ccCloseFailed), result),
       );
       return;   // the call is still open — leave the screen showing it
     }
@@ -298,29 +302,27 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
         <div className="cc-callmeta">
           <label className="cc-field">
             <span>{t(L.ccReason)}</span>
-            <select
-              className="mrs-control"
+            <Combobox
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            >
-              {CALL_REASONS.map((r) => <option key={r} value={r}>{t(callReasonLabel(r))}</option>)}
-            </select>
+              onChange={setReason}
+              options={CALL_REASONS.map((r) => ({ value: r, label: t(callReasonLabel(r)) }))}
+            />
           </label>
 
           <label className="cc-field">
             <span>{t(L.ccDirection)}</span>
-            <select
-              className="mrs-control"
+            <Combobox
               value={direction}
-              onChange={(e) => setDirection(e.target.value as CcDirection)}
+              onChange={(v) => setDirection(v as CcDirection)}
               // Locked once the call exists. Direction is written when the interaction OPENS and there is no
               // endpoint that changes it, so an editable control here would accept a correction and silently
               // drop it — worse than not offering one.
               disabled={interactionId !== null}
-            >
-              <option value="Inbound">{t(L.ccInbound)}</option>
-              <option value="Outbound">{t(L.ccOutbound)}</option>
-            </select>
+              options={[
+                { value: "Inbound", label: t(L.ccInbound) },
+                { value: "Outbound", label: t(L.ccOutbound) },
+              ]}
+            />
             {interactionId !== null && <span className="cc-hint">{t(L.ccDirectionLocked)}</span>}
           </label>
         </div>

@@ -58,6 +58,14 @@ export const zPrescribableDrug = z.object({
    * for them would sit beside the dose field reading as data.</p>
    */
   prescribingUnit: z.string().nullable().optional(),
+  /**
+   * 31.3 — the same unit as a prescriber writes it: `tabs`, `caps`, `IU`, `puffs`.
+   *
+   * <p>Derived by the service that owns the vocabulary, not reconstructed here. The stored words are
+   * database values, and a dose field labelled "Dose (Tablet)" reads as a column name that escaped onto a
+   * prescription.</p>
+   */
+  prescribingUnitShort: z.string().nullable().optional(),
   /** Prescribing units per pack. Absent where the catalogue does not record one. */
   packSize: z.number().nullable().optional(),
   /**
@@ -196,6 +204,18 @@ export const zPrescriptionDraftLine = z.object({
   durationDays: z.number().nullable(),
   quantity: z.number(),
   /**
+   * 31.3 — what `quantity` COUNTS: `boxes`, or the prescribing unit (`tabs`, `IU`, `ml`).
+   *
+   * <p>The Quantity field holds a box count wherever the catalogue records what a box holds, and the dose
+   * total where it does not — so the number alone does not say which, and the difference between them is one
+   * box and two thousand two hundred and fifty units. It labels the field here and is SENT with the line, so
+   * a dispensing counter reading the figure back is never reading it without its unit.</p>
+   *
+   * <p>Empty while nothing has been computed, and empty for a product whose unit the catalogue does not
+   * record. Never filled in with a plausible default.</p>
+   */
+  quantityUnit: z.string().default(""),
+  /**
    * True once the prescriber has typed a quantity of their own.
    *
    * <p>The computed figure is a STARTING POINT, not a verdict: a doctor who deliberately writes 90 because
@@ -292,13 +312,14 @@ export const zQuantityPreview = z.object({
   /**
    * 31.2 — how many BOXES to hand over, which is what a pharmacy counts out.
    *
-   * <p>NULL when the question has no answer, and it often has none: `pack_size` counts the catalogue's
-   * MINOR UNITS, which is only the same thing the dose counts for forms like tablets and ampoules. A box of
-   * 5 insulin pens dosed in IU divides to a box count wrong by the pen's contents — so it is withheld and
-   * the composer says why, rather than printing a confident wrong number above a dispensing counter.</p>
+   * <p>NULL when the box's contents are not recorded — the workbook gives no volume for "Lantus Solostar
+   * 100 I.U./ML 5 Pens", so how much insulin the box holds is genuinely unknown. Three millilitres per pen
+   * is the usual fill and it is not assumed: the composer says the contents are unrecorded rather than
+   * printing a confident wrong number above a dispensing counter.</p>
    */
   boxes: z.number().nullable().optional(),
-  packSize: z.number().nullable().optional(),
+  /** 31.3 — how many prescribing units one box holds: 24 tabs, 120 ml, 1500 IU. The divisor. */
+  packContent: z.number().nullable().optional(),
   /** The word the number is counted in, so the composer says "60 Tablet" and not a bare 60. */
   prescribingUnit: z.string().nullable().optional(),
   isPackSplittable: z.boolean().nullable().optional(),

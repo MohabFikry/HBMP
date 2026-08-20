@@ -74,19 +74,20 @@ public sealed class DashboardService(AdminDbContext db, IAuditClient audit)
     }
 
     /// <summary>Access-review campaign status roll-up (open/closed + item decision counts).</summary>
-    public async Task<object> AccessReviewAsync(ActorContext actor, string tenant, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AccessReviewCampaignView>> AccessReviewAsync(
+        ActorContext actor, string tenant, CancellationToken ct = default)
     {
         var campaigns = await db.Campaigns.AsNoTracking().Include(c => c.Items)
             .Where(c => c.TenantId == tenant).ToListAsync(ct);
-        var view = campaigns.Select(c => new
-        {
-            c.CampaignId, c.Name, status = c.Status.ToString(), c.DueAt,
-            total = c.Items.Count,
-            pending = c.Items.Count(i => i.Decision == ReviewDecision.Pending),
-            recertified = c.Items.Count(i => i.Decision == ReviewDecision.Recertified),
-            revoked = c.Items.Count(i => i.Decision == ReviewDecision.Revoked),
-            autoExpired = c.Items.Count(i => i.Decision == ReviewDecision.AutoExpired),
-        }).ToList();
+        // 31.6 — `Task<object>` was the last thing on this service with no describable response. The shape was
+        // never in doubt; it simply had no name, so the spec could not carry it.
+        var view = campaigns.Select(c => new AccessReviewCampaignView(
+            c.CampaignId, c.Name, c.Status.ToString(), c.DueAt,
+            c.Items.Count,
+            c.Items.Count(i => i.Decision == ReviewDecision.Pending),
+            c.Items.Count(i => i.Decision == ReviewDecision.Recertified),
+            c.Items.Count(i => i.Decision == ReviewDecision.Revoked),
+            c.Items.Count(i => i.Decision == ReviewDecision.AutoExpired))).ToList();
 
         await AuditView(actor, tenant, "access-review", view.Count, ct);
         return view;

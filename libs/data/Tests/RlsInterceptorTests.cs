@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Mersal.Auth;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Data.Tests;
@@ -176,6 +177,56 @@ public class RlsInterceptorTests
         var rls = new RlsContext();
         rls.TenantId.Should().BeEmpty();
         rls.ProviderId.Should().BeEmpty();
+    }
+
+    // ---- provider scope: absence must not be the grant ----------------------------------------------
+    //
+    // The provider RLS policies read an empty app.provider_id as "tenant-wide", which is correct for the
+    // Network Team and platform admins. It also made an ABSENT claim a grant: a provider-scoped token that
+    // lost its provider_id bound "" and was handed read of every provider's rows — the inverse of what the
+    // tenant sentinel above exists to prevent, in the layer that is supposed to hold when the others fail.
+
+    private static HbmpPrincipal Principal(string role, string? providerId) => new()
+    {
+        Subject = "u-1", Roles = new HashSet<string> { role }, Scopes = new HashSet<string>(),
+        TenantId = "tenant-a", ProviderId = providerId,
+    };
+
+    [Theory]
+    [InlineData("provider_admin")]
+    [InlineData("lab_tech")]
+    [InlineData("imaging_tech")]
+    [InlineData("radiology_tech")]
+    [InlineData("pharmacist")]
+    public void A_provider_scoped_role_is_recognised_as_provider_scoped(string role)
+    {
+        // The list has to be complete: a role missing from it reads as tenant-wide when its claim goes
+        // absent, which is exactly the failure this guards.
+        Principal(role, providerId: null).IsProviderScoped().Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("network_manager")]
+    [InlineData("org_admin")]
+    [InlineData("reception")]
+    public void A_tenant_scoped_role_is_not_provider_scoped(string role)
+    {
+        // These legitimately reach across providers; binding a sentinel for them would break the Network
+        // Team's whole job.
+        Principal(role, providerId: null).IsProviderScoped().Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_provider_scoped_principal_with_no_provider_id_is_distinguishable_from_tenant_wide()
+    {
+        // The two cases the binder must not conflate. "" is an explicit grant; the sentinel is a value no
+        // provider_id column can equal, so the session reads nothing rather than everything.
+        RlsConnectionInterceptor.NoProviderSentinel.Should().NotBeEmpty();
+        RlsConnectionInterceptor.NoProviderSentinel.Should().Contain("(",
+            "a parenthesis cannot appear in a UUID, so no provider row can ever carry this value");
+
+        Principal("lab_tech", providerId: null).IsProviderScoped().Should().BeTrue();
+        Principal("lab_tech", providerId: "p-1").ProviderId.Should().Be("p-1");
     }
 
     [Fact]

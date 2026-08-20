@@ -6,7 +6,8 @@ namespace Mersal.Finance.Infrastructure;
 public interface IContractPriceProvider
 {
     /// <summary>The in-effect agreed price book for a provider on a date: service_code → (unit price, currency,
-    /// contract id). A missing code means "no agreed price" → the settlement line falls back to observed unit cost.</summary>
+    /// contract id). A missing code means "no agreed price" → the settlement line falls back to the LOWEST
+    /// observed unit cost and is marked ObservedFloor, so a reviewer can see it had no tariff.</summary>
     Task<ContractPriceBook?> GetPriceBookAsync(Guid providerId, DateOnly asOf, string? bearerToken, CancellationToken ct = default);
 }
 

@@ -70,13 +70,17 @@ export function CptCombobox({
       return;
     }
     setSearching(true);
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      api.searchCpt(q, sections).then(
+      // The signal, not just the `live` flag. `live` stops a superseded answer from being RENDERED; the
+      // signal stops it from being FETCHED. On a 250ms debounce a considered search leaves several requests
+      // running against the catalogue that nobody will ever look at.
+      api.searchCpt(q, sections, controller.signal).then(
         (rows) => { if (live) { setResults(rows); setSearching(false); setActive(0); } },
         () => { if (live) { setResults([]); setSearching(false); } },
       );
     }, 250);
-    return () => { live = false; clearTimeout(timer); };
+    return () => { live = false; clearTimeout(timer); controller.abort(); };
     // `sections.join()` and not `sections`: the caller passes an array literal, so a new identity every
     // render would re-run this effect on every keystroke elsewhere on the screen. What matters is WHICH
     // sections, not which array.

@@ -47,7 +47,8 @@ public static class InventoryEndpoints
             if (includeDiscontinued != true) q = q.Where(i => i.Status == ItemStatus.Active);
             var rows = await q.OrderBy(i => i.NameEn).Take(1000).ToListAsync(ct);
             return Results.Ok(rows.Select(ItemView.From));
-        });
+        })
+        .Produces<IEnumerable<ItemView>>();
 
         write.MapPost("/items", async (CreateItemRequest req, InventoryDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, [FromServices] IMedicinesDirectory medicines, CancellationToken ct) =>
         {
@@ -139,7 +140,8 @@ public static class InventoryEndpoints
                 ActorUserId = me.Principal?.Subject, TenantId = tenant, DecisionOutcome = category.ToString(),
             }, ct);
             return Results.Created($"/api/v1/inventory/items/{item.ItemId}", ItemView.From(item));
-        });
+        })
+        .Produces<ItemView>();
 
         // ---- stock: the DERIVED balance ---------------------------------------------------------------
 
@@ -318,7 +320,6 @@ public static class InventoryEndpoints
                 transferRef, req.FromBranchId, ct);
             if (MapFailure(inbound) is { } inFailed) { await tx.RollbackAsync(ct); return inFailed; }
 
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -326,6 +327,7 @@ public static class InventoryEndpoints
                 ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
                 DecisionOutcome = "Transferred", DecisionReasonCode = req.Reason,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(new
             {

@@ -1,4 +1,6 @@
+using System.Globalization;
 using Mersal.Claims.Domain;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Claims.Infrastructure;
@@ -6,7 +8,13 @@ namespace Mersal.Claims.Infrastructure;
 /// <summary>Outcome of a provider submission. <c>Created</c> recorded the submission + its ProviderSubmitted claim;
 /// <c>Replayed</c> is the idempotent no-op for a retried Idempotency-Key; <c>Duplicate</c> means at least one line
 /// referenced an already-claimed fulfillment (the no-double-billing index fired) → nothing is created, DUPLICATE_CLAIM.</summary>
-public enum SubmitOutcome { Created, Replayed, Duplicate }
+public enum SubmitOutcome
+{
+    Created, Replayed, Duplicate,
+    /// <summary>The key was already used for a DIFFERENT submission. Answering it with the earlier claim
+    /// would tell the provider an invoice had been received that was never received (migration 0009).</summary>
+    IdempotencyKeyReuse,
+}
 
 /// <summary>A provider-asserted invoice line (min-necessary — code + amount + date, no clinical field).</summary>
 public sealed record SubmissionLineInput(
@@ -41,11 +49,18 @@ public sealed class SubmissionService(
     {
         ArgumentNullException.ThrowIfNull(req);
 
-        // (1) Idempotent replay — a retried submission with the same key returns the first result unchanged.
+        // (1) Idempotent replay — a retried submission with the same key returns the first result unchanged,
+        // and ONLY if it is the same submission. Bound to the body since migration 0009: this compared the
+        // key alone, so a key reused across two invoices returned the first claim, telling the provider
+        // their second invoice had been received when nothing had been received.
+        var requestHash = HashRequest(req);
         var prior = await db.ClaimSubmissions.AsNoTracking().Include(s => s.Lines)
             .FirstOrDefaultAsync(s => s.IdempotencyKey == idempotencyKey, ct);
         if (prior is not null)
         {
+            if (!IdempotencyKeyRules.Matches(prior.RequestHash, requestHash))
+                return new SubmitResult(SubmitOutcome.IdempotencyKeyReuse, null, null);
+
             var priorClaim = prior.ClaimId is { } cid
                 ? await db.Claims.AsNoTracking().Include(c => c.Lines).FirstOrDefaultAsync(c => c.ClaimId == cid, ct) : null;
             return new SubmitResult(SubmitOutcome.Replayed, prior, priorClaim);
@@ -104,6 +119,7 @@ public sealed class SubmissionService(
                 SubmittedOnBehalfOf = req.SubmittedOnBehalfOf,
                 SubmittedAt = now,
                 IdempotencyKey = idempotencyKey,
+                RequestHash = requestHash,
             };
 
             foreach (var plan in plans)
@@ -134,9 +150,13 @@ public sealed class SubmissionService(
             // Concurrent submit with the same key won the race → return theirs.
             if (tx is not null) await tx.RollbackAsync(ct);   // ambient? the caller owns the rollback
             db.ChangeTracker.Clear();
+            // Lost a race on the key. The winner's body still has to match: two different invoices sent
+            // concurrently under one key is exactly the case the hash exists for.
             var won = await db.ClaimSubmissions.AsNoTracking().Include(s => s.Lines)
                 .FirstAsync(s => s.IdempotencyKey == idempotencyKey, ct);
-            return new SubmitResult(SubmitOutcome.Replayed, won, null);
+            return IdempotencyKeyRules.Matches(won.RequestHash, requestHash)
+                ? new SubmitResult(SubmitOutcome.Replayed, won, null)
+                : new SubmitResult(SubmitOutcome.IdempotencyKeyReuse, null, null);
         }
     }
 
@@ -171,6 +191,21 @@ public sealed class SubmissionService(
 
     // ---- line construction --------------------------------------------------------------------------------
     private readonly record struct LinePlan(SubmissionLineInput Input, FulfillmentMatch? Match, decimal? Tariff);
+
+    /// <summary>What makes this submission THIS submission: who is billing, for whom, under which invoice,
+    /// and the lines. Lines are sorted before hashing, so a client that rebuilt the array in a different
+    /// order is still recognised as the same submission (IdempotencyKeyRules' order-stability rule).</summary>
+    private static string HashRequest(SubmissionRequest req) =>
+        IdempotencyKeyRules.Hash([
+            req.ProviderId.ToString(), req.BeneficiaryId.ToString(), req.InvoiceNumber ?? "",
+            req.CurrencyCode ?? "", req.SubmittedOnBehalfOf ?? "",
+            .. req.Lines
+                .Select(l => string.Join('|',
+                    l.CodeSystem.ToString(), l.Code, l.ServiceDate.ToString("O", CultureInfo.InvariantCulture),
+                    IdempotencyKeyRules.Amount(l.Quantity), IdempotencyKeyRules.Amount(l.BilledAmount),
+                    l.AuthorizationId?.ToString() ?? ""))
+                .OrderBy(x => x, StringComparer.Ordinal),
+        ]);
 
     private static (ClaimLine, ClaimSubmissionLine) BuildLine(Claim claim, LinePlan plan)
     {

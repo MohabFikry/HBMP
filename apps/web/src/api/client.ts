@@ -70,6 +70,7 @@ import type {
   CreatePractitionerInput,
   PractitionerCreated,
   ReportView,
+  SystemConfigEdit,
   SystemConfigEntry,
   TatSummary,
   CaseListItem,
@@ -120,7 +121,9 @@ import type {
   Settlement,
   UtilizationView,
   IdentityUser,
+  RoleCatalogEntry,
   RoleScopeGrant,
+  ScopeCatalogEntry,
   ReportAccessRequestRow,
   PatientProfile,
   CptRef,
@@ -175,7 +178,7 @@ export interface ApiClient {
    */
   branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
   // Reception — eligibility (Phase 2)
-  searchEligibility(query: string): Promise<EligibilityHit[]>;
+  searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
   checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
@@ -300,7 +303,7 @@ export interface ApiClient {
   /** Retract one — soft-deleted, and refused once the encounter's note is signed (409). */
   removeEncounterDiagnosis(encounterId: string, diagnosisId: string): Promise<void>;
   /** ICD-10 typeahead over master data. Empty query → no rows, never the whole catalogue. */
-  searchIcd(query: string): Promise<IcdRef[]>;
+  searchIcd(query: string, signal?: AbortSignal): Promise<IcdRef[]>;
   placeOrder(req: PlaceOrderRequest): Promise<PlaceOrderResult>;
   prescribe(req: PrescribeRequest): Promise<PrescribeResult>;
   /** The clinician's own orders (US-032). Pass status="Completed" for the results inbox. */
@@ -473,7 +476,7 @@ export interface ApiClient {
    */
   drugIngredients(drugIds: readonly string[]): Promise<Map<string, string>>;
   /** Formulary lookup for substitutions (US-052): search drugs, then list a drug's approved alternatives. */
-  searchDrugs(query: string): Promise<DrugRef[]>;
+  searchDrugs(query: string, signal?: AbortSignal): Promise<DrugRef[]>;
   drugAlternatives(drugId: string): Promise<DrugRef[]>;
 
   // Prescribing workspace (phase 26, design 43 §6)
@@ -484,7 +487,7 @@ export interface ApiClient {
    * same product. Returns real drug uuids — the modal this replaced sent the ATC code string where the API
    * expects a Guid.
    */
-  searchPrescribableDrugs(query: string): Promise<PrescribableDrug[]>;
+  searchPrescribableDrugs(query: string, signal?: AbortSignal): Promise<PrescribableDrug[]>;
   /**
    * Step 1 — advisory validation while composing (design 43 §5).
    *
@@ -549,7 +552,10 @@ export interface ApiClient {
     /** The product, so the SERVER resolves its pack facts — the same lookup the write path makes. */
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    /** 31.5 — what one box HOLDS, renamed from `packSize`: the pack size counts CONTAINERS for every
+     *  measured product and is the wrong divisor for all of them (31.3). Normally omitted — the server
+     *  resolves it from `drugId`. */
+    packContent?: number | null;
   }): Promise<ChronicPreview>;
 
   // Investigation ordering workspace — the lab / imaging counterpart of the prescribing trio above.
@@ -560,7 +566,7 @@ export interface ApiClient {
    * blood count, so it cannot separate the Labs tab from the Imaging tab. The numeric range can.
    */
   /** Typeahead over the CPT catalogue, narrowed to the sections a tab orders from (Labs spans two). */
-  searchCpt(query: string, sections: readonly CptSection[]): Promise<CptRef[]>;
+  searchCpt(query: string, sections: readonly CptSection[], signal?: AbortSignal): Promise<CptRef[]>;
   /**
    * Ask the approval team to revalidate an expired prescription or order.
    *
@@ -645,6 +651,80 @@ export interface ApiClient {
   // Admin / platform governance (Phase 8b) — WHO can access, not content. Admin-role gated on the server.
   /** 18.C2 (W5) — users from the IDENTITY STORE (active + 2FA state), not the admin-service projection. */
   identityUsers(query?: string): Promise<IdentityUser[]>;
+
+  // ---- 28.8/28.9: administering people, not just looking at them ------------------------------------------
+  //
+  // Every one of these existed on identity-service since 17.4 and had NO caller. The console could display a
+  // user and could not create, correct, re-enable or help one — so the only way to bring somebody onto the
+  // platform was a database seed. These are the wires.
+
+  /**
+   * Create an account and INVITE it.
+   *
+   * No password crosses this boundary in either direction. The server generates a throwaway, discards it,
+   * and emails a reset link — so there is no moment at which the administrator knows the credential (28.7,
+   * applied to creation). `resetLinkSent: false` means the account is real but nobody has been told about
+   * it yet, which the UI must say rather than smooth over.
+   */
+  createIdentityUser(input: {
+    username: string;
+    displayName: string;
+    email: string;
+    /**
+     * 28.16 — OMITTED by the portal, and that is the correct call rather than a shortcut.
+     *
+     * <p>The browser has no tenant to send: the caller's own is a claim in their token, and the SPA was
+     * passing "" because the field demanded a string. The server wrote that verbatim, so every account
+     * created through the product landed in tenant "" — an account nobody's organisation could see. It now
+     * resolves the tenant from the caller through the same reach check the roster reads with, and this field
+     * exists only for a platform admin deliberately creating INTO another tenant.</p>
+     */
+    tenantId?: string;
+    roles: string[];
+    lang?: "en" | "ar";
+    /** The person's job title. Display only — see `zIdentityUser.position`. */
+    position?: string;
+  }): Promise<{ id: string; resetLinkSent: boolean }>;
+  /**
+   * Correct a name, an address or a job title. Roles are deliberately NOT settable here — see
+   * setIdentityUserRoles.
+   *
+   * <p>An omitted field is left alone. `position: ""` CLEARS it, which is why the type is not
+   * `position?: string | undefined` collapsed with the others: removing a job title that no longer applies
+   * is an ordinary edit, and a field that can only ever gain a value is one nobody can correct.</p>
+   */
+  updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }): Promise<void>;
+  /** The signed-in person's own display identity — name and job title (28.13). */
+  myProfile(): Promise<{ displayName: string; position: string | null }>;
+  /**
+   * Set the roles — and therefore the PORTALS — this account holds.
+   *
+   * Takes the ISSUER's role names (`lab_tech`, `pharmacist`), not the SPA's portal keys. `issuerRoleFor`
+   * in config.ts is the translation; sending portal keys is a 422 for every clinical role in the system.
+   */
+  setIdentityUserRoles(id: string, roles: string[]): Promise<void>;
+  /** Soft deprovision: the account, its membership and every live session. Never a delete. */
+  deactivateIdentityUser(id: string): Promise<void>;
+  /** The way back. Sessions are NOT restored — the person signs in again, and gets a fresh token. */
+  reactivateIdentityUser(id: string): Promise<void>;
+  /** Start a reset for somebody who cannot start their own. Issues a link; never reveals a password. */
+  sendPasswordResetLink(id: string, lang?: "en" | "ar"): Promise<void>;
+  /** Change MY password. Requires the current one — a live token proves the device, not the owner. */
+  changeMyPassword(currentPassword: string, newPassword: string): Promise<void>;
+
+  /** 28.9 — every permission in the system, with its flags and who already holds it. */
+  scopeCatalog(): Promise<ScopeCatalogEntry[]>;
+  /** 28.9 — every role this tenant may assign, built-in and its own, with what each actually grants. */
+  roleCatalog(): Promise<RoleCatalogEntry[]>;
+  /** 28.9 — design a role from the catalogue. Refused 409 if the set holds both halves of a split duty. */
+  createRole(input: {
+    name: string;
+    scopes: string[];
+    description?: string;
+    sensitivityTier?: string;
+  }): Promise<void>;
+  /** Replace a role's permission set, in this tenant only. Built-in and custom roles both. */
+  setRoleScopes(role: string, scopes: string[]): Promise<void>;
   /** 18.C2 (W5) — the live role→scope matrix the token issuer actually reads. */
   identityRoleScopes(): Promise<RoleScopeGrant[]>;
   accessMatrix(): Promise<RoleBinding[]>;
@@ -676,6 +756,18 @@ export interface ApiClient {
   adminMasterDataAsOf(system: string, code: string, at: string): Promise<MasterDataAsOf>;
   adminMasterData(): Promise<MasterDataVersion[]>;
   adminSystemConfig(): Promise<SystemConfigEntry[]>;
+  /**
+   * Set one system-config value — 28.10.
+   *
+   * <p>The endpoint has existed since 8b.2 (typed, validated, effective-dated, audited) and nothing in the
+   * SPA has ever called it, so every one of these settings was read-only in the product and changeable only
+   * by a hand-written SQL statement against `admin.system_config`. That is the shape of a "hardcoded value":
+   * not a literal in the source, but a row nobody was given a way to reach.</p>
+   *
+   * <p>Returns the NEW version. The prior one is not overwritten — its window closes — so the version number
+   * coming back is the evidence the append happened rather than a no-op.</p>
+   */
+  adminSystemConfigSet(edit: SystemConfigEdit): Promise<SystemConfigEntry>;
 
   // User & access model (Phase 21.6, design 40) — the MEMBERSHIP is the principal, never the identity.
   /** The tenant's membership roster. Server-side tenant-pinned: asking for another tenant is 403 + audited. */
@@ -692,6 +784,19 @@ export interface ApiClient {
     membershipId: string,
     input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
   ): Promise<void>;
+  /**
+   * Withdraw one exception — 28.16.
+   *
+   * <p>`DELETE .../overrides/{scopeKey}` has existed since 21.2 and nothing in the SPA has ever called it, so
+   * an exception could be granted from the UI and never taken back from it. That is the worse half to leave
+   * missing: an administrator who cannot withdraw a narrow, reason-carrying exception has one remaining way
+   * to correct it — change the person's ROLE — which is the over-granting the exception path exists to
+   * avoid.</p>
+   *
+   * <p>Soft-deleted on the server: an override is evidence of a decision, and revoking it must not erase the
+   * record that it was once made.</p>
+   */
+  removeMembershipOverride(membershipId: string, scopeKey: string): Promise<void>;
   /**
    * Mode-2 effective access — "what can this person actually do, and why".
    *
@@ -844,4 +949,14 @@ export interface ApiClient {
 export interface ApiScenario {
   latencyMs?: number;
   fault?: "none" | "error" | "empty";
+  /**
+   * The ISSUER roles the fixture should answer as, for the endpoints the server role-projects (currently the
+   * patient profile). A function rather than a value because the signed-in role changes without the client
+   * being rebuilt — the dev login picks one after `ApiProvider` has already constructed this.
+   *
+   * Returning an empty array means "no role known", and the fixture then answers with everything rather than
+   * nothing. That is a FIXTURE convenience, not a policy: it keeps a client constructed with no session
+   * usable, and the enforcement that matters is server-side and tested there.
+   */
+  roles?: () => readonly string[];
 }

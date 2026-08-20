@@ -14,6 +14,13 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<AppointmentSlot> AppointmentSlots => Set<AppointmentSlot>();
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
+    /// <summary>0025 — the append-only twin the trigger writes. Read-only from the application's side: the
+    /// only writer is the database, which is what makes it a record of what happened rather than of what
+    /// somebody remembered to log.</summary>
+    public DbSet<ProviderAvailabilityHistoryRow> ProviderAvailabilityHistory => Set<ProviderAvailabilityHistoryRow>();
+    /// <summary>0016's twin, which had no reader until the roster grew a timeline: the rows were being
+    /// written from the day the table shipped and nothing on the platform could show them to anybody.</summary>
+    public DbSet<RosterExceptionHistoryRow> RosterExceptionHistory => Set<RosterExceptionHistoryRow>();
     public DbSet<WaitlistEntry> WaitlistEntries => Set<WaitlistEntry>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<EmrNote> Notes => Set<EmrNote>();
@@ -77,6 +84,27 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.StartTime).HasColumnName("start_time");
             e.Property(x => x.EndTime).HasColumnName("end_time");
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+            e.Property(x => x.MaxPerDay).HasColumnName("max_per_day");            // 0025
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");    // 0025
+            // Retired rules stay in the table — they are what produced the slots people are already booked
+            // into — and out of every query, so nothing has to remember to exclude them.
+            e.HasQueryFilter(x => !x.IsDeleted);
+        });
+
+        b.Entity<ProviderAvailabilityHistoryRow>(e =>
+        {
+            e.ToTable("provider_availability_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+        });
+
+        b.Entity<RosterExceptionHistoryRow>(e =>
+        {
+            e.ToTable("roster_exception_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
         });
 
         b.Entity<RosterException>(e =>

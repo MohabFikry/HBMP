@@ -1,12 +1,26 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { auditClient } from "../audit/auditClient";
 import type { Permission, Role } from "../authz/permissions";
-import { DevAuthClient, SESSION_TTL, type AuthClient, type Session } from "./authClient";
+import { SESSION_TTL, type AuthClient, type Session } from "./authClient";
 import { OidcAuthClient } from "./oidcClient";
+import { FIXTURES } from "@dev/fixtures";
 import { LIVE } from "../config";
 
-/** The default auth client: real OIDC (identity-service) in live mode, else the no-backend dev stub. */
-const defaultAuthClient: AuthClient = LIVE ? new OidcAuthClient() : new DevAuthClient();
+/**
+ * The default auth client: real OIDC (identity-service) in live mode, else the no-backend dev stub. The stub
+ * is reached through `@dev/fixtures`, which a live build resolves to a refusal — so the "any six digits signs
+ * you in as any role" client is absent from a production bundle rather than merely unreached.
+ *
+ * Built ON FIRST USE, not at module scope, and that is load-bearing rather than tidiness. The fixture module
+ * pulls in `DevLoginForm`, which uses `useAuth` from this file — a cycle, and with a module-scope
+ * initialiser this file's turn to evaluate comes while `FIXTURES` is still the uninitialised half of it.
+ * The whole suite failed with `Cannot read properties of undefined (reading 'createAuth')`. Deferring past
+ * import time is what makes the seam free to import whatever it needs; memoised so the client stays a
+ * singleton, which the session timers rely on.
+ */
+let cachedAuthClient: AuthClient | null = null;
+const defaultAuthClient = (): AuthClient =>
+  (cachedAuthClient ??= LIVE ? new OidcAuthClient() : FIXTURES.createAuth());
 
 /** Idle warning fires this long before the session expires. */
 const WARN_BEFORE_MS = 60 * 1000;
@@ -25,7 +39,7 @@ interface AuthContextValue {
   ready: boolean;
   /** True in the warning window before expiry (drives the re-auth prompt). */
   timeoutWarning: boolean;
-  login: (role: Role, mfaCode: string) => Promise<void>;
+  login: (roles: readonly Role[], mfaCode: string) => Promise<void>;
   logout: (reason?: "user" | "timeout") => Promise<void>;
   /** Refresh the idle timer (called on user activity + on "stay signed in"). */
   keepAlive: () => void;
@@ -34,7 +48,11 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children, client = defaultAuthClient }: { children: ReactNode; client?: AuthClient }) {
+export function AuthProvider({ children, client: injected }: { children: ReactNode; client?: AuthClient }) {
+  // `useState` and not a default parameter: the default has to be built lazily (see above), and a bare
+  // `injected ?? defaultAuthClient()` in the body would hand every render a fresh identity to the effect
+  // dependency lists below — remounting the session timers on each pass.
+  const [client] = useState<AuthClient>(() => injected ?? defaultAuthClient());
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [timeoutWarning, setTimeoutWarning] = useState(false);
@@ -98,7 +116,6 @@ export function AuthProvider({ children, client = defaultAuthClient }: { childre
     setTimeoutWarning(false);
     scheduleTimers(renewed);
     return true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, scheduleTimers]);
 
   // Restore any persisted session on first load.
@@ -120,8 +137,8 @@ export function AuthProvider({ children, client = defaultAuthClient }: { childre
   }, []);
 
   const login = useCallback(
-    async (role: Role, mfaCode: string) => {
-      const s = await client.login(role, mfaCode);
+    async (roles: readonly Role[], mfaCode: string) => {
+      const s = await client.login(roles, mfaCode);
       setSession(s);
       setTimeoutWarning(false);
       scheduleTimers(s);

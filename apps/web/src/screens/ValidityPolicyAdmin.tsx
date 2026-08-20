@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InlineAlert, InputField, StatusChip, useToast } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip, useToast } from "@mersal/design-system";
 import type { Localized, ValidityArtefactPolicy, ValidityPolicyView } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -155,7 +155,7 @@ function ArtefactRow({
   return (
     <Card as="section" style={{ padding: "var(--sp4)" }}>
       <div className="result-head">
-        <h3 className="section-h" style={{ margin: 0 }}>{t(label)}</h3>
+        <h2 className="section-h" style={{ margin: 0 }}>{t(label)}</h2>
         {/*
           "Set" and "platform default" are different states and only one of them is a decision. A screen
           that showed 10 either way would let a director believe their tenant had chosen it.
@@ -189,7 +189,7 @@ function ArtefactRow({
           {t(S.bounds).replace("{min}", String(view.minDays)).replace("{max}", String(view.maxDays))}
         </p>
         <div className="rx-search-actions">
-          <Button variant="primary" loading={busy} disabled={!changed || !inRange || busy} onClick={() => void save()}>
+          <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} disabled={!changed || !inRange || busy} onClick={() => void save()}>
             {t(S.save)}
           </Button>
         </div>

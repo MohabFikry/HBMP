@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
 import { AppRouter } from "../src/routing/AppRouter";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { seedSession } from "./helpers";
 
@@ -48,6 +48,26 @@ async function openTab(name: RegExp) {
   return user;
 }
 
+/**
+ * The procedure-type picker is a design-system Combobox now, not a native <select>.
+ *
+ * Two consequences for these tests. Its options only exist while the list is OPEN, so choosing one means
+ * clicking the control first; and the list is PORTALLED to <body> (see `Popup.tsx` — a scrolling ancestor
+ * would otherwise clip it), so options are found with `screen`, never with `within(pane)`.
+ */
+async function chooseType(
+  user: ReturnType<typeof userEvent.setup>, pane: HTMLElement, option: RegExp,
+) {
+  await user.click(await within(pane).findByLabelText(/procedure type|نوع الإجراء/i));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
+/** The offered kinds, read from the open list. */
+async function typeOptions(user: ReturnType<typeof userEvent.setup>, pane: HTMLElement) {
+  await user.click(await within(pane).findByLabelText(/procedure type|نوع الإجراء/i));
+  return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+}
+
 describe("29.2 — the OP Procedures composer offers a type", () => {
   it("shows a procedure type field on the Procedures tab", async () => {
     await openTab(/op procedures/i);
@@ -60,11 +80,11 @@ describe("29.2 — the OP Procedures composer offers a type", () => {
     await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    const select = await within(pane).findByLabelText(/procedure type|نوع الإجراء/i);
     // Seeded kinds from masterdata 0015/0017 — both session-based and not.
-    expect(within(select).getByRole("option", { name: /physiotherapy/i })).toBeInTheDocument();
-    expect(within(select).getByRole("option", { name: /dialysis/i })).toBeInTheDocument();
-    expect(within(select).getByRole("option", { name: /minor surgery/i })).toBeInTheDocument();
+    const offered = await typeOptions(userEvent.setup(), pane);
+    expect(offered.join("|")).toMatch(/physiotherapy/i);
+    expect(offered.join("|")).toMatch(/dialysis/i);
+    expect(offered.join("|")).toMatch(/minor surgery/i);
   });
 
   it("does NOT show a procedure type field on the Labs tab", async () => {
@@ -82,8 +102,7 @@ describe("29.2 — sessions follow the flag, not the name", () => {
     const user = await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    const select = await within(pane).findByLabelText(/procedure type|نوع الإجراء/i);
-    await user.selectOptions(select, "Physiotherapy");
+    await chooseType(user, pane, /^physiotherapy$/i);
 
     expect(await within(pane).findByLabelText(/sessions|عدد الجلسات/i)).toBeInTheDocument();
   });
@@ -94,8 +113,7 @@ describe("29.2 — sessions follow the flag, not the name", () => {
     const user = await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    const select = await within(pane).findByLabelText(/procedure type|نوع الإجراء/i);
-    await user.selectOptions(select, "Dialysis");
+    await chooseType(user, pane, /^dialysis$/i);
 
     expect(await within(pane).findByLabelText(/sessions|عدد الجلسات/i)).toBeInTheDocument();
   });
@@ -104,8 +122,7 @@ describe("29.2 — sessions follow the flag, not the name", () => {
     const user = await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    const select = await within(pane).findByLabelText(/procedure type|نوع الإجراء/i);
-    await user.selectOptions(select, "MinorSurgery");
+    await chooseType(user, pane, /^minor surgery$/i);
 
     expect(within(pane).queryByLabelText(/sessions|عدد الجلسات/i)).not.toBeInTheDocument();
   });
@@ -115,7 +132,7 @@ describe("29.2 — sessions follow the flag, not the name", () => {
     const user = await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    await user.selectOptions(await within(pane).findByLabelText(/procedure type|نوع الإجراء/i), "Physiotherapy");
+    await chooseType(user, pane, /^physiotherapy$/i);
 
     expect(await within(pane).findByLabelText(/sessions|عدد الجلسات/i)).toHaveValue(6);
   });
@@ -147,8 +164,7 @@ describe("31.1 — one kind and one session count for the whole order", () => {
     const user = await openTab(/op procedures/i);
 
     const pane = visiblePane();
-    await user.selectOptions(
-      await within(pane).findByLabelText(/procedure type|نوع الإجراء/i), "Physiotherapy");
+    await chooseType(user, pane, /^physiotherapy$/i);
 
     expect(await within(pane).findByLabelText(/quantity per session|الكمية لكل جلسة/i)).toBeInTheDocument();
   });

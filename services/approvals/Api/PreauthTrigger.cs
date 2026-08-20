@@ -73,7 +73,8 @@ public static class PreauthTriggerEndpoints
                     _ => "Pre-authorization could not be determined; authorization is required.",
                 },
                 RequiredByRule: byRule?.RuleId));
-        });
+        })
+        .Produces<PreauthRequirementView>();
     }
 }
 

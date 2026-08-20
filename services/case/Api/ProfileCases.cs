@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Case.Domain;
 using Mersal.Case.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Case.Api;
 
@@ -75,7 +76,7 @@ public static class ProfileCasesEndpoint
                     c.CaseId, c.CaseNo, c.Status.ToString(), c.Category.ToString(), c.OpenedAt))],
                 [.. tasks.Select(t => new ProfileTaskView(
                     t.TaskId, t.Title, t.Status.ToString(),
-                    t.DueAt is { } due ? DateOnly.FromDateTime(due.UtcDateTime) : null))],
+                    t.DueAt is { } due ? BusinessCalendar.DateIn(due) : null))],
                 // The escalation REASON is coordination content, not clinical content — an escalation says
                 // "this needs a decision from the approval team", which is precisely what a coordinator and an
                 // approver both need to see.

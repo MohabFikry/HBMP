@@ -200,6 +200,104 @@ public class ReimbursementIntegrationTests
         }
     }
 
+    // ---- idempotency (migration 0009) ---------------------------------------------------------------------
+
+    /// <summary>
+    /// A retried reimbursement submission creates one request.
+    /// </summary>
+    /// <remarks>
+    /// This was the only write in claims-service with no idempotency at all — and it is the channel a
+    /// BENEFICIARY submits through, from a phone, on a connection that drops. A retry created a second
+    /// request over the same receipts; both ran the OCR pipeline and both could auto-match, so the same
+    /// receipt could be reimbursed twice with nothing in either record hinting the other existed.
+    /// </remarks>
+    [SkippableFact]
+    public async Task A_retried_submission_returns_the_first_request_and_re_runs_no_OCR()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var key = Guid.NewGuid().ToString();
+            var sub = Sub(beneficiary, null) with { IdempotencyKey = key };
+
+            await using var db = Ctx();
+            var svc = Svc(db, new FakeOcr("tesseract", HighConfFields()), new FakeScanner(true), new FakeAuthz());
+
+            var first = await svc.SubmitAsync(tenant, "member", sub, null);
+            first.Outcome.Should().Be(ReimbursementOutcome.ManualAssessment);
+
+            var replay = await svc.SubmitAsync(tenant, "member", sub, null);
+            replay.Outcome.Should().Be(ReimbursementOutcome.Replayed);
+            replay.Request!.RequestId.Should().Be(first.Request!.RequestId);
+
+            await using var verify = Ctx();
+            (await verify.ReimbursementRequests.AsNoTracking().CountAsync(r => r.TenantId == tenant))
+                .Should().Be(1, "a second request over the same receipts is a second chance to be paid for them");
+            // The replay short-circuits BEFORE the scan and the extraction: re-running them would repeat the
+            // expensive, side-effecting half of the pipeline on documents already processed.
+            (await verify.OcrExtractions.AsNoTracking().CountAsync(x => x.RequestId == first.Request.RequestId))
+                .Should().Be(3);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    [SkippableFact]
+    public async Task A_key_reused_for_DIFFERENT_receipts_is_refused_rather_than_answered_with_the_first()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var key = Guid.NewGuid().ToString();
+            await using var db = Ctx();
+            var svc = Svc(db, new FakeOcr("tesseract", HighConfFields()), new FakeScanner(true), new FakeAuthz());
+
+            (await svc.SubmitAsync(tenant, "member", Sub(beneficiary, null) with { IdempotencyKey = key }, null))
+                .Outcome.Should().Be(ReimbursementOutcome.ManualAssessment);
+
+            // Different documents and a different total: a second, genuine claim under a stuck key. Answering
+            // it with the first request would show the beneficiary somebody else's receipts and quietly drop
+            // the money they are actually owed.
+            var second = await svc.SubmitAsync(
+                tenant, "member", Sub(beneficiary, null, receipt: 350m) with { IdempotencyKey = key }, null);
+
+            second.Outcome.Should().Be(ReimbursementOutcome.IdempotencyKeyReuse);
+            second.Request.Should().BeNull();
+
+            await using var verify = Ctx();
+            (await verify.ReimbursementRequests.AsNoTracking().CountAsync(r => r.TenantId == tenant)).Should().Be(1);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    [SkippableFact]
+    public async Task The_same_upload_described_in_a_different_ORDER_is_still_a_retry()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var key = Guid.NewGuid().ToString();
+            var sub = Sub(beneficiary, null) with { IdempotencyKey = key };
+            var reordered = sub with { Documents = [.. sub.Documents.Reverse()] };
+
+            await using var db = Ctx();
+            var svc = Svc(db, new FakeOcr("tesseract", HighConfFields()), new FakeScanner(true), new FakeAuthz());
+
+            await svc.SubmitAsync(tenant, "member", sub, null);
+
+            // The hash sorts the documents, so a client that rebuilt the array differently is recognised as a
+            // retry rather than told its resend is a new claim on the same receipts.
+            (await svc.SubmitAsync(tenant, "member", reordered, null))
+                .Outcome.Should().Be(ReimbursementOutcome.Replayed);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
     private static string T() => "t-" + Guid.NewGuid().ToString("N")[..10];
 
     private static async Task Cleanup(string tenant)

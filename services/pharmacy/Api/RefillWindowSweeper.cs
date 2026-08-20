@@ -4,6 +4,7 @@ using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
 using Mersal.Prescribing;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Pharmacy.Api;
 
@@ -62,7 +63,14 @@ public sealed class RefillWindowSweeper(
         var outbox = scope.ServiceProvider.GetRequiredService<IOutbox>();
 
         var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        // Cairo, and derived from the SAME instant this sweep is stamped with.
+        //
+        // The error here ran the OTHER WAY to the one at the counter, and it is worth being exact about that
+        // rather than filing both under "UTC is wrong". The UTC date LAGS Cairo, so a window that closed at
+        // the end of yesterday was not swept until 02:00–03:00 the following morning: a couple of hours of
+        // accidental grace, which costs a patient nothing. The counter's version of the same mistake refuses
+        // someone their medicine. Fixed together because they are one defect, not because they weigh alike.
+        var today = BusinessCalendar.DateIn(now);
 
         // The sweepable set, expressed the same way ShouldForfeit expresses it. Pending/Open only —
         // Blocked is excluded because the platform refused the patient, not the other way round, and

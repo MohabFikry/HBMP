@@ -25,10 +25,39 @@ deliberately **not tenant-RLS**: the issuer authenticates a user (by username) t
 before any request-scoped tenant context exists, so tenant_id here is a claim source, not a row filter (see
 `0002_identity_grants.sql`). Reachable only by identity-service under the `hbmp_app` grant.
 
+## Token retention (phase 28.11)
+OpenIddict persists a row per artefact it mints — access token, id_token, authorization code, refresh token —
+and prunes none of them by default; its own pruning ships as an opt-in Quartz job this service never opted
+into. So the table only grew: the development database reached 55,590 rows / 51 MB in sixteen days, of which
+all but ~400 had expired. An access token lives five minutes and its row lived forever.
+
+`TokenPruner` (a plain `BackgroundService`, no Quartz) runs daily and calls OpenIddict's own
+`PruneAsync` on tokens then authorizations — that order, because an authorization is only prunable once its
+tokens are gone. **It cannot sign anybody out:** OpenIddict prunes only what is already expired or spent, at
+any threshold. The window governs how far back this table can answer a forensic question, and
+`identity.login_attempt` plus the hash-chained audit store answer that better and for far longer.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `Issuer:TokenRetentionDays` | `30` | Days a spent token's row survives. Floored at 1 — a window under the 10h refresh lifetime is a typo, not a policy. |
+
+30 days is the conservative end of the 30–90 day "transient" class in `20-compliance-checklist.md` §6, whose
+line 110 lists "retention schedule configured and enforced by purge jobs" as a control. `TokenPruningTests`
+holds both halves: a spent token past the window goes, and a token still backing a session stays however old
+its row is.
+
 ## Tests
 Env-gated on `IDENTITY_TEST_DB` (a connection string to a migrated DB). Cover the frozen role vocabulary,
 role→scope resolution + min-necessary hard rules, and a user store round-trip proving the DDL matches the
 EF model. DB-less CI skips them.
+
+**Fixtures are swept, not just cleaned up.** Every test that creates an account removes it in a `finally` or
+an `await using`, and none of that runs when the process is killed — seven accounts and ~19,000 orphaned
+token rows had accumulated in the shared development database that way. `TestFixtureSweep` brackets the
+`identity-db` collection: it clears fixture accounts (matched on the RFC 2606 `@example.org` domain), the
+roles the catalogue tests mint, and the tokens a deleted account leaves behind (`OpenIddictTokens.subject`
+has no foreign key to the user it names). It runs *before* the collection as well as after, because only the
+before-pass can clean up after a run that never reached its own `finally`.
 
 ## Membership administration (phase 21.6, design 40 §1/§6)
 

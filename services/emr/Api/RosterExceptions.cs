@@ -68,6 +68,43 @@ public static class RosterExceptionEndpoints
             return Results.Ok(rows.Select(ToView));
         });
 
+        // GET /roster-exceptions/{id}/history — who closed this clinic day, when, and what it said before.
+        //
+        // The rows have existed since 0016: the trigger has been writing a snapshot on every insert and
+        // update from the day the table shipped, and nothing on the platform could show one to anybody. The
+        // only reader of change history was audit-service, behind audit:read — Security, Compliance and the
+        // DPO. So the coordinator whose Tuesday moved had no way to find out who moved it, while the record
+        // sat in their own service's schema.
+        //
+        // Read at appointment:read, under the same branch scoping as the exception itself. NOT audit:read:
+        // widening the hash-chained trail to clinic staff to answer an operational question would hand them
+        // the whole compliance record, and min-necessary is the rule this platform is built on.
+        read.MapGet("/roster-exceptions/{id:guid}/history", async (
+            Guid id, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var row = await db.RosterExceptions.AsNoTracking()
+                .IgnoreQueryFilters()   // a WITHDRAWN exception still has a history, and that is when it is asked for
+                .FirstOrDefaultAsync(e => e.ExceptionId == id && e.TenantId == tenant, ct);
+            if (row is null)
+                return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            // A practitioner-only exception belongs to no single clinic, so there is no branch to check it
+            // against — it is returned to any caller who can already read the exception itself, exactly as the
+            // list endpoint above treats the same rows.
+            if (row.BranchId is { } owning
+                && BranchWriteScope.RefuseUnlessWritable(branch.Mode, branch.Context, owning) is { } refused)
+                return refused;
+
+            var entries = await db.RosterExceptionHistory.AsNoTracking()
+                .Where(h => h.ExceptionId == id && h.TenantId == tenant)
+                .OrderBy(h => h.HistoryId)
+                .Take(200)
+                .ToListAsync(ct);
+
+            return Results.Ok(new { exceptionId = id, entries = entries.Select(RosterHistoryView.From) });
+        });
+
         // POST /roster-exceptions[?dryRun=true] — impact preview, then apply.
         write.MapPost("/roster-exceptions", async (
             CreateRosterException req, bool? dryRun,
@@ -84,6 +121,13 @@ public static class RosterExceptionEndpoints
 
             // The branch is resolved server-side exactly as a booking's is: a branch-scoped coordinator closes
             // their OWN clinic and may not name another.
+            //
+            // A PRACTITIONER-ONLY exception (branch null) means "away wherever they were due to work", which
+            // is a claim about clinics the author may not run. So it is available only to a branch-unrestricted
+            // caller: a coordinator's exception is stamped with their own clinic, and a clinics manager is
+            // asked which of theirs it applies to (400 branch-target-required). Recording "away from Maadi"
+            // and "away from Dokki" as two rows is more typing and exactly one fewer way to close a clinic
+            // nobody supervising it agreed to close.
             var (targetBranch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(branch, req.BranchId);
             if (denied is not null) return denied;
             if (targetBranch is null && req.PractitionerId is null)
@@ -236,6 +280,7 @@ public static class RosterExceptionEndpoints
     private static DateOnly ClinicToday(TimeProvider clock)
     {
         var now = clock.GetUtcNow();
+        // cairo-date: offset-probe (the inner UTC date only selects the offset; the returned date is Cairo's)
         return DateOnly.FromDateTime(now.ToOffset(CairoOffsetOn(DateOnly.FromDateTime(now.UtcDateTime))).DateTime);
     }
 

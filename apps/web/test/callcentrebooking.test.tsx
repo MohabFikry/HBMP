@@ -41,11 +41,11 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
       { providerId: "p2", locationId: "l2", branchId: "br-nasr", branchName: "Nasr City", label: "Mersal Nasr · Nasr Clinic", openSlots: 5 },
     ]),
     slots: vi.fn().mockResolvedValue([{ slotId: "slot-7", start: "2026-07-30T09:40:00Z" }]),
-    book: vi.fn().mockResolvedValue("ok"),
-    reschedule: vi.fn().mockResolvedValue("ok"),
-    cancel: vi.fn().mockResolvedValue("ok"),
+    book: vi.fn().mockResolvedValue({ kind: "ok" }),
+    reschedule: vi.fn().mockResolvedValue({ kind: "ok" }),
+    cancel: vi.fn().mockResolvedValue({ kind: "ok" }),
     // A RESULT, not void: the screen now clears only on a confirmed close.
-    close: vi.fn().mockResolvedValue("ok"),
+    close: vi.fn().mockResolvedValue({ kind: "ok" }),
     history: vi.fn().mockResolvedValue([]),
     ...over,
   };
@@ -63,8 +63,8 @@ async function findAndOpenMember(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /Hana Mansour/i }));
 }
 
-/** Branch and clinic are the design-system Select (a native <select> cannot style its own option list), so
- *  they are a combobox + listbox rather than something `selectOptions` can drive. */
+/** Every picker on this screen is a design-system Combobox (a native <select> cannot style its own option
+ *  list), so they are a combobox + listbox rather than something `selectOptions` can drive. */
 async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
   await user.click(await screen.findByRole("combobox", { name }));
   await user.click(screen.getByRole("option", { name: option }));
@@ -206,7 +206,7 @@ describe("standalone Book appointment (call centre)", () => {
 
   it("keeps the agent on the screen when a slot is taken (409), and re-reads the times", async () => {
     const user = userEvent.setup();
-    const api = fakeApi({ book: vi.fn().mockResolvedValue("conflict") });
+    const api = fakeApi({ book: vi.fn().mockResolvedValue({ kind: "conflict" }) });
     renderNode(<CallCentreBooking api={api} />);
     await findAndOpenMember(user);
     await choose(user, /^branch$/i, /Dokki/);
@@ -267,10 +267,12 @@ describe("standalone Book appointment (call centre)", () => {
     const api = fakeApi();
     renderNode(<CallCentreBooking api={api} />);
 
-    const dir = screen.getByLabelText(/direction/i);
-    expect(dir).toHaveValue("Inbound");
+    // The direction and reason pickers are design-system comboboxes now, not native selects, so they hold a
+    // LABEL and are driven by opening the list — same as branch and clinic above. The value still sent to the
+    // API is the code, which is what the `openInteraction` assertion below checks.
+    expect(screen.getByLabelText(/direction/i)).toHaveValue("Inbound — the member called us");
 
-    await user.selectOptions(dir, "Outbound");
+    await choose(user, /direction/i, /^outbound/i);
     await findAndOpenMember(user);
 
     await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("BookAppointment", "Outbound"));
@@ -298,9 +300,9 @@ describe("standalone Book appointment (call centre)", () => {
     renderNode(<CallCentreBooking api={api} />);
 
     // The default is the reason this screen exists for…
-    expect(screen.getByLabelText(/call reason/i)).toHaveValue("BookAppointment");
+    expect(screen.getByLabelText(/call reason/i)).toHaveValue("Book appointment");
     // …but an agent who came here to book and ended up answering something else can say so.
-    await user.selectOptions(screen.getByLabelText(/call reason/i), "EligibilityEnquiry");
+    await choose(user, /call reason/i, /^eligibility enquiry$/i);
     await findAndOpenMember(user);
 
     await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("EligibilityEnquiry", "Inbound"));

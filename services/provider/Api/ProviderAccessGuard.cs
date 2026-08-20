@@ -10,9 +10,10 @@ namespace Mersal.Provider.Api;
 public sealed class ProviderAccessGuard(IAuthorizationEngine engine)
 {
     /// <summary>The provider-scoped roles — a token in any of these MUST carry a provider_id claim.</summary>
-    private static readonly string[] ProviderScopedRoles = ["provider_admin", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist"];
-
-    public static bool IsProviderScoped(HbmpPrincipal p) => ProviderScopedRoles.Any(p.IsInRole);
+    /// <remarks>Delegates to <see cref="HbmpPrincipal.IsProviderScoped"/>: the RLS binder needs the same
+    /// answer to tell an absent claim from legitimate tenant-wide reach, and two copies of this list is how
+    /// the datastore layer came to disagree with this one.</remarks>
+    public static bool IsProviderScoped(HbmpPrincipal p) => p.IsProviderScoped();
 
     /// <summary>A provider-scoped token with no provider_id claim is rejected outright (layer 1).</summary>
     public static bool TokenMissingProviderId(HbmpPrincipal p) => IsProviderScoped(p) && string.IsNullOrEmpty(p.ProviderId);

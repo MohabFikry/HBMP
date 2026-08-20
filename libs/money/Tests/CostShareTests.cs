@@ -1,7 +1,7 @@
 using FluentAssertions;
-using Mersal.Money;
+using Mersal.Amounts;
 
-namespace Mersal.Money.Tests;
+namespace Mersal.Amounts.Tests;
 
 /// <summary>
 /// Phase 19.1b — the member/payer split at a network tier.

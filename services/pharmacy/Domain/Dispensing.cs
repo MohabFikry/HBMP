@@ -1,3 +1,5 @@
+using Mersal.Time;
+
 namespace Mersal.Pharmacy.Domain;
 
 /// <summary>Why a dispense request was refused (mapped to problem+json at the edge). <c>None</c> means it passed
@@ -25,7 +27,10 @@ public static class Dispensing
         // nothing, and the record would say it had.
         if (line.IsTerminal) return DispenseError.AlreadyDispensed;
         if (line.QuantityDispensed + quantity > line.QuantityPrescribed) return DispenseError.OverDispense;
-        if (expiryDate <= DateOnly.FromDateTime(now.UtcDateTime)) return DispenseError.ExpiredLot;                   // no expired stock
+        // The CAIRO date. A lot expiring today is expired at 00:30 Cairo but not yet in UTC, so a UTC read
+        // hands over expired stock for the first two hours of every day — the mirror of the refill defect
+        // three files away, and the more dangerous direction of the two.
+        if (expiryDate <= BusinessCalendar.DateIn(now)) return DispenseError.ExpiredLot;                   // no expired stock
         return DispenseError.None;
     }
 

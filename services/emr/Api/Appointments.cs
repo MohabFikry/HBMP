@@ -37,6 +37,9 @@ public static class AppointmentsModule
     /// </summary>
     private static DateOnly ClinicDateOf(DateTimeOffset instant)
     {
+        // Cairo's offset is looked up BY date, so the UTC date is the only key available before the
+        // conversion on the next line. It is never the answer.
+        // cairo-date: offset-probe (keys the offset lookup below)
         var utcDate = DateOnly.FromDateTime(instant.UtcDateTime);
         return DateOnly.FromDateTime(instant.ToOffset(CairoOffset(utcDate)).DateTime);
     }
@@ -51,6 +54,38 @@ public static class AppointmentsModule
     /// </summary>
     private static ScopeMode BranchModeOf(IHbmpPrincipalAccessor me) =>
         me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal);
+
+    /// <summary>The RFC 7807 type for a booking refused by the practitioner's daily limit (0025).</summary>
+    public const string DailyCapacityProblemType = "urn:hbmp:daily-capacity-reached";
+
+    /// <summary>
+    /// The daily cap that applies to this appointment, or null when none does.
+    ///
+    /// <para>Looked up from the availability rule for (doctor, branch, that day's weekday) — the rule IS where
+    /// the cap is administered, so there is one number and one place to change it. A booking with no doctor,
+    /// no branch, or no rule for the day is uncapped, which is every appointment on the platform before 0025
+    /// and every clinic that has not set a limit.</para>
+    ///
+    /// <para>The weekday comes from the CLINIC's calendar, not from UTC. For the two to three hours each
+    /// evening when Cairo has rolled over and UTC has not, the two disagree — and picking the wrong one would
+    /// read Monday's cap for a Tuesday appointment.</para>
+    /// </summary>
+    private static async Task<DailyCapacityCheck?> DailyCapAsync(
+        EmrDbContext db, Appointment appt, CancellationToken ct)
+    {
+        if (appt.DoctorId is not { } doctorId) return null;
+
+        var clinicDate = ClinicDateOf(appt.ScheduledStart);
+        var cap = await db.ProviderAvailabilities.AsNoTracking()
+            .Where(a => a.DoctorId == doctorId
+                        && a.BranchId == appt.BranchId
+                        && a.DayOfWeek == clinicDate.DayOfWeek
+                        && a.MaxPerDay != null)
+            .Select(a => a.MaxPerDay)
+            .FirstOrDefaultAsync(ct);
+
+        return cap is { } c ? new DailyCapacityCheck(doctorId, clinicDate, c) : null;
+    }
 
     public static void MapAppointments(this WebApplication app)
     {
@@ -115,16 +150,46 @@ public static class AppointmentsModule
             var rosterExceptions = await RosterExceptionEndpoints.OverlappingAsync(
                 db, slotBranch, req.DoctorId, req.FromDate, req.ToDate, ct);
 
-            var availability = new ProviderAvailability
+            // 0025 — UPSERT the rule; do not mint one.
+            //
+            // This used to be `new ProviderAvailability { AvailabilityId = Guid.NewGuid(), … }` unconditionally,
+            // so every call left another live rule behind. Materializing a clinic's Tuesdays three times left
+            // three identical rules, and each of them was a source slot generation would honour. Nothing
+            // surfaced it because the SLOTS were deduplicated a few lines below — the calendar looked right
+            // while the thing generating it multiplied. `ux_availability_rule` now forbids the duplicate, so
+            // this reads the rule back and updates it in place.
+            var tenant = me.Principal?.TenantId;
+            if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
+
+            var now = clock.GetUtcNow();
+            var availability = await db.ProviderAvailabilities.FirstOrDefaultAsync(
+                a => a.TenantId == tenant && a.ProviderId == req.ProviderId && a.LocationId == req.LocationId
+                     && a.DoctorId == req.DoctorId && a.BranchId == slotBranch && a.DayOfWeek == req.DayOfWeek, ct);
+
+            if (availability is null)
             {
-                AvailabilityId = Guid.NewGuid(), ProviderId = req.ProviderId, LocationId = req.LocationId,
-                // Was validated and then dropped, so the rule — and every slot generated from it — ended up
-                // branchless. SlotGeneration copies this onto each slot.
-                BranchId = slotBranch,
-                DoctorId = req.DoctorId, DayOfWeek = req.DayOfWeek,
-                StartTime = req.StartTime, EndTime = req.EndTime, SlotMinutes = req.SlotMinutes,
-            };
-            db.ProviderAvailabilities.Add(availability);
+                availability = new ProviderAvailability
+                {
+                    AvailabilityId = Guid.NewGuid(), TenantId = tenant,
+                    ProviderId = req.ProviderId, LocationId = req.LocationId,
+                    // Was validated and then dropped, so the rule — and every slot generated from it — ended
+                    // up branchless. SlotGeneration copies this onto each slot.
+                    BranchId = slotBranch,
+                    DoctorId = req.DoctorId, DayOfWeek = req.DayOfWeek,
+                    CreatedAt = now, CreatedBy = me.Principal?.Subject,
+                };
+                db.ProviderAvailabilities.Add(availability);
+            }
+
+            availability.StartTime = req.StartTime;
+            availability.EndTime = req.EndTime;
+            availability.SlotMinutes = req.SlotMinutes;
+            // Null LEAVES an existing cap alone — see CreateSlotsRequest.MaxPerDay for why regenerating a
+            // calendar must not be a way to uncap a clinic by omission.
+            if (req.MaxPerDay is { } cap) availability.MaxPerDay = cap;
+            availability.UpdatedAt = now;
+            availability.UpdatedBy = me.Principal?.Subject;
+            availability.UpdatedByName = me.Principal?.DisplayName;
 
             // 25.3 — the licence is a bound on the generation WINDOW, not a filter applied afterwards.
             // Availability is computed in exactly one place (design 42 §7 rule 5), and that place has to know
@@ -150,7 +215,8 @@ public static class AppointmentsModule
                 skippedExisting = existingSet.Count,
                 slots = fresh.Select(s => SlotResponse.From(s, open: true)),
             });
-        });
+        })
+        .Produces<IEnumerable<SlotResponse>>();
 
         // GET /appointment-slots — min-necessary slot list (scheduling only); onlyOpen hides held/past slots.
         read.MapGet("/appointment-slots", async (
@@ -205,6 +271,7 @@ public static class AppointmentsModule
             // two-hour mismatch AppointmentDay exists to prevent on the day board.
             var days = rows
                 .Where(r => !taken.Contains(r.SlotId))
+                // cairo-date: offset-probe (the inner UTC date keys the offset lookup; the value grouped on is the Cairo date)
                 .GroupBy(r => DateOnly.FromDateTime(r.SlotStart.ToOffset(CairoOffset(DateOnly.FromDateTime(r.SlotStart.UtcDateTime))).DateTime))
                 .Select(g => new AppointmentDayResponse(g.Key, g.Count()))
                 .OrderBy(d => d.Day)
@@ -473,6 +540,13 @@ public static class AppointmentsModule
             // fact, a crash held the slot with nothing downstream told: a patient booked into a slot
             // no board shows, and a referral marked scheduled that the referring clinician never sees.
             // The idempotent REPLAY path must not re-enqueue, which is why the guard is inside.
+            // 0025 — the practitioner's daily cap for the day this appointment lands on, if they have one.
+            //
+            // Resolved from the SETTLED appointment rather than from the request: the slot is authoritative
+            // for both the doctor and the time (see above), so reading req.DoctorId here would miss the cap
+            // whenever the caller named only a slot — which is how the call-centre façade books.
+            var capacity = await DailyCapAsync(db, appt, ct);
+
             var result = await booking.BookAsync(appt,
                 insideTransaction: async (b, c) =>
                 {
@@ -488,6 +562,7 @@ public static class AppointmentsModule
                         await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
                             new { referralRef = r, appointmentId = b.AppointmentId }, c);
                 },
+                capacity,
                 ct);
             switch (result.Outcome)
             {
@@ -498,6 +573,19 @@ public static class AppointmentsModule
                     return Results.Problem(statusCode: 409, title: "Slot already booked", type: "urn:hbmp:slot-taken",
                         detail: "That slot was taken by another booking. Choose one of the next available slots.",
                         extensions: new Dictionary<string, object?> { ["nextSlots"] = next });
+                case BookOutcome.DailyCapacityReached:
+                    // The two numbers are in the message on purpose. "Fully booked" sends an operator looking
+                    // for a system fault; "18 of 18" sends them to another day, and tells them what the cap is
+                    // in case it is the cap that is wrong.
+                    return Results.Problem(statusCode: 409, title: "daily-capacity-reached",
+                        type: DailyCapacityProblemType,
+                        detail: $"This clinician is booked to capacity on {ClinicDateOf(appt.ScheduledStart):yyyy-MM-dd} " +
+                                $"({result.Booked} of {result.Cap}). Offer another day, or raise the daily limit on the roster.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["booked"] = result.Booked, ["cap"] = result.Cap,
+                            ["clinicDate"] = ClinicDateOf(appt.ScheduledStart).ToString("yyyy-MM-dd"),
+                        });
             }
 
             var booked = result.Appointment!;
@@ -524,7 +612,8 @@ public static class AppointmentsModule
             }
 
             return Results.Created($"/api/v1/appointments/{booked.AppointmentId}", AppointmentResponse.From(booked));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // GET /appointments — reception's day board (US-020). Defaults to today's appointments; an optional
         // ?status= filters to a single status (e.g. Scheduled for the check-in worklist). Ordered by start time.
@@ -597,7 +686,8 @@ public static class AppointmentsModule
             var asOf = clock.GetUtcNow();
             return Results.Ok(rows.Select(a =>
                 AppointmentResponse.From(a, asOf, a.BeneficiaryName ?? nameByAppt.GetValueOrDefault(a.AppointmentId))));
-        });
+        })
+        .Produces<IEnumerable<AppointmentResponse>>();
 
         // GET /appointments/reassignment-needed — the OTHER half of the licence worklist (25.3).
         //
@@ -644,6 +734,63 @@ public static class AppointmentsModule
             });
         });
 
+        // GET /appointments/licence-impact — what a PROPOSED licence expiry would strand (design 42 §3).
+        //
+        // The roster makes an impact preview mandatory before a clinic day is closed, and a licence brought
+        // forward strands appointments in exactly the same way — a doctor whose expiry moves from December to
+        // September cannot lawfully see anybody in October or November. The licence screen applied that change
+        // with no preview at all, so the person making it learned the consequence afterwards, from the flagged
+        // worklist, if they thought to look.
+        //
+        // It lives HERE and not on the licence endpoint because provider-service holds no appointments. That
+        // also settles what kind of guard this is: informational, not a server-side veto. The licence write
+        // does NOT call this to verify an acknowledged count the way the roster's apply does, because it would
+        // make renewing a licence fail whenever emr is unreachable — and refusing a renewal that keeps a
+        // doctor bookable is worse than the thing it would prevent. The real guarantee is downstream and
+        // already exists: shortening an expiry emits PractitionerLicenceExpired, and emr flags every affected
+        // appointment. Nothing is silently lost either way; this is so the operator SEES it first.
+        read.MapGet("/appointments/licence-impact", async (
+            Guid doctorId, DateOnly expiry, Guid? branchId, BranchScopeState branch, IHbmpPrincipalAccessor me,
+            EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+
+            // Everything after the last day the licence covers. INCLUSIVE of the expiry date itself, matching
+            // PractitionerLicence.IsValidAt and SlotGeneration's bookableUntil: a doctor is not unlicensed on
+            // the last day printed on their own certificate, and an off-by-one here would put that day's
+            // patients on a list telling a coordinator to ring them for nothing.
+            var firstUncovered = expiry.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            var cutoff = new DateTimeOffset(firstUncovered, CairoOffset(expiry.AddDays(1))).ToUniversalTime();
+
+            var q = db.Appointments.AsNoTracking()
+                .Where(a => a.DoctorId == doctorId
+                            && a.ScheduledStart >= cutoff
+                            // Future only, and live only. A cancelled appointment needs no reassigning, and a
+                            // past one is not affected — expiry is never retroactive (design 42 §7 rule 6).
+                            && a.ScheduledStart > now
+                            && (a.Status == AppointmentStatus.Booked || a.Status == AppointmentStatus.CheckedIn));
+
+            q = q.ApplyBranchScope(a => a.BranchId, BranchModeOf(me), branch.Context, branchId);
+
+            var rows = await q.OrderBy(a => a.ScheduledStart).Take(500).ToListAsync(ct);
+            return Results.Ok(new
+            {
+                asOf = now,
+                doctorId,
+                proposedExpiry = expiry.ToString("yyyy-MM-dd"),
+                affectedCount = rows.Count,
+                // The LIST, not just the count — the same reasoning as the roster's preview. "8 appointments"
+                // is a number; the list is what lets a coordinator recognise the two who cannot easily travel
+                // again. Contact affordances only: this is a scheduling problem and carries no clinical
+                // content.
+                affected = rows.Select(a => new
+                {
+                    a.AppointmentId, a.BeneficiaryId, a.BeneficiaryName,
+                    a.BranchId, a.DoctorId, a.ScheduledStart,
+                }),
+            });
+        });
+
         // GET /appointments/summary — the three counts the reception dashboard's cards show.
         //
         // Counted HERE rather than by tallying the board client-side. The board is capped at 200 rows, so a
@@ -673,7 +820,8 @@ public static class AppointmentsModule
                 Total: byStatus.Sum(x => x.Count),
                 CheckedIn: Of(AppointmentStatus.CheckedIn),
                 NoShow: Of(AppointmentStatus.NoShow)));
-        });
+        })
+        .Produces<AppointmentSummaryResponse>();
 
         read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -684,7 +832,8 @@ public static class AppointmentsModule
                 return Results.Problem(statusCode: 403, title: "branch-scope-denied", detail: "this appointment is not in your active branch");
             resp.Headers.ETag = $"\"{a.RowVersion}\"";   // clients echo this back as If-Match on transitions
             return Results.Ok(AppointmentResponse.From(a, clock.GetUtcNow()));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
         reserve.MapPost("/appointments/{id:guid}/reschedule", async (
@@ -721,7 +870,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "reschedule", id, 200, db, ct);   // the event committed with the move
             return Results.Ok(AppointmentResponse.From(appt));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/cancel — release slot + reason; promote waitlist (US-021).
         reserve.MapPost("/appointments/{id:guid}/cancel", async (
@@ -761,7 +911,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "cancel", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/note — amend the general/administrative booking note.
         //
@@ -809,7 +960,8 @@ public static class AppointmentsModule
             }, ct);
 
             return Results.Ok(AppointmentResponse.From(appt, clock.GetUtcNow(), appt.BeneficiaryName));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/no-show — guarded; reporting flag + backfill (US-022).
         write.MapPost("/appointments/{id:guid}/no-show", async (
@@ -855,7 +1007,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "no-show", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(appt));
-        });
+        })
+        .Produces<AppointmentResponse>();
     }
 
     private const int RepeatNoShowThreshold = 3;

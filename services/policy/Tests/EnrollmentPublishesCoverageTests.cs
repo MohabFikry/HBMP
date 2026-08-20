@@ -131,6 +131,62 @@ public class EnrollmentPublishesCoverageTests
         finally { await CleanupAsync(f); }
     }
 
+    /// <summary>The other half of the same invariant, and the one that was still missing after the enrolment
+    /// fix above: a TERMINATED member must stop being covered. Termination announced only
+    /// <c>MemberTerminated</c>, which the consumer's switch has no case for and drops through its default —
+    /// so every coverage row stayed exactly as the enrolment published it, open-ended, and the engine went on
+    /// answering Eligible at the counter for a membership that had ended.</summary>
+    [SkippableFact]
+    public async Task Terminating_publishes_a_coverage_event_closing_every_window()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await SeedAsync(waitingDays: 0);
+        try
+        {
+            var enrolled = await EnrollAsync(f, new RecordingOutbox());
+            var outbox = new RecordingOutbox();
+            var result = await TerminateAsync(enrolled.Value!.Enrollment.EnrollmentId, outbox);
+            result.Ok.Should().BeTrue("the membership is active; error was {0}", result.Error?.Code);
+
+            var events = outbox.Of("CoverageChanged");
+            events.Should().HaveCount(2,
+                "eligibility-service reads CoverageChanged and nothing else; MemberTerminated alone leaves " +
+                "every coverage row open-ended and the member Eligible after their membership ended");
+            events.Select(e => Str(e, "category")).Should().BeEquivalentTo(["LAB", "PHARMACY"]);
+            events.Select(e => Str(e, "effectiveTo")).Should().AllBe("2026-06-30",
+                "the end date IS the fact that closes the cover — the engine reads effectiveTo");
+        }
+        finally { await CleanupAsync(f); }
+    }
+
+    /// <summary>And reinstatement must reopen it. The end date is cleared with an explicit null, which
+    /// <c>OnCoverageChanged</c> reads as "clear" under the same absent-vs-null rule it applies to the waiting
+    /// period — otherwise a reinstated member keeps the date their termination wrote and stays refused.</summary>
+    [SkippableFact]
+    public async Task Reinstating_publishes_a_coverage_event_reopening_every_window()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await SeedAsync(waitingDays: 0);
+        try
+        {
+            var enrolled = await EnrollAsync(f, new RecordingOutbox());
+            var enrollmentId = enrolled.Value!.Enrollment.EnrollmentId;
+            await TerminateAsync(enrollmentId, new RecordingOutbox());
+
+            var outbox = new RecordingOutbox();
+            var result = await ReinstateAsync(enrollmentId, outbox);
+            result.Ok.Should().BeTrue("a terminated membership is reinstatable; error was {0}", result.Error?.Code);
+
+            var events = outbox.Of("CoverageChanged");
+            events.Should().HaveCount(2);
+            events.Should().OnlyContain(e => e.ContainsKey("effectiveTo"),
+                "an ABSENT property means 'unchanged' to the consumer, so the clear has to be an explicit null");
+            events.Select(e => Str(e, "effectiveTo")).Should().AllSatisfy(v => v.Should().BeNull(
+                "reinstatement lifts the end date; leaving it set keeps the member refused at the counter"));
+        }
+        finally { await CleanupAsync(f); }
+    }
+
     // ---- harness -----------------------------------------------------------------------------------------
 
     private sealed record Fixture(
@@ -157,6 +213,32 @@ public class EnrollmentPublishesCoverageTests
             bearerToken: null,
             actor: new ActorRef(Guid.NewGuid(), "gate-3"));
     }
+
+    private static async Task<MembershipResult<Enrollment>> TerminateAsync(Guid enrollmentId, IOutbox outbox)
+    {
+        await using var db = Ctx();
+        return await Commands(db, outbox).TerminateAsync(
+            enrollmentId, new DateOnly(2026, 6, 30), "gate-3 termination", maySupervise: false,
+            new ActorRef(Guid.NewGuid(), "gate-3"));
+    }
+
+    private static async Task<MembershipResult<Enrollment>> ReinstateAsync(Guid enrollmentId, IOutbox outbox)
+    {
+        await using var db = Ctx();
+        return await Commands(db, outbox).ReinstateAsync(
+            enrollmentId, new DateOnly(2026, 7, 1), "gate-3 reinstatement",
+            new ActorRef(Guid.NewGuid(), "gate-3"));
+    }
+
+    private static MembershipCommands Commands(PolicyDbContext db, IOutbox outbox) => new(
+        db,
+        new StubProbe("Active"),
+        new StubMemberNos(),
+        new StubAudit(),
+        outbox,
+        new FixedCalendar(new DateOnly(2026, 1, 1)),
+        Options.Create(new MembershipOptions()),
+        TimeProvider.System);
 
     private static async Task<Fixture> SeedAsync(int waitingDays)
     {

@@ -102,6 +102,11 @@ public sealed class RabbitMqEventPublisher(IOptions<EventsOptions> options) : IE
     {
         if (ProjectionFeed.Includes(eventType)) yield return ProjectionFeed.Queue;
         if (CareFeed.Includes(eventType)) yield return CareFeed.Queue;
+        // The two halves of the prior-authorization saga. Both were absent, and their absence was the whole
+        // gap: the request never reached the reviewer, and the decision never came back.
+        if (ApprovalRoutingFeed.Includes(eventType)) yield return ApprovalRoutingFeed.Queue;
+        if (ApprovalDecisionFeed.Includes(eventType))
+            foreach (var queue in ApprovalDecisionFeed.Queues) yield return queue;
     }
 
     public void Dispose()

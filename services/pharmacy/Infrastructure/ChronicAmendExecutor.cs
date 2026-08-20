@@ -124,7 +124,8 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
             var successor = new PrescriptionLine
             {
                 PrescriptionLineId = newLineId, TenantId = line.TenantId, PrescriptionId = rxId,
-                DrugId = line.DrugId, DrugName = line.DrugName,
+                DrugId = line.DrugId, DrugName = line.DrugName, QuantityUnit = line.QuantityUnit,
+                DoseAmount = line.DoseAmount, TimesPerDay = line.TimesPerDay,
                 Dose = line.Dose, Route = line.Route, Frequency = line.Frequency,
                 RefillsAllowed = line.RefillsAllowed,
                 DurationDays = req.NewDurationDays,
@@ -284,17 +285,29 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
     /// an amendment that changed them would be a different prescription, not a rescheduling of this one.</summary>
     private static AllocationRequest Request(PrescriptionLine line, ChronicAmendRequest req)
     {
-        // The original total divided by its own duration recovers the daily rate, which is what the
-        // allocation needs and what the line stores indirectly. Expressed as dose-per-administration with one
-        // administration a day, because the split is over days either way and inventing a times-per-day the
-        // line does not record would be a guess.
+        // 31.5 — THE LINE NOW RECORDS ITS OWN DOSE AND FREQUENCY, so the re-plan uses the numbers the
+        // prescription was actually written from. It used to reverse-engineer a daily rate by dividing the
+        // total by the duration and calling it one administration a day, because — in this method's own
+        // words — "inventing a times-per-day the line does not record would be a guess". It records it now.
+        //
+        // The old derivation stays as the fallback for a line written before 31.5, which holds neither
+        // number. That is not a guess: it recovers the same daily rate the original was dispensed at, and
+        // over a whole-day split it produces the identical total.
+        if (line.DoseAmount is { } dose && line.TimesPerDay is { } times)
+        {
+            return new AllocationRequest(
+                DosePerAdministration: dose, TimesPerDay: times,
+                DurationDays: req.NewDurationDays, FrequencyMonths: req.NewFrequencyMonths,
+                IsPackSplittable: true, PackContent: null);
+        }
+
         var perDay = line.DurationDays is > 0
             ? line.QuantityPrescribed / line.DurationDays.Value
             : line.QuantityPrescribed;
         return new AllocationRequest(
             DosePerAdministration: perDay, TimesPerDay: 1,
             DurationDays: req.NewDurationDays, FrequencyMonths: req.NewFrequencyMonths,
-            IsPackSplittable: true, PackSize: null);
+            IsPackSplittable: true, PackContent: null);
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex)

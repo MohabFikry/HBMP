@@ -1,4 +1,6 @@
+using System.Globalization;
 using Mersal.Claims.Domain;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Claims.Infrastructure;
@@ -7,6 +9,9 @@ public enum DecisionOutcome
 {
     Recorded, PendingSecondApproval, Confirmed, Replayed, NotFound,
     SoDOriginator, SoDProviderAffiliated, SoDSameDecider, DualControlNotPending, Conflict, Validation,
+    /// <summary>The key was already used for a DIFFERENT decision. Answering it with the earlier one would
+    /// report a verdict the officer did not give (migration 0009).</summary>
+    IdempotencyKeyReuse,
 }
 
 public sealed record DecisionRequest(
@@ -40,11 +45,22 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
         var line = claim?.Lines.FirstOrDefault(l => l.ClaimLineId == lineId);
         if (claim is null || line is null) return Fail(DecisionOutcome.NotFound);
 
-        // Idempotent replay.
+        /*
+         * IDEMPOTENT REPLAY, BOUND TO THE BODY.
+         *
+         * This compared the key alone until the 2026-08-09 audit, so a DENY retried under a key already used
+         * to APPROVE came back as the approval, 200 OK: the officer believes they refused a line that is now
+         * payable, and no error exists anywhere to investigate. 18.A3 settled the rule on consume and
+         * dispense; the column to apply it with arrived in migration 0009.
+         */
+        var requestHash = HashRequest(claimId, lineId, req);
         if (idempotencyKey is not null)
         {
             var prior = await db.ClaimDecisions.AsNoTracking().FirstOrDefaultAsync(d => d.IdempotencyKey == idempotencyKey, ct);
-            if (prior is not null) return new DecisionResult(DecisionOutcome.Replayed, prior, claim, line);
+            if (prior is not null)
+                return IdempotencyKeyRules.Matches(prior.RequestHash, requestHash)
+                    ? new DecisionResult(DecisionOutcome.Replayed, prior, claim, line)
+                    : Fail(DecisionOutcome.IdempotencyKeyReuse);
         }
 
         // Segregation of duties — enforced at the service.
@@ -181,8 +197,12 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
         catch (DbUpdateException ex) when (IsUnique(ex, "ux_decision_idempotency"))
         {
             await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+            // Two deliveries of the same key raced and this one lost. The winner's body still has to match:
+            // a race between an approve and a deny under one key is exactly the case the hash exists for.
             var prior = await db.ClaimDecisions.AsNoTracking().FirstAsync(d => d.IdempotencyKey == decision.IdempotencyKey, ct);
-            return new DecisionResult(DecisionOutcome.Replayed, prior, claim, line);
+            return IdempotencyKeyRules.Matches(prior.RequestHash, decision.RequestHash!)
+                ? new DecisionResult(DecisionOutcome.Replayed, prior, claim, line)
+                : Fail(DecisionOutcome.IdempotencyKeyReuse);
         }
     }
 
@@ -194,7 +214,21 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
         DecidedBy = actor, DecidedAt = clock.GetUtcNow(), RuleVersion = Adjudicator.RuleVersion,
         CorrelationId = correlationId, PendingSecondApproval = pending, ConfirmsDecisionId = confirms,
         IdempotencyKey = idempotencyKey,
+        // Computed from the SAME inputs the replay check hashes, in one function, so the two cannot drift.
+        RequestHash = HashRequest(claim.ClaimId, line.ClaimLineId, req),
     };
+
+    /// <summary>What makes this decision THIS decision: the line it is about, the verdict, the money, the
+    /// coded reasons and the rationale. Reason codes are sorted, so two orderings of one decision hash
+    /// alike — a client that rebuilt the array in a different order would otherwise be told its retry was a
+    /// different request.</summary>
+    private static string HashRequest(Guid claimId, Guid lineId, DecisionRequest req) =>
+        IdempotencyKeyRules.Hash(
+            claimId.ToString(), lineId.ToString(), req.Kind.ToString(),
+            req.AllowedAmount is { } a ? IdempotencyKeyRules.Amount(a) : "",
+            string.Join(',', req.ReasonCodes.OrderBy(c => c, StringComparer.Ordinal)),
+            req.Rationale ?? "", req.IsOverride.ToString(CultureInfo.InvariantCulture),
+            req.ConfirmsDecisionId?.ToString() ?? "");
 
     private static DecisionResult Fail(DecisionOutcome o) => new(o, null, null, null);
 

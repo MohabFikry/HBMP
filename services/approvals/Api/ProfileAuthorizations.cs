@@ -5,6 +5,7 @@ using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Approvals.Api;
 
@@ -62,7 +63,7 @@ public static class ProfileAuthorizationsEndpoint
                     a.DecidedAt,
                     // The validity window an authorization is honoured within. Reception reads this to tell a
                     // member "your MRI is approved until the 30th", which is the section's whole purpose there.
-                    a.DecidedAt is { } decided ? DateOnly.FromDateTime(decided.UtcDateTime).AddDays(30) : null,
+                    a.DecidedAt is { } decided ? BusinessCalendar.DateIn(decided).AddDays(30) : null,
                     decision?.Rationale,
                     null);
             });
@@ -82,7 +83,8 @@ public static class ProfileAuthorizationsEndpoint
             }, ct);
 
             return Results.Ok(new ProfileAuthorizationsView(rows));
-        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"))
+        .Produces<ProfileAuthorizationsView>();
     }
 }
 

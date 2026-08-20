@@ -896,3 +896,271 @@ Invariant registry OK with two new entries. Loader re-run is idempotent.
 - `tools/ci/check-kong-route-coverage.py` still only proves a prefix is routed SOMEWHERE, not to the service
   that serves it. That gap is what let `/api/v1/patients/{id}/service-history` route to profile-service for a
   whole phase.
+
+---
+
+## Phase 31.3 — what a box holds (ADR-0040 addendum)
+
+Seven fixes reported from screenshots of the running encounter workspace. Two of them were cosmetic; the
+other five were a single wrong number and the ways it reached the screen.
+
+### The number
+
+**A course was being divided by the wrong thing.** `pack_size` is the catalogue's "Minor Units (total)", and
+it counts whatever the catalogue counts — tablets for a box of tablets, but *containers* for everything
+measured. So:
+
+| product | `pack_size` | what a 210 ml / 750 IU course produced |
+|---|---|---|
+| 120 ml bottle of syrup | 1 | **210 bottles** |
+| box of 5 insulin pens | 5 | *"boxes cannot be counted for this product"* |
+| box of 24 tablets | 24 | 1 box — correct, and the only case that was |
+
+`masterdata.drug.pack_content` (migration 0019) is the missing number: how many PRESCRIBING units one box
+holds. It is derived at load time from two columns the loader had been reading past — "Volume / Weight" and
+"Strength" — times "Major Units (per box)", which is the container count. A concentration in IU per millilitre
+also decides the UNIT: insulin arrives in vials, cartridges and pens and is dosed in IU in all three, so the
+container stopped naming the dose.
+
+`QuantityMath.Compute` now takes `packContent` in place of `packSize`, and `PackUnitRules.PackCounts` — the
+"does the pack count the same thing the dose does?" gate — is gone, because with the content known the
+question does not arise.
+
+**Coverage: 19,243 / 22,653 rows (84.9%) have a real divisor**, down from a nominal 96.1% that included every
+syrup, cream and pen it was wrong for. The 2,580 rows that know their unit but not their box's contents are
+LISTED by name in `reports/pack-content-missing-<release>.txt`, each one a "Volume / Weight" cell away from a
+box count.
+
+**Where it is unknown it stays unknown — unless somebody states it.** The platform does not assume that an
+insulin pen holds three millilitres. `tools/masterdata-loader/data/pack-measurement-overrides.csv` is where
+that fact is *stated*: one line per product, each carrying its own basis, subordinate to the workbook, and
+reported when an entry matches nothing. **All 59 insulin rows now carry a box content** — Lantus SoloStar is
+1,500 IU, so 25 IU nightly for 30 days is one box rather than "750" with a note saying boxes could not be
+counted. A new insulin arriving in a workbook refresh matches nothing and appears in the missing-content
+report, which is the property a rule in code would not have had.
+
+A second source was found while checking those: **a name that counts its own containers.** `5*3ml penfills`
+is the workbook's notation for five cartridges of three millilitres, used on 70 rows — and it agrees with a
+column on 66 of them. Where it disagreed with "Major Units", the major column was the outlier, and
+"Insulatard Hm 5*3ml Penfills" was holding 300 IU instead of 1,500: a fifth of the month's insulin.
+
+### The screen
+
+- **The Quantity field holds BOXES** where the box's contents are known, and the label says which — "Quantity
+  (boxes)" or "Quantity (IU)". An unlabelled 2 and an unlabelled 2250 are the same control saying two very
+  different things.
+- **And the unit travels with the number** (`pharmacy.prescription_line.quantity_unit`, migration 0017),
+  snapshotted at prescribing time like `drug_name`. Making the quantity a box count without this would have
+  put "1" against a 24-tablet box on the dispensing counter, which renders the figure alone and takes the
+  pharmacist's number against it — 1 box and 1 tablet are the same character. It is shown on the counter, on
+  the amend/withdraw dialog and in the prescription detail, and it is absent rather than guessed on any line
+  written before 31.3.
+- **The dose field is labelled with its unit**, in the short form a prescription is written in: `Dose (tabs)`,
+  `Dose (caps)`, `Dose (IU)`, `Dose (puffs)`. `PackUnitRules.ShortUnit` is server-side, beside the vocabulary
+  the drug table's CHECK constraint owns. An oral spray is now `puffs` and a nasal one `sprays`; both were
+  "Spray".
+- **The rank picker on the diagnosis modal was rendering blank options.** `.dx-staged-list li` is a DESCENDANT
+  selector, and a `Select` renders its listbox *inside* the row that owns it — so every option inherited the
+  row's four-column grid and its label landed in a track that resolved to 0px. Every bare ` li` rule in
+  app.css is now child-scoped, with a guard over the whole sheet.
+- **Modal actions moved into the footer slot** on the transaction and service-history dialogs; the body card's
+  padding went from 16px to 20px, which is no longer tighter than the 24px frame around it.
+- The ICD picker is `wide`.
+
+### Verified
+
+`prescribing` 186, `clinical-validation` 121, `pharmacy` **164 with the DB attached** (0 skipped), web
+**1,144 / 89 files**; the whole .NET solution green under `--with-db`. OpenAPI drift regenerated
+(`pharmacy.json`); invariant registry OK with three new entries; master data reloaded end to end.
+
+Driven in a real browser against the deployed stack: the ICD picker's rank options render their labels, the
+dose field reads "Dose (IU)" for insulin and "Dose (tabs)" for a tablet, Panadol's quantity is 1 box with
+"21 tabs — 24 tabs per box" beneath it, Lantus says its box contents are unrecorded, and a prescription
+submitted end to end comes back onto the amend dialog labelled "Quantity (box)".
+
+### Fixed on the way
+
+**Migration 0016 could not be applied twice.** It dropped and re-added `ck_drug_prescribing_unit` with the
+original thirteen-value vocabulary, and 0018 widened it to twenty-one — so the second load over a database
+holding any row written under 0018 aborted with `23514 ... violated by some row` before touching a table. The
+first load succeeded, which is exactly what hid it. The ADD is now guarded on the constraint's absence and the
+DROP is gone.
+
+### Not done in 31.3
+
+- **2,610 products still have no box count** because the workbook records no volume for them — 582 of them
+  dosed in IU, including both Lantus rows. Filling one cell per row fixes each.
+- The 21 pre-existing `DROP CONSTRAINT` lines across five migrations still fail `check-migration-compat`.
+  Unchanged by this phase and still unacknowledged.
+
+---
+
+## Phase 31.4 — the act above the record, and a repeat you do not retype
+
+### Two cards per tab, composer first
+
+All four encounter tabs rendered the history table and the composer inside ONE card, separated by a rule.
+That reads as a record with an appendix — and it put the thing the doctor opened the tab to do below five rows
+of what they had already done, which on a laptop is below the fold. They are now sibling cards, and the
+composer is first. What has been prescribed is a **record**; what is being prescribed is an **act**.
+
+### Copy, on the row
+
+A repeat script is the commonest thing a returning patient needs, and writing one meant finding every medicine
+in a catalogue of 22,653 a second time. Every transaction row on all four tabs now carries a Copy icon beside
+Amend and Withdraw, and it is deliberately the one control there that changes nothing: it fills the composer
+above with a **new draft** the prescriber still has to check and submit.
+
+Four things it refuses to do:
+
+- **It does not write.** No confirmation, no dialog, nothing raised — a control on a clinical record that
+  silently created a second prescription would be the worst kind of convenience.
+- **It does not discard what is already composed.** Items are APPENDED; the only line it removes is a single
+  empty placeholder, which is not work.
+- **It re-reads each medicine from the CATALOGUE** rather than trusting the copy stored on the old line, so a
+  copy carries today's pack facts, price and availability. A product the catalogue no longer offers is
+  **counted and reported**, never quietly dropped from the copy.
+- **It says when it can copy nothing** — a record whose lines predate the drug id, or an order with no lines.
+  Returning quietly is how a control earns a reputation for being broken when it is being honest.
+
+The quantity comes across **with its unit** (31.3), so a copied box count does not arrive as a bare number.
+
+### What a copy cannot carry, and why
+
+**Dose and frequency.** `doseAmount` and `timesPerDay` are sent at prescribing time — the daily-dose rule and
+the quantity check run on them — and are **never persisted**. The line keeps a formatted sig ("1 Tablet x
+3/day") and nothing numeric. Parsing that string back would be inventing clinical numbers out of display text,
+so a copied prescription arrives with those two fields empty and the Quantity check honestly reporting that it
+has nothing to compute from.
+
+**A procedure course's kind and session count.** Order-level facts since 31.1, and the worklist row does not
+carry them.
+
+### Verified
+
+Web 1,160 / 89 files. Driven in a browser on all four tabs: composer card above the history card on each, a
+Copy control on every row, and copying RX-2026-002719 filling the composer with Panadol and the confirmation
+"Copied 1 medicine(s) … Nothing has been prescribed yet".
+
+### Not done in 31.4
+
+- **The numeric dose is still not persisted.** *(Closed by 31.5, below.)*
+
+---
+
+## Phase 31.5 — the numbers a prescription was written from
+
+### The record kept the sentence and threw away the numbers
+
+`doseAmount` and `timesPerDay` arrived on every line of every prescription. The daily-dose rule compared
+against them, the quantity check divided by them, the chronic allocation split a course by them — and then
+they were dropped. What the row kept was `dose`: a SENTENCE this application had formatted, "1 Tablet x
+3/day".
+
+Three costs, in ascending order of seriousness:
+
+- a prescription could not be **copied** without retyping its dose, because there was no dose to copy;
+- a prescription could not be **re-checked** — re-running a rule over a written script needs the numbers it
+  was graded on, and the only route back to them was parsing a string built for humans to read;
+- the sentence and the numbers **could disagree and nothing would know**, because after compose time there
+  was nothing left to derive the sentence from.
+
+`pharmacy.prescription_line.dose_amount` and `.times_per_day` (migration 0018) close it. Expand-only,
+nullable, no backfill: a line written before this reads NULL, which is the honest answer for a row whose
+numbers were never kept — never 1, which would assert a dose nobody wrote.
+
+**They are signed clinical content**, so 0013's guard now freezes them like the rest. `quantity_unit` (0017)
+is frozen with them: it says what a signed quantity COUNTS, and editing it in place changes what the quantity
+means without changing the quantity — the quietest possible way to alter a prescription.
+
+### Three things this fixed downstream
+
+**Copy carries the dose.** The reason for doing it: a copied prescription now arrives with its dose, frequency
+and duration, and the quantity check has something to compute from.
+
+**The chronic allocation was dividing by the wrong number.** 31.3 replaced `pack_size` with `pack_content` in
+`QuantityMath` — the acute path — and MISSED `ChronicAllocation`. A 120 ml bottle of syrup is `pack_size = 1`,
+so a ninety-day course at 10 ml twice a day allocated **1,800 "packs"** across its windows, and the composer
+would have shown the number. It is fifteen bottles, and a test says so.
+
+**A chronic amendment stopped reverse-engineering a dose.** `ChronicAmendExecutor` divided the original total
+by its duration and called the result one administration a day — its own comment explained that "inventing a
+times-per-day the line does not record would be a guess". The line records it now. The old derivation stays as
+the fallback for pre-31.5 lines, where it recovers the same daily rate.
+
+### And the drift gate was passing over every response body
+
+Adding three fields to a prescription line changed no committed spec, because a minimal API returning
+`Results.Ok(x)` publishes no schema for `x` — the gate had been comparing **requests and routes only**.
+Declaring the response type on pharmacy's typed endpoints made 328 lines of `pharmacy.json` appear, including
+`RxLineResponse` with the new fields. The gate now bites on a response-shape change for the clinical record.
+
+**It does not yet for anything else: 490 of the platform's 496 endpoints still declare no response type**,
+most because they return anonymous objects that have no type to declare. Naming those is real design work —
+what the response contract IS — and is not done here.
+
+### Not done in 31.5
+
+- **490 endpoints still publish no response schema.** *(31.6 below takes this on.)*
+
+### Verified
+
+Web 1,168 / 89 files; pharmacy 167 with the DB attached, 0 skipped, including three new tests that go through
+HTTP: the dose comes back (1.5 stays 1.5), an absent one reports null rather than 1, and both survive an
+amendment onto the successor version. Prescribing lib 190.
+
+---
+
+## Phase 31.6 — every endpoint says what it returns
+
+### The gate could only see half a contract
+
+`check-openapi-drift.sh` compares the committed specs against the running services, and the specs described
+**no response bodies at all**: a minimal API returning `Results.Ok(x)` publishes no schema for `x`. That is
+how 31.5 added three fields to a prescription line and the drift gate reported "every committed spec matches".
+
+The SPA parses those bodies with zod. A response shape that changes with nothing noticing is a screen that
+fails to parse at a dispensing counter, and it arrives as "could not load" rather than as a build error.
+
+### What the 535 endpoints actually were
+
+| | count | what it needed |
+|---|---|---|
+| already declared | 6 | — |
+| returns a **named type** | 162 | one line each |
+| returns an **anonymous object** | 198 | a named record each |
+| returns a variable or primitive | 104 | inspection |
+| no body (Problem / 204 only) | 65 | nothing |
+
+**The 162 were done by codemod** — a conservative one that derives the type only from shapes it can read
+unambiguously, requires every success branch of an endpoint to agree, and skips anything else for a human. It
+declared 141 and left 323. Solution builds clean; **3,636 tests unchanged**.
+
+**The anonymous ones are being named service by service**, starting with the endpoints the SPA actually calls,
+because those are the ones where a silent shape change breaks a screen. Each record carries exactly the
+property names the anonymous object carried, so **the JSON is byte-identical** — what changes is that the
+shape is now in the spec. Pharmacy, masterdata and orders are done; their suites pass unchanged.
+
+Coverage went **1% → 42.2%** (242 of 574 operations), and the SPA-called subset went **51 → 0**: every
+endpoint the browser calls now declares what it returns. That subset is the one that mattered, because those
+are the bodies parsed with zod — a shape change anywhere else is a documentation gap, and a shape change
+there is a screen that fails to load with nothing else failing first.
+
+### And a ratchet, so the remainder cannot stay invisible
+
+`tools/ci/check-response-schemas.py` records a per-service floor and fails when one drops. Demanding 100% in
+one change would mean inventing a DTO for every anonymous object on the platform at once, which is how a gate
+acquires a `# TODO: re-enable` comment above it. Same shape as the coverage floors, and for the same reason:
+a bar that can be lowered to pass is not a bar. It is in `REQUIRED_GATES`, so its *silence* alarms too.
+
+### Not done in 31.6
+
+- **332 operations still declare no response body — and none of them is called by the SPA.** What remains is
+  service-to-service and administrative: write acknowledgements, internal lookups, health probes. The floors
+  hold the line per service and name the remainder, so it can only shrink.
+
+  Two shapes in that remainder are deliberately undeclarable rather than undone, and are worth separating
+  from the backlog: the beneficiary search and the approver queue return **field-level minimum-necessary
+  projections**, where a receptionist and a doctor asking the same question receive different KEYS. Only the
+  paging envelope is fixed, and that is what is declared. Publishing a fixed item schema there would be a
+  lie that reads as documentation.

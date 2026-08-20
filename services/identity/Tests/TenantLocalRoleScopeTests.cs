@@ -148,8 +148,16 @@ public class TenantLocalRoleScopeTests
         // The decision recorded in 0011: tenant-locality lives on grants, NOT on the role catalog, so the
         // token's frozen role vocabulary cannot drift per tenant. If someone later adds tenant_id to
         // identity.role, this goes red — which is the intent.
-        var names = await db.Roles.AsNoTracking().Select(r => r.Name!).ToListAsync();
-        names.Should().BeEquivalentTo(IdentityContract.Roles);
-        names.Should().OnlyHaveUniqueItems("role names are globally unique — ASP.NET Identity's RoleStore requires it");
+        //
+        // 28.9 added `owner_tenant_id`, and it is deliberately NOT the thing this test forbids: it records
+        // who AUTHORED a role, not which tenant may see it. Names stay in one global namespace — which is
+        // precisely what the uniqueness assertion below still proves, now over the built-ins AND the custom
+        // roles together. A per-tenant namespace would show up here as two rows with one name.
+        var all = await db.Roles.AsNoTracking().Select(r => new { r.Name, r.OwnerTenantId }).ToListAsync();
+
+        all.Where(r => r.OwnerTenantId == null).Select(r => r.Name!)
+            .Should().BeEquivalentTo(IdentityContract.Roles);
+        all.Select(r => r.Name!)
+            .Should().OnlyHaveUniqueItems("role names are globally unique — ASP.NET Identity's RoleStore requires it");
     }
 }

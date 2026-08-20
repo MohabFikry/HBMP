@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.ClinicalValidation;
 using Mersal.Pharmacy.Api;
+using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
 using Mersal.Validity;
 using Microsoft.AspNetCore.Authentication;
@@ -49,6 +50,20 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
     /// "catalogue records nothing" case, which must stay NotChecked rather than becoming a guess.
     /// </summary>
     public Dictionary<Guid, DrugPack> Packs { get; } = [];
+
+    /// <summary>
+    /// Drugs the routing policy gates, so a test can produce a prescription that really goes for approval.
+    ///
+    /// <para><b>Steered by replacing the SERVICE, not by adding configuration</b>, and the difference is not
+    /// cosmetic. <c>AddPharmacyInfrastructure</c> reads <c>Pharmacy:Routing</c> EAGERLY, at registration time,
+    /// and registers the resulting <c>RxRoutingOptions</c> as a singleton — but a <c>WebApplicationFactory</c>'s
+    /// configuration sources are merged when the host is BUILT, which is after every <c>builder.Services.Add…</c>
+    /// line has run. So a test that sets <c>Pharmacy:Routing:GatedDrugIds</c> finds the key present in
+    /// <c>IConfiguration</c> and the options object still empty: it silently exercises an UNGATED prescription
+    /// while reading as though it had gated one. (<c>ConnectionStrings:Pharmacy</c> works from configuration
+    /// because it is read lazily, inside the DbContext options callback.)</para>
+    /// </summary>
+    public List<Guid> GatedDrugIds { get; } = [];
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -99,6 +114,11 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
             // ACTS on the verdict, so the stub answers from the same published ranges and nothing more.
             s.RemoveAll<IReferralServiceResolver>();
             s.AddSingleton<IReferralServiceResolver>(new StubReferralServiceResolver());
+
+            // The routing policy. Replaced rather than configured — see GatedDrugIds for why configuration
+            // arrives too late. An empty list reproduces the shipped default (nothing gated).
+            s.RemoveAll<RxRoutingOptions>();
+            s.AddSingleton(new RxRoutingOptions { GatedDrugIds = [.. GatedDrugIds] });
         });
     }
 

@@ -117,6 +117,81 @@ public class BranchScopeGrantParityTests
         }
     }
 
+    /// <summary>
+    /// A home branch that has been RE-ISSUED since the last migration pass does not break the next one.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The failure this exists for.</b> The copy guarded itself with
+    /// <c>NOT EXISTS (grant_id = assignment_id)</c> — correct, and keyed on the wrong thing. The grant table
+    /// has a second uniqueness rule, <c>ux_bsg_home_per_subject</c>, keyed on
+    /// <c>(tenant_id, subject_user_id)</c>. The two disagree the moment somebody's home branch changes: the
+    /// app revokes the old assignment and writes a new one with a fresh id, the id guard sees an uncopied
+    /// assignment, and the insert collides with the home grant copied from its predecessor.</para>
+    ///
+    /// <para><b>Why it mattered more than one failing statement.</b> <c>apply-migrations.sh</c> runs under
+    /// <c>set -e</c> and replays every file on every pass, so from the first re-issued home onward the script
+    /// aborted here — and every service after <c>admin/</c> alphabetically silently stopped receiving
+    /// migrations. It surfaced as orders- and pharmacy-service tests failing on missing tables, several
+    /// migrations away from the cause, against a database that looked migrated. The previous idempotence
+    /// assertion could not catch it: it replays the copy over an UNCHANGED source, which is the one case the
+    /// id guard already handled.</para>
+    /// </remarks>
+    [SkippableFact]
+    public async Task A_home_branch_reissued_between_passes_does_not_break_the_next_one()
+    {
+        Skip.If(Db is null, "test DB not configured — set ADMIN_TEST_DB to run this DB integration test.");
+        var tenant = $"p23-{Guid.NewGuid():N}"[..16];
+        var subject = $"u-{Guid.NewGuid():N}"[..12];
+        await using var db = Ctx();
+
+        async Task HomeAsync(Guid id, Guid branch, string status) =>
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO admin.user_branch_assignment
+                    (assignment_id, tenant_id, subject_user_id, branch_id, assignment_type, valid_from, valid_to, status)
+                VALUES ({id}, {tenant}, {subject}, {branch}, 'Home', {new DateOnly(2026, 1, 1)}, {(DateOnly?)null}, {status})
+                """);
+
+        try
+        {
+            // Pass one: the home as it stood, copied.
+            var first = Guid.NewGuid();
+            await HomeAsync(first, Guid.NewGuid(), "Active");
+            await db.Database.ExecuteSqlRawAsync(CopyBlock());
+
+            // Between passes the person moves branch. `ux_user_home_branch` allows only one ACTIVE home, so
+            // the app revokes the old row before writing the new one — which is exactly what leaves a live
+            // home grant whose id no longer matches any uncopied assignment.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE admin.user_branch_assignment SET status = 'Revoked' WHERE assignment_id = {first}");
+            await HomeAsync(Guid.NewGuid(), Guid.NewGuid(), "Active");
+
+            // Pass two. This threw 23505 before the home guard, aborting the whole migration script.
+            var replay = async () => await db.Database.ExecuteSqlRawAsync(CopyBlock());
+            await replay.Should().NotThrowAsync(
+                "a re-issued home must not collide with the grant copied from its predecessor — the script "
+                + "runs under set -e, so this one statement stops every migration after admin/");
+
+            // And reach is unchanged, which is what row parity actually asserts: one live home, not two and
+            // not none. A guard that suppressed too much would show up here as zero.
+            var liveHomes = await db.Database.SqlQueryRaw<int>(
+                """
+                SELECT count(*)::int AS "Value" FROM admin.branch_scope_grant
+                 WHERE tenant_id = {0} AND is_home AND NOT is_deleted
+                """, tenant).SingleAsync();
+            liveHomes.Should().Be(1, "the principal has exactly one home branch, before and after");
+        }
+        finally
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM admin.branch_scope_grant_history WHERE tenant_id = {0}", tenant);
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM admin.branch_scope_grant WHERE tenant_id = {0}", tenant);
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM admin.user_branch_assignment WHERE tenant_id = {0}", tenant);
+        }
+    }
+
     [SkippableFact]
     public async Task A_grant_with_neither_a_membership_nor_a_user_is_rejected_by_the_schema()
     {

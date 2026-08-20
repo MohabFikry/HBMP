@@ -9,8 +9,8 @@
 ## What this is
 
 A service-oriented Healthcare Benefit Management Platform for Mersal Foundation's refugee beneficiaries.
-21 .NET 8 services, a React/TypeScript SPA, PostgreSQL with row-level security, all self-hostable.
-Design set: `HBMP-Design/` (docs 0A–40). Build prompts: `HBMP-Design/claude-code-prompts/` — one
+22 .NET 8 services, a React/TypeScript SPA, PostgreSQL with row-level security, all self-hostable.
+Design set: `HBMP-Design/` (docs 0A–46; 41 was never written). Build prompts: `HBMP-Design/claude-code-prompts/` — one
 sub-prompt ≈ one PR. Conventions that apply to every change: root `CLAUDE.md` (auto-loaded). Where the
 build has got to: `docs/BUILD-STATUS.md`.
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, Icon, InlineAlert, InputField, SegmentedControl, SelectField, StatusChip,
+  Button, Card, DataTable, Icon, InlineAlert, InputField, SegmentedControl, ComboboxField, StatusChip,
   TextareaField, useToast,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -354,7 +354,7 @@ function RuleTable({ rules }: { rules: ApprovalRule[] }) {
   const fmt = useFormat();
 
   const cols: Column<ApprovalRule>[] = [
-    { key: "order", header: t(S.order), cell: (r) => r.priority, numeric: true },
+    { key: "order", header: t(S.order), cell: (r) => r.priority, numeric: true, sortable: true, sortValue: (r) => r.priority },
     { key: "when", header: t(S.when), cell: (r) => <span className="mono">{describe(r.predicate, t)}</span> },
     { key: "then", header: t(S.then), cell: (r) => <strong>{describeAction(r.action)}</strong> },
     {
@@ -368,7 +368,7 @@ function RuleTable({ rules }: { rules: ApprovalRule[] }) {
             ? <StatusChip kind="ok" label={t(S.live)} />
             : <StatusChip kind="warn" label={t(S.disabled)} />,
     },
-    { key: "why", header: t(S.why), cell: (r) => r.rationale },
+    { key: "why", header: t(S.why), cell: (r) => r.rationale, sortable: true, sortValue: (r) => r.rationale },
   ];
 
   return (
@@ -468,7 +468,7 @@ function RuleEditor({
           onChange={(e) => setPriority(e.currentTarget.value)}
         />
 
-        <SelectField
+        <ComboboxField
           label={t(S.matchPriority)}
           value={matchPriority}
           onChange={setMatchPriority}
@@ -480,7 +480,7 @@ function RuleEditor({
           ]}
         />
 
-        <SelectField
+        <ComboboxField
           label={t(S.matchSource)}
           value={matchSource}
           onChange={setMatchSource}
@@ -494,7 +494,7 @@ function RuleEditor({
 
         {family === "AutoApprove" && (
           <>
-            <SelectField
+            <ComboboxField
               label={t(S.category)}
               value={category}
               onChange={setCategory}
@@ -528,7 +528,7 @@ function RuleEditor({
 
         {family === "Preauth" && (
           <>
-            <SelectField
+            <ComboboxField
               label={t(S.category)}
               value={category}
               onChange={setCategory}
@@ -560,7 +560,7 @@ function RuleEditor({
         )}
 
         {family === "Routing" ? (
-          <SelectField
+          <ComboboxField
             label={t(S.queue)}
             value={queue}
             onChange={setQueue}
@@ -598,7 +598,7 @@ function RuleEditor({
       </div>
 
       <div className="pol-editor-actions">
-        <Button variant="secondary" onClick={onCancel}>{t(S.cancel)}</Button>
+        <Button variant="ghost" onClick={onCancel}>{t(S.cancel)}</Button>
         <Button
           variant="primary"
           loading={busy}

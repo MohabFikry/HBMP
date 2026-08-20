@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Button,
   Card,
-  DataTable,
+  DataTableView,
   InlineAlert,
   InputField,
   SegmentedControl,
   StatusChip,
   TextareaField,
   useToast,
+  useTableQuery,
 } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import {
   zDecisionRequest,
   type ApprovalItem,
@@ -79,6 +80,22 @@ const S = {
   ok: { en: "Decision recorded.", ar: "تم تسجيل القرار." },
   replay: { en: "Already recorded (idempotent replay).", ar: "مُسجّل مسبقاً (إعادة متكافئة)." },
   fail: { en: "Could not record the decision.", ar: "تعذّر تسجيل القرار." },
+  search: { en: "Search", ar: "بحث" },
+  searchHint: {
+    en: "Member token, service code or reference",
+    ar: "رمز العضو أو رمز الخدمة أو المرجع",
+  },
+  noMatches: {
+    en: "No requests match. Change the search or clear the filters.",
+    ar: "لا توجد طلبات مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
+  fPriority: { en: "Priority", ar: "الأولوية" },
+  fRoutine: { en: "Routine", ar: "عادي" },
+  fUrgent: { en: "Urgent", ar: "عاجل" },
+  fEmergency: { en: "Emergency", ar: "طارئ" },
+  fSla: { en: "SLA", ar: "مستوى الخدمة" },
+  fBreached: { en: "Breached", ar: "متجاوَز" },
+  fDue: { en: "Still in time", ar: "ضمن المهلة" },
   breached: { en: "Breached", ar: "متجاوَز" },
   dueIn: { en: "due in", ar: "خلال" },
   min: { en: "min", ar: "دقيقة" },
@@ -95,7 +112,7 @@ export function ApprovalsWorklist() {
   const selectedRow = (worklist.data ?? []).find((r) => r.id === selected) ?? null;
 
   const cols: Column<ApprovalItem>[] = [
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
     {
       key: "service",
       header: t(S.service),
@@ -112,7 +129,7 @@ export function ApprovalsWorklist() {
           <span><span className="tnum">{r.service.code}</span> · {t(r.service.label)}</span>
         ),
     },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
     {
       key: "sla",
       header: t(S.sla),
@@ -127,18 +144,67 @@ export function ApprovalsWorklist() {
           <span className="tnum">{t(S.dueIn)} {r.sla.minutesRemaining} {t(S.min)}</span>
         ),
     },
-    { key: "cost", header: t(S.cost), cell: (r) => <span className="tnum">{r.estimatedCost}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "cost", header: t(S.cost), cell: (r) => r.estimatedCost, numeric: true, sortable: true, sortValue: (r) => r.estimatedCost },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "review",
       header: t(S.action),
+      stickyEnd: true,
       cell: (r) => (
-        <Button size="sm" variant={selected === r.id ? "primary" : "secondary"} onClick={() => setSelected(r.id)}>
+        <Button size="sm" variant="secondary" onClick={() => setSelected(r.id)}>
           {t(S.review)}
         </Button>
       ),
     },
   ];
+
+  /*
+    ============================================================================================================
+    THE QUEUE IS SEARCHABLE, FILTERABLE AND PAGED
+    ============================================================================================================
+    This is the busiest queue in the product and it had none of the three: a reviewer holding a member token
+    could only scroll. Two filter groups rather than a dozen, because these are the two questions asked of an
+    approval queue — how urgent, and is the clock already up.
+
+    Read OUTSIDE AsyncSection's render prop: a hook called in there would be conditional on the load finishing.
+  */
+  const filters: TableFilterSpec<ApprovalItem>[] = useMemo(() => [
+    {
+      key: "priority",
+      label: t(S.fPriority),
+      options: [
+        { value: "emergency", label: t(S.fEmergency) },
+        { value: "urgent", label: t(S.fUrgent) },
+        { value: "routine", label: t(S.fRoutine) },
+      ],
+      match: (r, value) => r.priority === value,
+    },
+    {
+      key: "sla",
+      label: t(S.fSla),
+      // A fulfilment authorization has no SLA at all — it is neither breached nor in time, so it belongs to
+      // neither chip rather than being quietly counted as "still in time".
+      options: [
+        { value: "breached", label: t(S.fBreached) },
+        { value: "due", label: t(S.fDue) },
+      ],
+      match: (r, value) => (value === "breached" ? r.sla?.breached === true : r.sla?.breached === false),
+    },
+  ], [t]);
+
+  const query = useTableQuery<ApprovalItem>({
+    rows: worklist.data ?? [],
+    columns: cols,
+    // The three things a reviewer arrives holding: the member's token, the service code, or the reference of
+    // the order or prescription the request was raised against.
+    searchText: (r) => [r.patient.token, r.service.code, t(r.service.label), r.itemReference]
+      .filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.searchHint),
+    filters,
+    pageSize: 25,
+    persistKey: "approvals-worklist",
+  });
 
   return (
     <>
@@ -146,18 +212,20 @@ export function ApprovalsWorklist() {
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <AsyncSection state={worklist} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
-            {(rows) => (
+            {() => (
               // 18.D3 (U6): rows were focusable (interactive) with NO onSelect, so a keyboard user could
               // tab to a row, press Enter, and nothing happened — the worklist was reachable but not
               // operable. Enter/Space now opens the same review the mouse opens.
-              <DataTable
+              <DataTableView
+                query={query}
                 columns={cols}
-                rows={rows}
                 rowKey={(r) => r.id}
                 caption={t(S.title)}
                 interactive
                 selectedKey={selected ?? undefined}
                 onSelect={(r) => setSelected(r.id)}
+                emptyLabel={t(S.empty)}
+                noMatchesLabel={t(S.noMatches)}
               />
             )}
           </AsyncSection>

@@ -121,7 +121,7 @@ export function ServiceHistoryModal({
           <span>
             <StatusChip kind="warn" label={t(S.restricted)} />
             {onRequestAccess && (
-              <Button variant="ghost" onClick={() => onRequestAccess(r)}>{t(S.requestAccess)}</Button>
+              <Button size="sm" variant="ghost" onClick={() => onRequestAccess(r)}>{t(S.requestAccess)}</Button>
             )}
           </span>
         ) : (
@@ -131,16 +131,26 @@ export function ServiceHistoryModal({
   ];
 
   return (
-    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title={`${t(S.title)}${label ? ` — ${label}` : ` — ${code}`}`}>
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={`${t(S.title)}${label ? ` — ${label}` : ` — ${code}`}`}
+      /* The way out belongs to the dialog. Written as the last child it rendered inside the opaque body
+         card, directly under the "no previous occurrences" alert with nothing between them. Retry joins it
+         only while there IS something to retry. */
+      footer={
+        <>
+          {state.status === "error" && (
+            <Button variant="secondary" onClick={state.reload}>{t(S.retry)}</Button>
+          )}
+          <Button variant="secondary" onClick={onClose}>{t(S.close)}</Button>
+        </>
+      }
+    >
       {state.status === "loading" && <p role="status">{t(S.loading)}</p>}
 
       {/* COULD NOT LOAD — its own state, in its own words, with a retry. Never "none". */}
-      {state.status === "error" && (
-        <>
-          <InlineAlert tone="warn">{t(S.unavailable)}</InlineAlert>
-          <Button variant="secondary" onClick={state.reload}>{t(S.retry)}</Button>
-        </>
-      )}
+      {state.status === "error" && <InlineAlert tone="warn">{t(S.unavailable)}</InlineAlert>}
 
       {/* Rendered ABOVE both the empty and the populated case: an incomplete list and an empty-because-
           pharmacy-was-down list are both stories a reader would otherwise get wrong. */}
@@ -174,8 +184,6 @@ export function ServiceHistoryModal({
           />
         </>
       )}
-
-      <Button variant="secondary" onClick={onClose}>{t(S.close)}</Button>
     </Modal>
   );
 }

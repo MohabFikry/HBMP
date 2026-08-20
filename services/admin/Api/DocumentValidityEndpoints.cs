@@ -66,7 +66,8 @@ public static class DocumentValidityEndpoints
             return Results.Ok(new DocumentValidityView(
                 tenant, DocumentValidityPolicy.DefaultDays, DocumentValidityPolicy.MinDays,
                 DocumentValidityPolicy.MaxDays, DocumentValidityPolicy.DefaultWarnDays, items));
-        }).RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("admin:read"))
+        .Produces<DocumentValidityView>();
 
         app.MapPut("/api/v1/admin/document-validity", async (
             SetDocumentValidityRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
@@ -132,15 +133,12 @@ public static class DocumentValidityEndpoints
             // Says plainly what it does NOT do. A supervisor who shortens a cadence and expects yesterday's
             // recorded documents to lapse tonight has to learn that from somewhere, and retroactive expiry
             // would strand a beneficiary whose papers were fine when they were checked.
-            return Results.Ok(new
-            {
-                kind = kind.ToString(),
-                days = req.Days,
-                warnDays = req.WarnDays,
-                appliesTo = "documents recorded from now on; anything already recorded keeps the expiry it carries",
-                version = savedVersion,
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("admin:write"));
+            return Results.Ok(new DocumentValidityChangeView(
+            kind.ToString(), req.Days, req.WarnDays,
+            "documents recorded from now on; anything already recorded keeps the expiry it carries",
+            savedVersion));
+        }).RequireAuthorization(HbmpPolicies.Scope("admin:write"))
+        .Produces<DocumentValidityChangeView>();
     }
 }
 

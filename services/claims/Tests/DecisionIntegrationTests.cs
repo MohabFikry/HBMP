@@ -229,6 +229,66 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
+    /// <summary>
+    /// A DENY retried under a key already used to APPROVE is refused, not answered with the approval.
+    /// </summary>
+    /// <remarks>
+    /// The replay compared the key alone until the 2026-08-09 audit. So an officer who approved, then
+    /// corrected themselves and denied under the same key, was told 200 OK — and read the APPROVAL back. The
+    /// line stays payable, the denial they believe they recorded does not exist, and there is no error
+    /// anywhere to investigate: from the platform's side nothing went wrong. Money moves on this.
+    /// </remarks>
+    [SkippableFact]
+    public async Task A_deny_retried_under_an_approves_key_is_refused_rather_than_answered_approved()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        try
+        {
+            var (claimId, lineId, _) = await Seed(tenant, "alice");
+            await using var db = Ctx();
+
+            (await Svc(db).DecideAsync(tenant, "officer", null, claimId, lineId, Approve(), "k1", 1_000_000m, "c"))
+                .Outcome.Should().Be(DecisionOutcome.Recorded);
+
+            var deny = new DecisionRequest(
+                ClaimDecisionKind.Deny, null, ["NOT_COVERED"], "outside the benefit", false, null);
+            var reused = await Svc(db).DecideAsync(tenant, "officer", null, claimId, lineId, deny, "k1", 1_000_000m, "c");
+
+            reused.Outcome.Should().Be(DecisionOutcome.IdempotencyKeyReuse);
+
+            await using var verify = Ctx();
+            var decisions = await verify.ClaimDecisions.AsNoTracking().Where(d => d.ClaimId == claimId).ToListAsync();
+            decisions.Should().ContainSingle("the refusal changes nothing — the officer retries with their own key");
+            decisions[0].Decision.Should().Be(ClaimDecisionKind.Approve);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    [SkippableFact]
+    public async Task The_SAME_decision_retried_under_the_same_key_still_replays()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        try
+        {
+            var (claimId, lineId, _) = await Seed(tenant, "alice");
+            await using var db = Ctx();
+
+            (await Svc(db).DecideAsync(tenant, "officer", null, claimId, lineId, Approve(), "k1", 1_000_000m, "c"))
+                .Outcome.Should().Be(DecisionOutcome.Recorded);
+
+            // The point of the header, and it has to survive the new check: a retry after a dropped response
+            // returns the decision already made, not a second one and not a 422.
+            (await Svc(db).DecideAsync(tenant, "officer", null, claimId, lineId, Approve(), "k1", 1_000_000m, "c"))
+                .Outcome.Should().Be(DecisionOutcome.Replayed);
+
+            await using var verify = Ctx();
+            (await verify.ClaimDecisions.AsNoTracking().CountAsync(d => d.ClaimId == claimId)).Should().Be(1);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
     private static string T() => "t-" + Guid.NewGuid().ToString("N")[..10];
 
     private static async Task Cleanup(string tenant)

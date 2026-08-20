@@ -25,7 +25,14 @@
 --   requested_quantity — what the doctor asked for. Never changed after creation.
 --   quantity_ordered   — what may actually be delivered. Set from the APPROVED scope.
 -- On an auto-activated order (no approval required) the two are equal, which is why the backfill below is a
--- straight copy and why requested_quantity is NOT NULL going forward.
+-- straight copy. requested_quantity becomes NOT NULL, but not here — see the note above the backfill and
+-- deferred/0018_requested_quantity_not_null_contract.sql.
+--
+-- ON THE `migrate-compat: contract-ok` ACKNOWLEDGEMENTS BELOW.
+-- Each marks a `DROP CONSTRAINT IF EXISTS ck_…` whose constraint this same migration adds two lines further
+-- down. The DROP is idempotency boilerplate so the file can be re-run; on a first run the constraint does not
+-- exist yet, and no previously deployed version can depend on one this migration introduces. That is a
+-- different thing from dropping a constraint the running system relies on, which is what the gate is for.
 
 ALTER TABLE orders.order_line
     ADD COLUMN IF NOT EXISTS procedure_type_code varchar(32)  NULL,
@@ -34,16 +41,20 @@ ALTER TABLE orders.order_line
 -- Backfill: every existing line was delivered at what it asked for.
 UPDATE orders.order_line SET requested_quantity = quantity_ordered WHERE requested_quantity IS NULL;
 
-ALTER TABLE orders.order_line ALTER COLUMN requested_quantity SET NOT NULL;
+-- NOT NULL is NOT set here. It is a contract-phase step and lives in
+-- deferred/0018_requested_quantity_not_null_contract.sql, for the same reason deferred/0014 exists for
+-- root_line_id on this very table: during a rolling deploy an OLD orders-service replica still inserts
+-- order_line rows without requested_quantity, and the constraint would turn that into a violation — a 500
+-- to a doctor placing an order mid-encounter. The column is nullable until every replica is new.
 
-ALTER TABLE orders.order_line DROP CONSTRAINT IF EXISTS ck_order_line_requested_positive;
+ALTER TABLE orders.order_line DROP CONSTRAINT IF EXISTS ck_order_line_requested_positive;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE orders.order_line
     ADD CONSTRAINT ck_order_line_requested_positive CHECK (requested_quantity > 0);
 
 -- An approval may narrow the entitlement; it may NEVER widen it beyond what was asked for. A partial approval
 -- that granted MORE than the request would be a defect upstream, and the database is the last place it can be
 -- stopped before it becomes a delivered service and then a claim.
-ALTER TABLE orders.order_line DROP CONSTRAINT IF EXISTS ck_order_line_ordered_within_requested;
+ALTER TABLE orders.order_line DROP CONSTRAINT IF EXISTS ck_order_line_ordered_within_requested;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE orders.order_line
     ADD CONSTRAINT ck_order_line_ordered_within_requested CHECK (quantity_ordered <= requested_quantity);
 

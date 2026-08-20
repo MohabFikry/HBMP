@@ -38,10 +38,11 @@ public static class QueueEndpoints
                 .OrderBy(o => o.RequestedAt).Skip((p - 1) * ps).Take(ps)
                 .ToListAsync(ct);
 
-            await AuditRead(audit, me, "queue", items.Count);
+            await AuditRead(audit, me, "queue", [.. items.Select(o => o.OrderId)]);
             var now = clock.GetUtcNow();
             return Results.Ok(items.Select(o => QueueItemResponse.From(o, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<QueueItemResponse>>();
 
         // ---- Search by patient (beneficiary id) OR order number ----
         v1.MapGet("/search", async (
@@ -111,10 +112,11 @@ public static class QueueEndpoints
             }
 
             var items = await q.OrderBy(o => o.RequestedAt).Take(100).ToListAsync(ct);
-            await AuditRead(audit, me, "search", items.Count);
+            await AuditRead(audit, me, "search", [.. items.Select(o => o.OrderId)]);
             var searchNow = clock.GetUtcNow();
             return Results.Ok(items.Select(o => QueueItemResponse.From(o, searchNow)));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<QueueItemResponse>>();
 
         // ---- Awaiting result: lines THIS provider has consumed but not yet uploaded a result for (US-042). ----
         // Drives the result-upload worklist; a result may only be attached to a line this provider consumed.
@@ -136,9 +138,10 @@ public static class QueueEndpoints
                     l.Code, l.Description, f.ConsumedAt)
             ).Take(100).ToListAsync(ct);
 
-            await AuditRead(audit, me, "awaiting-result", rows.Count);
+            await AuditRead(audit, me, "awaiting-result", [.. rows.Select(o => o.OrderId)]);
             return Results.Ok(rows);
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<AwaitingResultResponse>>();
     }
 
     /// <summary>A consumed line still awaiting its result upload (US-042) — the provider's result worklist row.</summary>
@@ -162,11 +165,36 @@ public static class QueueEndpoints
     private static (int page, int pageSize) Page(int page, int pageSize) =>
         (page < 1 ? 1 : page, pageSize is < 1 or > 100 ? 25 : pageSize);
 
-    private static async Task AuditRead(IAuditClient audit, IHbmpPrincipalAccessor me, string op, int count) =>
-        await audit.EmitAsync(new AuditEventDraft
+    /// <summary>
+    /// Audit a PHI read with the RECORDS it disclosed, one event each.
+    /// </summary>
+    /// <remarks>
+    /// The investigation twin of pharmacy's <c>AuditRead</c>, and it carried the identical defect: an
+    /// <c>EntityId</c> of <c>"queue"</c> or <c>"search"</c> and a count, so "who has looked at
+    /// ORD-2026-000900?" had no answer on the chain. One event per disclosed order, capped by the page size,
+    /// matching patient-service's <c>BeneficiaryReadGuard</c>. An empty result still emits one: a search that
+    /// found nothing is still an act, and on an identifier search it confirms a person has no live order.
+    /// </remarks>
+    private static async Task AuditRead(
+        IAuditClient audit, IHbmpPrincipalAccessor me, string op, IReadOnlyCollection<Guid> disclosed)
+    {
+        if (disclosed.Count == 0)
         {
-            EntityType = "investigation_order", EntityId = op, Action = AuditAction.Read,
-            ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
-            DecisionReasonCode = $"provider-{op}:{count}", FieldClasses = ["phi"],
-        });
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "investigation_order", EntityId = "(none)", Action = AuditAction.Read,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
+                DecisionReasonCode = $"provider-{op}:0", FieldClasses = ["phi"],
+            });
+            return;
+        }
+
+        foreach (var id in disclosed)
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "investigation_order", EntityId = id.ToString(), Action = AuditAction.Read,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
+                DecisionReasonCode = $"provider-{op}:{disclosed.Count}", FieldClasses = ["phi"],
+            });
+    }
 }

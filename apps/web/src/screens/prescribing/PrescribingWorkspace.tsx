@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type SetStateAction } from "react";
 import { z } from "zod";
-import { Button, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
 import type {
   CheckKind, CheckState, ClinicalSeverity, Finding, LineAcknowledgement, Localized,
   PrescriptionDraftLine, ValidationResult,
@@ -26,22 +26,39 @@ const S = {
   dose: { en: "Dose", ar: "الجرعة" },
   timesPerDay: { en: "Times per day", ar: "مرات يومياً" },
   duration: { en: "Duration (days)", ar: "المدة (أيام)" },
-  // 29.6 — what the quantity was computed from, said beside it. The doctor can overrule the number; they
-  // cannot check it unless they are told how it was reached.
-  quantityPacks: { en: "whole pack(s) of", ar: "عبوة كاملة سعة" },
   // 31.2 — what the pharmacy counts out. Stated beside the units it came from, so the prescriber can check
   // the conversion rather than take it on trust.
   boxes: { en: "box", ar: "علبة" },
   boxesPlural: { en: "boxes", ar: "علب" },
-  boxesOf: { en: "of", ar: "سعة" },
   boxesUnknown: {
-    en: "Boxes cannot be counted for this product: the catalogue's pack size counts containers, not the "
-      + "unit this is dosed in.",
-    ar: "لا يمكن حساب عدد العلب لهذا المنتج: حجم العبوة في الكتالوج يحسب الأوعية، وليس الوحدة التي تُوصف بها.",
+    en: "The catalogue does not record how much one box of this holds, so this is the total dose, not a "
+      + "box count.",
+    ar: "لا يسجّل الكتالوج سعة العبوة الواحدة من هذا المنتج، لذلك هذه هي الجرعة الإجمالية وليست عدد العلب.",
   },
+  // 31.3 — the box's contents, said once beside the box count. The prescriber can overrule the number; they
+  // cannot check it unless they are told what one box holds.
+  perBox: { en: "per box", ar: "لكل علبة" },
   quantityNotChecked: {
     en: "The quantity to dispense could not be computed.",
     ar: "تعذّر حساب الكمية المطلوب صرفها.",
+  },
+
+  // ---- 31.4 — copying a prescription that has already been written ----
+  cloned: {
+    en: "Copied {n} medicine(s) from {ref}. Nothing has been prescribed yet — check the doses and submit.",
+    ar: "تم نسخ {n} دواء من {ref}. لم يتم وصف أي شيء بعد — راجع الجرعات ثم أرسل.",
+  },
+  clonePartial: {
+    en: "{n} medicine(s) could not be copied: the catalogue no longer offers them. Everything else was.",
+    ar: "تعذّر نسخ {n} دواء: لم يعد الكتالوج يوفرها. تم نسخ الباقي.",
+  },
+  cloneEmpty: {
+    en: "Nothing on {ref} could be copied: its items do not record which catalogue product they are.",
+    ar: "لا يوجد ما يمكن نسخه من {ref}: بنودها لا تسجّل المنتج المقابل في الكتالوج.",
+  },
+  cloneFailed: {
+    en: "That prescription could not be copied — the drug catalogue could not be reached. Nothing was added.",
+    ar: "تعذّر نسخ الوصفة — لم يمكن الوصول إلى كتالوج الأدوية. لم يُضف أي شيء.",
   },
 
   // ---- 29.5 (design 45 §5) — acute / chronic ----
@@ -196,7 +213,9 @@ function newLine(): PrescriptionDraftLine {
   return {
     lineId: crypto.randomUUID(), drug: null, dose: "",
     doseAmount: null, timesPerDay: null, durationDays: null,
-    quantity: 1, quantityEdited: false,
+    // 31.3 — no unit until something has been computed. A new line's "1" counts nothing yet, and labelling
+    // it with a guess would be the one place this screen invents a fact.
+    quantity: 1, quantityUnit: "", quantityEdited: false,
   };
 }
 
@@ -209,6 +228,20 @@ function newLine(): PrescriptionDraftLine {
  *
  * <p>Empty while the dose is unset — an absent instruction must not render as a formatted one.</p>
  */
+/**
+ * 31.3 — the unit this line is counted in, as a prescriber writes it: `tabs`, `caps`, `IU`, `ml`.
+ *
+ * <p>Empty while no medicine is chosen, and empty for the 838 catalogue rows whose unit cannot be derived —
+ * a label reading "Dose" alone is honest, and a word invented to fill the gap would sit beside the field
+ * reading as data.</p>
+ *
+ * <p>The short form comes from the SERVER, which owns the vocabulary. `prescribingUnit` — "Tablet" — is the
+ * database's word and is kept for the stored sig; it is not what goes on a label.</p>
+ */
+function unitOf(line: PrescriptionDraftLine): string {
+  return line.drug?.prescribingUnitShort ?? line.drug?.prescribingUnit ?? "";
+}
+
 function sigOf(line: PrescriptionDraftLine): string {
   if (line.doseAmount === null) return "";
   const unit = line.drug?.prescribingUnit ? ` ${line.drug.prescribingUnit}` : "";
@@ -238,10 +271,36 @@ function fingerprint(lines: PrescriptionDraftLine[]): string {
  * The validation result here is ADVISORY. The server re-runs the whole thing on submit and ignores whatever
  * this screen concluded, so nothing below is a security control.
  */
+/**
+ * 31.4 — a transaction to copy into this composer, as the row that offered it knows it.
+ *
+ * <p>Ids and numbers, not draft lines: the composer owns line identity, and a caller minting `lineId`s would
+ * be a second place deciding what a line IS. The medicine itself is re-read from the catalogue here, so a
+ * clone carries today's pack facts and price rather than a snapshot taken when the original was written.</p>
+ */
+export interface PrescriptionClone {
+  /** What the doctor is copying, for the confirmation — "RX-2026-000312". */
+  reference: string;
+  items: {
+    drugId: string;
+    label: string;
+    quantity: number;
+    /** 31.3's unit, carried with its number — a bare "1" copied off a box count is the ambiguity that field
+     *  exists to close, and it would be reintroduced by dropping it here. */
+    quantityUnit: string | null;
+    /** 31.5 — the numbers the original was written from. Null on a line written before they were kept. */
+    doseAmount: number | null;
+    timesPerDay: number | null;
+    durationDays: number | null;
+  }[];
+}
+
 export function PrescribingWorkspace({
   encounterId,
   beneficiaryId,
   diagnosisIcdCodes,
+  clone,
+  onCloneApplied,
   onDone,
 }: {
   encounterId: string;
@@ -257,6 +316,9 @@ export function PrescribingWorkspace({
    * reports "no diagnosis recorded" rather than passing.
    */
   diagnosisIcdCodes: string[];
+  /** 31.4 — set by a row's Clone action; consumed once and reported back through `onCloneApplied`. */
+  clone?: PrescriptionClone | null;
+  onCloneApplied?: () => void;
   onDone?: () => void;
 }) {
   const api = useApi();
@@ -291,6 +353,90 @@ export function PrescribingWorkspace({
     setDraft((d) => ({ ...d, result: r, validatedFingerprint: fingerprint }));
 
   const [busy, setBusy] = useState(false);
+
+  /*
+   * 31.4 — COPY AN EXISTING PRESCRIPTION INTO THIS COMPOSER.
+   *
+   * A repeat script is the commonest thing a returning patient needs, and writing one meant finding each
+   * medicine in a catalogue of 22,653 again. The row's Clone action hands over the ids; the work here is
+   * re-reading each one from the CATALOGUE rather than trusting the copy stored on the old line — a clone
+   * should carry today's pack facts, price and availability, not last year's.
+   *
+   * THREE THINGS IT REFUSES TO DO.
+   *
+   * It does not discard what is already composed: the copied medicines are APPENDED, and the only line it
+   * removes is a single empty placeholder, which is not work. A doctor who has half-written a script and
+   * reaches for Clone must not watch it disappear.
+   *
+   * It does not silently drop a medicine the catalogue no longer offers — the count that failed is stated.
+   * A short prescription that looks complete is worse than one that says it is short.
+   *
+   * What it carries of the ORIGINAL is what the record actually holds. Since 31.5 that includes the dose,
+   * the frequency and the duration; before it, those three were sent at prescribing time, used by the
+   * checks and discarded, so a copy arrived with the fields empty. A line written before 31.5 still does —
+   * absent is carried through as absent rather than filled in by parsing the sig this app formatted.
+   */
+  useEffect(() => {
+    if (!clone) return;
+    let live = true;
+
+    // A transaction whose every line predates the drug id — or which carries no lines at all — copies
+    // NOTHING, and must say so. Returning quietly here would leave the request unconsumed and the doctor
+    // watching a button that appears to do nothing.
+    if (clone.items.length === 0) {
+      toast(t(S.cloneEmpty).replace("{ref}", clone.reference), "bad");
+      onCloneApplied?.();
+      return;
+    }
+
+    (async () => {
+      try {
+        const resolved = await Promise.all(
+          clone.items.map(async (item) => ({
+            item,
+            drug: await api.prescribableDrugById(item.drugId).catch(() => null),
+          })),
+        );
+        if (!live) return;
+
+        const usable = resolved.filter((r) => r.drug !== null);
+        if (usable.length > 0) {
+          setLines((prev) => [
+            // An empty placeholder is not work, so it makes way. Anything else the doctor typed stays.
+            ...prev.filter((l) => l.drug !== null || prev.length > 1),
+            ...usable.map(({ item, drug }) => ({
+              ...newLine(),
+              drug: drug!,
+              quantity: item.quantity,
+              quantityUnit: item.quantityUnit ?? "",
+              // 31.5 — the dose and frequency come across because the RECORD NOW HOLDS THEM. Until it did,
+              // a copy arrived with these two fields empty and the quantity check with nothing to compute
+              // from; the only route back to them was parsing the sig this app had formatted.
+              doseAmount: item.doseAmount,
+              timesPerDay: item.timesPerDay,
+              durationDays: item.durationDays,
+            })),
+          ]);
+          // The copy changes what is composed, so any check already run against the old set is stale.
+          setChecked(null, null);
+        }
+
+        const lost = resolved.length - usable.length;
+        toast(
+          t(S.cloned).replace("{n}", String(usable.length)).replace("{ref}", clone.reference),
+          usable.length > 0 ? "ok" : "bad",
+        );
+        if (lost > 0) toast(t(S.clonePartial).replace("{n}", String(lost)), "bad");
+      } catch {
+        if (live) toast(t(S.cloneFailed), "bad");
+      } finally {
+        if (live) onCloneApplied?.();
+      }
+    })();
+
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clone]);
 
   /*
    * 29.5 — the chronic half (design 45 §5).
@@ -420,44 +566,47 @@ export function PrescribingWorkspace({
         setLines((prev) => prev.map((x) =>
           // `quantityEdited` is re-checked HERE, not only above: the doctor may have typed while the request
           // was in flight, and answering it afterwards would overwrite what they just wrote.
-          x.lineId === l.lineId && !x.quantityEdited ? { ...x, quantity: p.dispenseQuantity } : x));
+          //
+          // 31.3 — BOXES where the box's contents are known, and the raw dispensing units where they are
+          // not. A prescription is written in the thing the patient carries home; "2250" beside an insulin
+          // pen is a number of international units, and no pharmacy counts those out. The field's LABEL
+          // says which of the two this is, so the number is never ambiguous.
+          //
+          // The unit is set with the number and travels with it: it labels the field here, it is persisted
+          // in the draft, and it is SENT, so a dispensing counter reading the figure back never reads it
+          // without knowing what it counts.
+          x.lineId === l.lineId && !x.quantityEdited
+            ? {
+                ...x,
+                quantity: p.boxes ?? p.dispenseQuantity,
+                quantityUnit: p.boxes ? t(p.boxes === 1 ? S.boxes : S.boxesPlural) : unitOf(l),
+              }
+            : x));
         setQuantityNote((prev) => ({
           ...prev,
           /*
-           * 31.2 — SAY IT IN BOXES, because that is what leaves the counter.
+           * ONLY WHAT THE NUMBER DOES NOT ALREADY SAY.
            *
-           * "180" beside a medicine tells a prescriber nothing about what the patient carries home. The
-           * units it came FROM stay in the sentence so the conversion is checkable rather than trusted.
-           *
-           * And where boxes cannot be counted, the sentence says so. `pack_size` counts the catalogue's
-           * minor units, which is only the same thing the dose counts for forms like tablets — a box of 5
-           * insulin pens dosed in IU would divide to a box count wrong by the pen's contents, and it would
-           * look exactly as confident as a right one.
+           * "Computed from dose x frequency x duration" used to sit under every quantity, restating the
+           * three fields immediately to its left. What remains is the conversion the number cannot carry:
+           * the dose total it came from and what one box holds, so a prescriber can CHECK the box count
+           * rather than trust it — or, where the catalogue does not record the box's contents, the fact
+           * that this is a dose total and not a box count at all.
            */
-          /*
-           * 31.2 — ONLY WHAT THE NUMBER DOES NOT ALREADY SAY.
-           *
-           * "Computed from dose x frequency x duration" used to sit under every quantity. It restates the
-           * three fields immediately to its left, so it was two lines of prose explaining nothing, on the
-           * one control the prescriber most needs to read quickly.
-           *
-           * What remains is information the number cannot carry: how many BOXES that is, or — where boxes
-           * cannot be counted, because `pack_size` counts containers and the dose counts millilitres or IU
-           * — the fact that they cannot.
-           */
-          [l.lineId]: p.boxes
-            ? `${p.totalUnits} ${p.prescribingUnit ?? ""} — ${p.boxes} `
-              + `${t(p.boxes === 1 ? S.boxes : S.boxesPlural)}`
-              + (p.packSize ? ` ${t(S.boxesOf)} ${p.packSize}` : "")
-            : p.packSize
-              ? t(S.boxesUnknown)
-              : "",
+          [l.lineId]: p.boxes && p.packContent
+            ? `${p.totalUnits} ${unitOf(l)} — ${p.packContent} ${unitOf(l)} ${t(S.perBox)}`
+            : p.boxes
+              ? `${p.totalUnits} ${unitOf(l)}`
+              : t(S.boxesUnknown),
         }));
       } catch (err) {
         if (!live) return;
         // ABSENCE IS NEVER A NUMBER (invariant 8). The missing field is NAMED and the quantity is left
         // alone — a guessed quantity is a dispensing error that looks exactly like a correct one.
         const problem = (err as { problem?: { title?: string; detail?: string } })?.problem;
+        // Nothing was computed, so the field is whatever the prescriber last saw and the label must not
+        // claim it is a box count. Cleared to a bare "Quantity"; the note below says what was missing.
+        setLines((prev) => prev.map((x) => x.lineId === l.lineId ? { ...x, quantityUnit: "" } : x));
         setQuantityNote((prev) => ({
           ...prev,
           [l.lineId]: problem?.title === "quantity-not-checked" && problem.detail
@@ -672,23 +821,17 @@ export function PrescribingWorkspace({
         <div className="rx-chronic-fields">
           <label className="rx-field">
             <span className="rx-field-label">{t(S.refillFrequency)}</span>
-            <select
-              className="rx-field-input"
-              value={refillFrequencyCode ?? ""}
+            <Combobox
+              value={refillFrequencyCode}
               disabled={busy}
-              onChange={(e) => {
-                // Read the value BEFORE the updater. `setDraft`'s callback runs after React has released
-                // the synthetic event, so `e.currentTarget` is null by then — which throws inside a state
-                // updater and takes the whole composer down with it.
-                const code = e.currentTarget.value || null;
-                setDraft((d) => ({ ...d, refillFrequencyCode: code }));
+              placeholder={t(S.chooseFrequency)}
+              onChange={(next) => {
+                // The event-timing note that used to live here is gone with the native select: `onChange`
+                // hands over the VALUE, so there is no synthetic event to read after React has released it.
+                setDraft((d) => ({ ...d, refillFrequencyCode: next || null }));
               }}
-            >
-              <option value="">{t(S.chooseFrequency)}</option>
-              {frequencies.map((f) => (
-                <option key={f.code} value={f.code}>{t(f.name)}</option>
-              ))}
-            </select>
+              options={frequencies.map((f) => ({ value: f.code, label: t(f.name), keywords: f.code }))}
+            />
           </label>
           {/*
             31.1 — the treatment length is READ from the lines, not asked for again. One fact, one field:
@@ -730,7 +873,7 @@ export function PrescribingWorkspace({
         this is the last moment changing it is free.
       */}
       {preview && (
-        <div className="rx-schedule" data-testid="chronic-schedule">
+        <div className="rx-schedule mrs-scroll mrs-scroll-focusable" tabIndex={0} data-testid="chronic-schedule">
           <h4 className="section-h">{t(S.scheduleTitle)}</h4>
           <table className="mini-table">
             <caption className="mini-table-cap sr-only">{t(S.scheduleTitle)}</caption>
@@ -788,34 +931,35 @@ export function PrescribingWorkspace({
                   The unit comes from MASTER DATA and is shown, not chosen: it is a fact about the product.
                   A drug whose unit the catalogue does not record shows the field bare rather than a guess.
                 */}
-                <div className="rx-field">
-                  <label className="rx-field-label" htmlFor={`rx-dose-${line.lineId}`}>{t(S.dose)}</label>
-                  <span className="rx-dose">
-                    <input
-                      id={`rx-dose-${line.lineId}`}
-                      className="rx-field-input"
-                      type="number"
-                      min={0}
-                      step="any"
-                      inputMode="decimal"
-                      value={line.doseAmount ?? ""}
-                      disabled={busy}
-                      // The unit DESCRIBES the field rather than naming it — "Dose", described as "Tablet".
-                      // Folding it into the name would make the field announce as "Dose Tablet", which is
-                      // not what it is called.
-                      aria-describedby={line.drug?.prescribingUnit ? `rx-unit-${line.lineId}` : undefined}
-                      onChange={(e) => {
-                        const raw = e.currentTarget.value;
-                        patch(line.lineId, { doseAmount: raw === "" ? null : Number(raw) });
-                      }}
-                    />
-                    {line.drug?.prescribingUnit && (
-                      <span id={`rx-unit-${line.lineId}`} className="rx-dose-unit">
-                        {line.drug.prescribingUnit}
-                      </span>
-                    )}
+                {/*
+                  31.3 — THE LABEL CARRIES THE UNIT, because the unit is what the field means.
+
+                  It used to sit as a separate chip beside the box, which cost a column of width on the
+                  narrowest row of the composer and left the label saying "Dose" on every medicine in the
+                  catalogue. "Dose (IU)" for insulin, "Dose (tabs)" for a tablet, "Dose (puffs)" for an
+                  inhaler — one field, read at a glance, in the words a prescription is written in.
+
+                  A drug whose unit the catalogue does not record shows the label bare. That is honest; a
+                  word invented for it would sit beside the field reading as data.
+                */}
+                <label className="rx-field">
+                  <span className="rx-field-label">
+                    {t(S.dose)}{unitOf(line) && ` (${unitOf(line)})`}
                   </span>
-                </div>
+                  <input
+                    className="rx-field-input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    value={line.doseAmount ?? ""}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const raw = e.currentTarget.value;
+                      patch(line.lineId, { doseAmount: raw === "" ? null : Number(raw) });
+                    }}
+                  />
+                </label>
                 <label className="rx-field">
                   <span className="rx-field-label">{t(S.timesPerDay)}</span>
                   <input
@@ -854,7 +998,11 @@ export function PrescribingWorkspace({
                   is travelling must not watch it snap back on the next keystroke.
                 */}
                 <div className="rx-field">
-                  <label className="rx-field-label" htmlFor={`rx-qty-${line.lineId}`}>{t(S.quantity)}</label>
+                  {/* 31.3 — "Quantity (boxes)" or "Quantity (IU)". The number alone does not say which, and
+                      the difference between them is one box and two thousand two hundred and fifty units. */}
+                  <label className="rx-field-label" htmlFor={`rx-qty-${line.lineId}`}>
+                    {t(S.quantity)}{line.quantityUnit && ` (${line.quantityUnit})`}
+                  </label>
                   <input
                     id={`rx-qty-${line.lineId}`}
                     className="rx-field-input"
@@ -970,7 +1118,7 @@ export function PrescribingWorkspace({
         className="rx-add-line"
         disabled={busy}
         onClick={() => setLines((prev) => [...prev, newLine()])}
-        leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+        leadingIcon={<Icon name="plus" aria-hidden="true" />}
       >
         {t(S.addLine)}
       </Button>
@@ -998,7 +1146,7 @@ export function PrescribingWorkspace({
         <Button variant="secondary" loading={busy} disabled={!allLinesHaveDrugs} onClick={() => void validate()}>
           {t(S.validate)}
         </Button>
-        <Button variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
+        <Button leadingIcon={<Icon name="check2" />} variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
           {t(S.submit)}
         </Button>
       </div>
@@ -1028,7 +1176,7 @@ export function PrescribingWorkspace({
         title={t(S.confirmDiscard)}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
+            <Button variant="secondary" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
             <Button
               variant="danger"
               onClick={() => { setDraft(emptyDraft()); setOpenChecks(null); setDiscarding(false); }}

@@ -35,13 +35,19 @@ public sealed record CreatePrescriptionRequest(
 /// </param>
 /// <param name="DoseAmount">Numeric dose, when the client can supply one, for the daily-dose rule.</param>
 /// <param name="TimesPerDay">Doses per day, for the daily-dose rule.</param>
+/// <param name="QuantityUnit">
+/// 31.3 — what <paramref name="QuantityPrescribed"/> COUNTS: "boxes", or the prescribing unit. A quantity of
+/// 1 against a 24-tablet box and a quantity of 2250 against a box of insulin pens are both correct and are
+/// counted in different things; the counter renders the figure, so the figure carries its unit.
+/// </param>
 public sealed record CreateRxLine(
     Guid DrugId, string? Dose, string? Route, string? Frequency, decimal QuantityPrescribed, int RefillsAllowed,
     int? DurationDays = null,
     Guid? ClientLineId = null,
     decimal? DoseAmount = null,
     string? DoseUnit = null,
-    int? TimesPerDay = null);
+    int? TimesPerDay = null,
+    string? QuantityUnit = null);
 
 /// <summary>A prescriber's recorded reason for proceeding past one warning on one line.</summary>
 public sealed record LineAcknowledgement(Guid ClientLineId, string FindingKind, string Reason);
@@ -69,7 +75,9 @@ public sealed record ChronicPreviewRequest(
     decimal? DoseAmount = null,
     int? TimesPerDay = null,
     bool? IsPackSplittable = null,
-    decimal? PackSize = null,
+    /// <summary>31.5 — what one box HOLDS, renamed from `PackSize` for the reason 31.3 gives: the pack size
+    /// counts containers for every measured product and is the wrong divisor for all of them.</summary>
+    decimal? PackContent = null,
     Guid? DrugId = null);
 
 /// <summary>
@@ -81,13 +89,18 @@ public sealed record ChronicPreviewRequest(
 /// itself. A composer that fetched a pack size and handed it back would be a second place deciding what the
 /// catalogue says, and the version that drifted would be the one on screen.
 /// </remarks>
+/// <param name="PackContent">
+/// An override for how much one box holds, for the caller that already knows. 31.3 renamed it from
+/// <c>PackSize</c>, which is a different fact: the catalogue's minor-unit count, equal to the content only
+/// for the countable forms and equal to 1 for every bottle of syrup in the list.
+/// </param>
 public sealed record QuantityPreviewRequest(
     Guid? DrugId = null,
     decimal? DoseAmount = null,
     int? TimesPerDay = null,
     int? DurationDays = null,
     bool? IsPackSplittable = null,
-    decimal? PackSize = null);
+    decimal? PackContent = null);
 
 /// <summary>
 /// Body for POST /prescriptions/validate — step 1, advisory (doc 43 §5).
@@ -137,13 +150,25 @@ public sealed record CreateReferralRequest(
 /// </param>
 public sealed record CancelRequest(string? Reason, string? ReasonCode = null);
 
+/// <param name="DoseAmount">31.5 — how much per administration. Null where the record does not hold it.</param>
+/// <param name="TimesPerDay">31.5 — administrations per day. Null where the record does not hold it.</param>
+/// <param name="DurationDays">How long the course runs. Null ⇒ the prescriber recorded none.</param>
 public sealed record RxLineResponse(
     Guid PrescriptionLineId, Guid DrugId, string? DrugName, string? Dose, string? Route, string? Frequency,
-    decimal QuantityPrescribed, decimal QuantityDispensed, int RefillsAllowed, string Status)
+    decimal QuantityPrescribed, decimal QuantityDispensed, int RefillsAllowed, string Status,
+    // 31.3 — what the two quantities above are counted in. Null on a line written before 31.3, and rendered
+    // as no unit rather than as a guessed one.
+    string? QuantityUnit = null,
+    // 31.5 — the numbers the sig was FORMATTED FROM, which the record used to discard. Without them a
+    // prescription cannot be copied without retyping its dose, and cannot be re-checked at all.
+    decimal? DoseAmount = null,
+    int? TimesPerDay = null,
+    int? DurationDays = null)
 {
     public static RxLineResponse From(PrescriptionLine l) => new(
         l.PrescriptionLineId, l.DrugId, l.DrugName, l.Dose, l.Route, l.Frequency,
-        l.QuantityPrescribed, l.QuantityDispensed, l.RefillsAllowed, l.Status.ToString());
+        l.QuantityPrescribed, l.QuantityDispensed, l.RefillsAllowed, l.Status.ToString(), l.QuantityUnit,
+        l.DoseAmount, l.TimesPerDay, l.DurationDays);
 }
 
 public sealed record AlertView(string Kind, string Severity, string Detail);
@@ -184,7 +209,16 @@ public sealed record PrescriptionResponse(
 public sealed record DispensableLineView(
     Guid PrescriptionLineId, Guid DrugId, string? DrugName, string? Dose, string? Route, string? Frequency,
     int? DurationDays,
-    decimal QuantityPrescribed, decimal QuantityDispensed, decimal QuantityRemaining, string Status);
+    decimal QuantityPrescribed, decimal QuantityDispensed, decimal QuantityRemaining, string Status,
+    /// <summary>
+    /// 31.3 — what those three quantities COUNT: "boxes", or the prescribing unit ("tabs", "IU", "ml").
+    /// </summary>
+    /// <remarks>
+    /// The dispensing screen renders the figure alone, and 31.3 made a prescription's quantity a box count
+    /// wherever the catalogue records what a box holds. A pharmacist reading "1" against a 24-tablet box and
+    /// handing over one TABLET is an error the record previously gave them no way to catch.
+    /// </remarks>
+    string? QuantityUnit = null);
 
 /// <summary>
 /// A prescription as the dispensing counter needs it.
@@ -224,7 +258,8 @@ public sealed record DispensableRxView(
         p.Lines.Where(l => l.Status is RxLineStatus.Active or RxLineStatus.PartiallyDispensed && l.QuantityRemaining > 0)
             .Select(l => new DispensableLineView(
                 l.PrescriptionLineId, l.DrugId, l.DrugName, l.Dose, l.Route, l.Frequency, l.DurationDays,
-                l.QuantityPrescribed, l.QuantityDispensed, l.QuantityRemaining, l.Status.ToString()))
+                l.QuantityPrescribed, l.QuantityDispensed, l.QuantityRemaining, l.Status.ToString(),
+                l.QuantityUnit))
             .ToList());
 }
 

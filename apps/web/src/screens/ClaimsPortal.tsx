@@ -1,4 +1,4 @@
-import { Card, DataTable, KpiCard, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { Card, DataTable, DataTableView, KpiCard, SegmentedControl, StatusChip, useTableQuery } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type { ClaimRow, ClaimsKpis, Localized, ReconciliationRow } from "@mersal/contracts";
@@ -13,6 +13,13 @@ const S = {
   wlTitle: { en: "Claims Worklist", ar: "قائمة المطالبات" },
   wlEmpty: { en: "No claims match this filter.", ar: "لا توجد مطالبات مطابقة." },
   claimNo: { en: "Claim", ar: "المطالبة" },
+  search: { en: "Search", ar: "بحث" },
+  wlSearchHint: { en: "Claim number or origin", ar: "رقم المطالبة أو المصدر" },
+  recSearchHint: { en: "Claim number or service code", ar: "رقم المطالبة أو رمز الخدمة" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filter above.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل التصفية أعلاه.",
+  },
   origin: { en: "Origin", ar: "المصدر" },
   status: { en: "Status", ar: "الحالة" },
   claimed: { en: "Claimed", ar: "المطالَب" },
@@ -62,14 +69,33 @@ export function ClaimsWorklist() {
   const [status, setStatus] = useState<string>("");
   const state = useAsync<ClaimRow[]>(() => api.claimsWorklist(status || undefined), [status]);
   const cols: Column<ClaimRow>[] = [
-    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
-    { key: "origin", header: t(S.origin), cell: (r) => r.origin },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true },
-    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true },
-    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span> },
-    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
+    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span>, sortable: true, sortValue: (r) => r.claimNo },
+    { key: "origin", header: t(S.origin), cell: (r) => r.origin, sortable: true, sortValue: (r) => r.origin },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true, sortable: true, sortValue: (r) => r.claimedAmount },
+    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true, sortable: true, sortValue: (r) => r.netPayable },
+    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span>, sortable: true, sortValue: (r) => r.serviceDateFrom },
+    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span>, sortable: true, sortValue: (r) => r.submittedAt },
   ];
+
+  /*
+    Search and a pager, but NO filter group: the status segmented control above already narrows this, and it
+    does it on the SERVER — `claimsWorklist(status)` refetches. Mirroring it into `useTableQuery` would give
+    the screen two controls for one question that could disagree with each other.
+
+    Read outside AsyncSection's render prop: a hook called in there would be conditional on the load.
+  */
+  const query = useTableQuery<ClaimRow>({
+    rows: state.data ?? [],
+    columns: cols,
+    // What a finance clerk arrives holding: the claim number off a provider's statement, or the code.
+    searchText: (r) => [r.claimNo, r.origin, t(r.status.label)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.wlSearchHint),
+    pageSize: 25,
+    persistKey: "claims-worklist",
+  });
+
   return (
     <>
       <PageHeader title={t(S.wlTitle)} />
@@ -88,7 +114,16 @@ export function ClaimsWorklist() {
       </div>
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.wlEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.wlTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.wlTitle)}
+              emptyLabel={t(S.wlEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>
@@ -103,14 +138,27 @@ export function ClaimsReconciliation() {
   const [bucket, setBucket] = useState<string>("");
   const state = useAsync<ReconciliationRow[]>(() => api.claimsReconciliation(bucket || undefined), [bucket]);
   const cols: Column<ReconciliationRow>[] = [
-    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
-    { key: "origin", header: t(S.origin), cell: (r) => r.origin },
-    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
-    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span> },
-    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true },
-    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true },
-    { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span>, sortable: true, sortValue: (r) => r.claimNo },
+    { key: "origin", header: t(S.origin), cell: (r) => r.origin, sortable: true, sortValue: (r) => r.origin },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span>, sortable: true, sortValue: (r) => r.code },
+    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span>, sortable: true, sortValue: (r) => r.serviceDate },
+    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true, sortable: true, sortValue: (r) => r.billedAmount },
+    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true, sortable: true, sortValue: (r) => r.allowedAmount },
+    { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
+
+  /** Same shape as the worklist above: the bucket control is the server's filter, so this adds only the
+   *  search and the pager. A reconciliation row is found by claim number or by the service code on it. */
+  const query = useTableQuery<ReconciliationRow>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.claimNo, r.code, r.origin, t(r.status.label)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.recSearchHint),
+    pageSize: 25,
+    persistKey: "claims-reconciliation",
+  });
+
   return (
     <>
       <PageHeader title={t(S.recTitle)} />
@@ -129,7 +177,16 @@ export function ClaimsReconciliation() {
       </div>
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.recEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => `${r.claimId}-${r.code}`} caption={t(S.recTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => `${r.claimId}-${r.code}`}
+              caption={t(S.recTitle)}
+              emptyLabel={t(S.recEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>
@@ -143,8 +200,8 @@ export function ClaimsInsights() {
   const t = useLoc();
   const state = useAsync<ClaimsKpis>(() => api.claimsKpis(), []);
   const reasonCols: Column<{ reason: string; count: number }>[] = [
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
-    { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
+    { key: "count", header: t(S.count), cell: (r) => r.count, numeric: true, sortable: true, sortValue: (r) => r.count },
   ];
   return (
     <>
@@ -152,7 +209,10 @@ export function ClaimsInsights() {
       <AsyncSection state={state} isEmpty={() => false} emptyLabel={S.insEmpty}>
         {(k) => (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "var(--sp3)", marginBottom: "var(--sp4)" }}>
+            {/* `mrs-kpigrid`, not a hand-written grid: this was `minmax(160px, 1fr)` with a --sp3 gap, which
+                is narrower than the design system's own KPI row and too narrow for the money values two of
+                these seven tiles carry — they clipped. One class now sizes both KPI layouts. */}
+            <div className="mrs-kpigrid" style={{ marginBottom: "var(--sp4)" }}>
               <KpiCard label={t(S.tat)} value={k.averageTatHours.toFixed(1)} />
               <KpiCard label={t(S.approval)} value={pct(k.approvalRate)} />
               <KpiCard label={t(S.denial)} value={pct(k.denialRate)} />

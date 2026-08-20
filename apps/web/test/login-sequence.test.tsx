@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@mersal/design-system";
 import { LoginPage } from "../src/pages/LoginPage";
 import { AuthProvider } from "../src/auth/AuthProvider";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 
 /**
  * Phase 28.4 — the sign-in SEQUENCE now happens in the SPA (ADR-0036 §3).

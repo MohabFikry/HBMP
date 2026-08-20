@@ -185,7 +185,7 @@ public class ChronicComposerSupportTests(PrescribingApiFactory f) : IClassFixtur
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m);
+        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m, PackContent: 20m);
 
         var p = await PreviewAsync(new
         {
@@ -205,7 +205,7 @@ public class ChronicComposerSupportTests(PrescribingApiFactory f) : IClassFixtur
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: null, PackSize: null);
+        f.Packs[drug] = new DrugPack(IsPackSplittable: null, PackSize: null, PackContent: null);
 
         var r = await f.Prescriber().PostAsJsonAsync("/api/v1/prescriptions/chronic-preview", new
         {

@@ -40,7 +40,23 @@ public sealed class BusinessCalendar(TimeProvider clock) : IBusinessCalendar
 
     public DateOnly Today() => DateOf(clock.GetUtcNow());
 
-    public DateOnly DateOf(DateTimeOffset instant) =>
+    public DateOnly DateOf(DateTimeOffset instant) => DateIn(instant);
+
+    /// <summary>
+    /// The Cairo business date an instant falls on, without an injected calendar.
+    ///
+    /// <para>For pure domain code and value types that are HANDED an instant and have nowhere to inject
+    /// anything — <c>Dispensing.Validate</c>, an entity's computed property. Without it, that code writes
+    /// <c>DateOnly.FromDateTime(instant.UtcDateTime)</c>, which is the defect this whole type exists to
+    /// prevent, and the 2026-08-09 audit found twenty of them.</para>
+    ///
+    /// <para><b>This is not a way to get "today".</b> It needs an instant, and the only legitimate source of
+    /// the current one is an injected <c>TimeProvider</c> — reading the clock directly is banned outright by
+    /// <c>NoBareClockArchitectureTests</c>, so there is no shortcut here. Deriving the date from the SAME
+    /// instant the rest of a handler already used is also strictly better than a second
+    /// <see cref="Today"/> call, which re-reads the clock and can land on the other side of midnight.</para>
+    /// </summary>
+    public static DateOnly DateIn(DateTimeOffset instant) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, CairoZone).DateTime);
 
     private static TimeZoneInfo Resolve()

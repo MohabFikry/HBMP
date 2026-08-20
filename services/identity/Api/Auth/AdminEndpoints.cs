@@ -40,7 +40,11 @@ public static class AdminEndpoints
             if (!string.IsNullOrWhiteSpace(query))
             {
                 var norm = query.ToUpperInvariant();
-                q = q.Where(u => u.NormalizedUserName!.Contains(norm) || EF.Functions.ILike(u.DisplayName, $"%{query}%"));
+                // EMAIL is searched too, and it is the field an administrator is most likely to be handed:
+                // a request to reset an account arrives as an address far more often than as a username.
+                q = q.Where(u => u.NormalizedUserName!.Contains(norm)
+                              || (u.NormalizedEmail != null && u.NormalizedEmail.Contains(norm))
+                              || EF.Functions.ILike(u.DisplayName, $"%{query}%"));
             }
             var rows = await q.OrderBy(u => u.UserName).Take(200).ToListAsync(http.RequestAborted);
             var views = new List<object>();
@@ -48,6 +52,12 @@ public static class AdminEndpoints
                 views.Add(new
                 {
                     id = u.Id, username = u.UserName, displayName = u.DisplayName,
+                    // 28.13 — the job title. Display only; nothing authorizes on it, and it is deliberately
+                    // absent from the token for that reason (see ApplicationUser.Position).
+                    position = u.Position,
+                    // Returned since 28.8: the console could not show an address, so an administrator could
+                    // not tell whether "send a reset link" would reach anybody before pressing it.
+                    email = u.Email,
                     tenantId = u.TenantId, providerId = u.ProviderId, isActive = u.IsActive,
                     twoFactorEnabled = u.TwoFactorEnabled, roles = await users.GetRolesAsync(u),
                 });
@@ -55,7 +65,9 @@ public static class AdminEndpoints
         });
 
         g.MapPost("/users", async (HttpContext http, CreateUserRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit, TimeProvider clock, MembershipService memberships) =>
+            UserManager<ApplicationUser> users, IdentityStoreDbContext db, IAuditClient audit, TimeProvider clock,
+            MembershipService memberships,
+            IEmailSender email, IConfiguration config, ILoggerFactory logs) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -63,13 +75,71 @@ public static class AdminEndpoints
             var known = req.Roles.All(r => IdentityContract.Roles.Contains(r.ToLowerInvariant()));
             if (!known) return Results.Problem(statusCode: 422, title: "unknown-role", detail: "one or more roles are not in the catalog");
 
+            // 28.8 — an email address is REQUIRED now, because it is the sign-in credential and the only
+            // channel a password reset can travel down. An account created without one can neither sign in
+            // by address nor be helped back in, and nothing about it says so until somebody is locked out.
+            if (string.IsNullOrWhiteSpace(req.Email) || !IsPlausibleEmail(req.Email))
+                return Results.Problem(statusCode: 422, title: "email-required",
+                    detail: "a valid email address is required — it is the sign-in credential and the reset channel");
+
+            // Checked BEFORE the create so the conflict is reported as a conflict. Identity's own uniqueness
+            // check would surface as a generic "create-failed" with a validation string in the detail, which
+            // an administrator cannot distinguish from a rejected password. The database's unique index
+            // (0035) is what actually enforces this; the check here exists to give a good answer.
+            if (await users.FindByEmailAsync(req.Email) is not null)
+                return Results.Problem(statusCode: 409, title: "email-taken",
+                    detail: "another account already uses this email address");
+            if (await users.FindByNameAsync(req.Username) is not null)
+                return Results.Problem(statusCode: 409, title: "username-taken",
+                    detail: "another account already uses this username");
+
+            // ------------------------------------------------------------------------------------------------
+            // 28.16 — THE NEW ACCOUNT BELONGS TO A TENANT, AND THE CALLER DOES NOT GET TO INVENT ONE.
+            // ------------------------------------------------------------------------------------------------
+            // This wrote `req.TenantId` verbatim. The SPA sends "" — it has no tenant to send, since the
+            // caller's own is in their token — so every account created through the product landed with an
+            // EMPTY tenant id, and `EnsureMirroredAsync` below then minted its membership in tenant "".
+            //
+            // Nothing said so. The account appeared in the directory (that listing is not tenant-scoped), it
+            // could sign in, and it was simply absent from its own organisation's membership roster forever:
+            // no authority to review, no exception that could be granted to it, and a token carrying a tenant
+            // claim that matches no tenant. Merging the two lists is what made it visible — the new row says
+            // "No membership" the moment it is created.
+            //
+            // Resolved through the SAME reach check the roster reads with, so a cross-tenant create is
+            // refused and audited rather than quietly accepted, and asking for nothing means "mine".
+            var (askedTenant, tenantDenied) = await ResolveTenantReachAsync(
+                db, me!, string.IsNullOrWhiteSpace(req.TenantId) ? null : req.TenantId, audit, http.RequestAborted);
+            if (tenantDenied is not null) return tenantDenied;
+            // Null here means "every tenant", which is a legitimate answer for a READ and meaningless for a
+            // create — a platform admin who named no tenant gets their own.
+            var tenantId = askedTenant ?? me!.GetClaim(HbmpClaimTypes.TenantId);
+            if (string.IsNullOrWhiteSpace(tenantId))
+                return Results.Problem(statusCode: 422, title: "tenant-required",
+                    detail: "the new account's tenant could not be resolved — name one, or sign in with a tenant of your own");
+
             var user = new ApplicationUser
             {
                 Id = Guid.NewGuid(), UserName = req.Username, NormalizedUserName = req.Username.ToUpperInvariant(),
-                Email = req.Email, DisplayName = req.DisplayName, TenantId = req.TenantId, ProviderId = req.ProviderId,
+                Email = req.Email, DisplayName = req.DisplayName, Position = Trimmed(req.Position),
+                TenantId = tenantId, ProviderId = req.ProviderId,
                 CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
-            var created = await users.CreateAsync(user, req.Password);
+            // ------------------------------------------------------------------------------------------------
+            // 28.8 — THE ADMINISTRATOR DOES NOT CHOOSE THE PASSWORD, HERE EITHER.
+            // ------------------------------------------------------------------------------------------------
+            // 28.7 removed the admin's ability to SET a password on an existing account, on the grounds that
+            // there must be a moment at which only its owner knows the credential. Creation was left taking
+            // a `password`, which answered the same question the other way: the person who filled the form
+            // in knew the new account's password, and had to communicate it down some channel that outlives
+            // the moment.
+            //
+            // The password is now a throwaway. It is generated here, never returned, never logged, and never
+            // valid for anybody because the reset link below is what the owner actually uses. `req.Password`
+            // remains accepted so the seeders and integration tests that mint fixture accounts keep working;
+            // no UI sends it.
+            var initial = req.Password is { Length: > 0 } chosen ? chosen : GenerateThrowawayPassword();
+            var created = await users.CreateAsync(user, initial);
             if (!created.Succeeded)
                 return Results.Problem(statusCode: 422, title: "create-failed", detail: string.Join("; ", created.Errors.Select(e => e.Description)));
             if (req.Roles.Count > 0) await users.AddToRolesAsync(user, req.Roles.Select(r => r.ToLowerInvariant()));
@@ -79,9 +149,79 @@ public static class AdminEndpoints
             await memberships.EnsureMirroredAsync(user, req.Roles.Select(r => r.ToLowerInvariant()),
                 me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
 
+            // The invitation. It is what turns a row in a table into an account somebody can use, so its
+            // outcome is REPORTED rather than assumed: a failure here leaves a real account nobody can sign
+            // in to, and an administrator told only "created" would walk away from that.
+            //
+            // It does NOT fail the creation. The account and its roles are already committed and correct;
+            // undoing them because a mail server was down would throw away the work and leave the
+            // administrator with nothing, when the remedy is one button (Send reset link) on the row that
+            // now exists.
+            var invited = false;
+            if (email.IsConfigured && !string.IsNullOrWhiteSpace(user.Email))
+            {
+                try
+                {
+                    await PasswordResetEndpoints.SendResetLinkAsync(users, email, config, user, req.Lang, http.RequestAborted);
+                    invited = true;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logs.CreateLogger("Mersal.Identity.Api.Auth.AdminEndpoints")
+                        .LogError(ex, "Invitation link could not be sent for new user {UserId}.", user.Id);
+                }
+            }
+
             await Audit(audit, me, "identity.user", user.Id.ToString(), AuditAction.Create, "UserCreated",
-                $"{{\"username\":\"{user.UserName}\",\"roles\":[{string.Join(",", req.Roles.Select(r => $"\"{r}\""))}]}}");
-            return Results.Created($"/identity/admin/users/{user.Id}", new { id = user.Id, username = user.UserName });
+                $"{{\"username\":\"{user.UserName}\",\"invited\":{invited.ToString().ToLowerInvariant()},\"roles\":[{string.Join(",", req.Roles.Select(r => $"\"{r}\""))}]}}");
+            return Results.Created($"/identity/admin/users/{user.Id}",
+                new { id = user.Id, username = user.UserName, email = user.Email, resetLinkSent = invited });
+        });
+
+        // ---- 28.8 — correct an account's name or address --------------------------------------------------
+        //
+        // Without this, fixing a typo in an email meant creating a SECOND account: the address is the sign-in
+        // credential, so a wrong one is not a cosmetic defect, and the only remedy available was to deprovision
+        // and start again — losing the audit continuity of the person, which is exactly what soft-deprovision
+        // exists to preserve.
+        //
+        // Roles are NOT settable here. They go through `/roles`, which mirrors the membership the token is
+        // minted from; letting authority change through a "fix the spelling" endpoint would put a grant on a
+        // path nobody reviews.
+        g.MapPost("/users/{id:guid}", async (HttpContext http, Guid id, UpdateUserRequest req,
+            UserManager<ApplicationUser> users, IAuditClient audit) =>
+        {
+            var (me, err) = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            var user = await users.FindByIdAsync(id.ToString());
+            if (user is null) return Results.Problem(statusCode: 404, title: "not-found");
+
+            if (!string.IsNullOrWhiteSpace(req.Email) &&
+                !string.Equals(req.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!IsPlausibleEmail(req.Email))
+                    return Results.Problem(statusCode: 422, title: "invalid-email", detail: "that is not a usable email address");
+                var clash = await users.FindByEmailAsync(req.Email);
+                if (clash is not null && clash.Id != user.Id)
+                    return Results.Problem(statusCode: 409, title: "email-taken",
+                        detail: "another account already uses this email address");
+                await users.SetEmailAsync(user, req.Email);
+            }
+            if (!string.IsNullOrWhiteSpace(req.DisplayName)) user.DisplayName = req.DisplayName;
+            // `null` leaves it alone, `""` CLEARS it. The two have to be distinguishable: an administrator
+            // removing a job title that no longer applies is an ordinary edit, and a record that can only
+            // ever gain a value is one nobody can correct.
+            if (req.Position is not null) user.Position = Trimmed(req.Position);
+
+            var saved = await users.UpdateAsync(user);
+            if (!saved.Succeeded)
+                return Results.Problem(statusCode: 422, title: "update-failed",
+                    detail: string.Join("; ", saved.Errors.Select(e => e.Description)));
+
+            await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserUpdated",
+                $"{{\"displayName\":\"{user.DisplayName}\",\"email\":\"{user.Email}\",\"position\":\"{user.Position}\"}}");
+            return Results.Ok(new { id, displayName = user.DisplayName, email = user.Email, position = user.Position });
         });
 
         g.MapPost("/users/{id:guid}/roles", async (HttpContext http, Guid id, SetRolesRequest req,
@@ -137,6 +277,37 @@ public static class AdminEndpoints
 
             await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserDeactivated", null);
             return Results.Ok(new { id, isActive = false });
+        });
+
+        // ---- 28.8 — and the way back ----------------------------------------------------------------------
+        //
+        // Deprovision shipped without it. A staff member returning from leave, or an account disabled by
+        // mistake, could only be restored by an UPDATE run against the database by hand — which is both
+        // unaudited and exactly the kind of access this whole service exists to remove the need for.
+        //
+        // It restores the account and its membership; it does NOT restore the sessions deactivation revoked,
+        // and it must not. Those were ended deliberately and the person signs in again — which is also what
+        // produces a fresh, correct token rather than resurrecting one minted before whatever caused the
+        // deprovision.
+        g.MapPost("/users/{id:guid}/reactivate", async (HttpContext http, Guid id,
+            UserManager<ApplicationUser> users, IAuditClient audit, MembershipService memberships) =>
+        {
+            var (me, err) = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            var user = await users.FindByIdAsync(id.ToString());
+            if (user is null) return Results.Problem(statusCode: 404, title: "not-found");
+            user.IsActive = true;
+            await users.UpdateAsync(user);
+
+            // Symmetric with deactivate: the membership is what the token is minted from, so an account
+            // restored here without its membership restored there would sign in and then be refused at
+            // authorize — a "working" account that works right up until the moment it matters.
+            await memberships.EnsureMirroredAsync(user, await users.GetRolesAsync(user),
+                me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
+
+            await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserReactivated", null);
+            return Results.Ok(new { id, isActive = true });
         });
 
         // ---- 28.7 — an administrator ISSUES A LINK. They no longer choose the password. ----------------------
@@ -198,6 +369,179 @@ public static class AdminEndpoints
             return Results.Ok(new { id, resetLinkSent = true });
         });
 
+        // ---- 28.9 — THE ACCESS CATALOGUE -------------------------------------------------------------------
+        //
+        // ============================================================================================================
+        // WHY THIS HAD TO EXIST BEFORE CUSTOM ROLES COULD
+        // ============================================================================================================
+        // Every permission in the platform has always been data — `identity.scope` — and no surface listed it.
+        // An administrator could grant a role, and could grant an exception naming a key, but had no way to
+        // find out what keys there ARE or what any of them means. In practice that leaves exactly one usable
+        // strategy: give somebody the nearest bigger role and hope. Which is how least-privilege dies — not
+        // by being rejected, but by being unavailable.
+        //
+        // Everything here is a READ of the catalog. Nothing is authorized by it and nothing is disclosed by
+        // it beyond the vocabulary the token contract already publishes.
+        g.MapGet("/scopes", async (HttpContext http, IdentityStoreDbContext db) =>
+        {
+            var (me, err) = await Guard(http, "admin:read");
+            if (err is not null) return err;
+
+            var tenant = me!.GetClaim(HbmpClaimTypes.TenantId) ?? RoleScope.PlatformDefault;
+
+            // Which roles hold each key, IN THIS TENANT. The question an administrator actually has in front
+            // of a permission is "who has this already" — without it, deciding whether a new role needs a key
+            // means guessing, and the safe guess is always "include it".
+            var grants = await db.RoleScopes.AsNoTracking()
+                .Where(rs => rs.TenantId == tenant || rs.TenantId == RoleScope.PlatformDefault)
+                .ToListAsync(http.RequestAborted);
+            // A tenant that has provisioned its own grants OVERRIDES the platform default rather than adding
+            // to it — the same precedence the resolver applies, restated here so the screen does not show a
+            // role holding a key the issuer would not actually mint for it.
+            var tenantOwn = grants.Where(rs => rs.TenantId == tenant).Select(rs => rs.RoleName).ToHashSet(StringComparer.Ordinal);
+            var effective = grants
+                .Where(rs => tenantOwn.Contains(rs.RoleName) ? rs.TenantId == tenant : true)
+                .GroupBy(rs => rs.ScopeName)
+                .ToDictionary(gr => gr.Key, gr => gr.Select(x => x.RoleName).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList());
+
+            var scopes = await db.Scopes.AsNoTracking()
+                .OrderBy(s => s.Domain).ThenBy(s => s.Name)
+                .ToListAsync(http.RequestAborted);
+
+            return Results.Ok(scopes.Select(s => new
+            {
+                name = s.Name,
+                domain = s.Domain,
+                description = s.Description,
+                // Every flag the catalog carries, because each one changes whether a key belongs in a role:
+                // a service-only key must never reach a human, a deprecated one must not seed a new role, and
+                // a platform-administration key is the one kind the A1 short-circuit can reach.
+                serviceOnly = s.ServiceOnly,
+                deprecated = s.Deprecated,
+                replacedBy = s.ReplacedBy,
+                isPlatformAdminKey = s.IsPlatformAdminKey,
+                heldBy = effective.TryGetValue(s.Name, out var roles) ? roles : [],
+            }));
+        });
+
+        /// The role catalogue: what each role is, and what it actually grants in THIS tenant.
+        g.MapGet("/roles", async (HttpContext http, IdentityStoreDbContext db) =>
+        {
+            var (me, err) = await Guard(http, "admin:read");
+            if (err is not null) return err;
+
+            var tenant = me!.GetClaim(HbmpClaimTypes.TenantId) ?? RoleScope.PlatformDefault;
+            var roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync(http.RequestAborted);
+            var grants = await db.RoleScopes.AsNoTracking()
+                .Where(rs => rs.TenantId == tenant || rs.TenantId == RoleScope.PlatformDefault)
+                .ToListAsync(http.RequestAborted);
+
+            var own = grants.Where(rs => rs.TenantId == tenant).Select(rs => rs.RoleName).ToHashSet(StringComparer.Ordinal);
+            var byRole = grants
+                .Where(rs => own.Contains(rs.RoleName) ? rs.TenantId == tenant : true)
+                .GroupBy(rs => rs.RoleName)
+                .ToDictionary(gr => gr.Key, gr => gr.Select(x => x.ScopeName).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList());
+
+            return Results.Ok(roles
+                // Another tenant's custom role is not shown: it is not assignable here and not editable here,
+                // so listing it would only offer a control that refuses.
+                .Where(r => r.OwnerTenantId is null || r.OwnerTenantId == tenant)
+                .Select(r => new
+                {
+                    name = r.Name,
+                    description = r.Description,
+                    sensitivityTier = r.SensitivityTier,
+                    level = r.Level,
+                    // A built-in role's scope set is platform policy and is edited with care; a custom one is
+                    // this tenant's own and is edited freely. The UI needs to say which is which.
+                    custom = r.OwnerTenantId is not null,
+                    builtIn = IdentityContract.Roles.Contains(r.Name ?? ""),
+                    scopes = byRole.TryGetValue(r.Name ?? "", out var s) ? s : [],
+                }));
+        });
+
+        /// <summary>28.9 — design a role: a name, a tier, and a set of permissions chosen from the catalogue.</summary>
+        g.MapPost("/roles", async (HttpContext http, CreateRoleRequest req,
+            RoleManager<ApplicationRole> roles, IdentityStoreDbContext db, IAuditClient audit) =>
+        {
+            var (me, err) = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            var tenant = me!.GetClaim(HbmpClaimTypes.TenantId) ?? RoleScope.PlatformDefault;
+            var name = (req.Name ?? "").Trim().ToLowerInvariant();
+
+            // The name lands in the token's `roles` claim, which every service parses. Constrained to the
+            // same shape the built-ins use so a custom role cannot smuggle whitespace, a colon or a comma
+            // into a claim that other code splits on.
+            if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z][a-z0-9_]{2,48}$"))
+                return Results.Problem(statusCode: 422, title: "invalid-role-name",
+                    detail: "a role name is 3–49 characters of lower-case letters, digits and underscores");
+
+            // A built-in name is refused outright rather than merged into: the platform's role definitions are
+            // not a tenant's to redefine, and silently editing one here would change what `doctor` means for
+            // everybody who reads the audit trail expecting the standard meaning.
+            if (IdentityContract.Roles.Contains(name))
+                return Results.Problem(statusCode: 409, title: "reserved-role-name",
+                    detail: "that is a built-in role; edit its permissions instead of redefining it");
+            if (await roles.RoleExistsAsync(name))
+                return Results.Problem(statusCode: 409, title: "role-name-taken",
+                    detail: "a role with this name already exists");
+
+            var catalog = (await db.Scopes.AsNoTracking().ToListAsync(http.RequestAborted))
+                .ToDictionary(s => s.Name, StringComparer.Ordinal);
+            var wanted = (req.Scopes ?? []).Distinct(StringComparer.Ordinal).ToList();
+            var unknown = wanted.Where(s => !catalog.ContainsKey(s)).ToList();
+            if (unknown.Count > 0)
+                return Results.Problem(statusCode: 422, title: "unknown-scope",
+                    detail: $"not in the catalogue: {string.Join(", ", unknown)}");
+
+            // A machine key on a human role is a category error the catalogue already records, so it is
+            // refused rather than merely discouraged: `auth:ingest` on somebody's account is a service
+            // credential attached to a person, and no review would ever catch it as one.
+            var machine = wanted.Where(s => catalog[s].ServiceOnly).ToList();
+            if (machine.Count > 0)
+                return Results.Problem(statusCode: 422, title: "service-only-scope",
+                    detail: $"these keys are granted to machines, never to people: {string.Join(", ", machine)}");
+
+            // SoD over the SET, not key by key — see SegregationOfDuties.EvaluateScopeSet. A role holding both
+            // halves of a split duty breaches it for every person ever assigned the role, at once.
+            var violations = SegregationOfDuties.EvaluateScopeSet(wanted);
+            if (violations.Count > 0)
+            {
+                await Audit(audit, me, "identity.role", name, AuditAction.Create, "RoleRefusedSoD",
+                    $"{{\"conflicts\":[{string.Join(",", violations.Select(v => $"\"{v.HeldToken} vs {v.ConflictingToken}\""))}]}}");
+                return Results.Problem(statusCode: 409, title: "sod-conflict",
+                    detail: string.Join("; ", violations.Select(v => $"{v.HeldToken} vs {v.ConflictingToken}: {v.Reason}")));
+            }
+
+            var tier = req.SensitivityTier is "T1" or "T2" or "T3" or "T4" ? req.SensitivityTier : "T2";
+            var role = new ApplicationRole(name)
+            {
+                Id = Guid.NewGuid(),
+                Description = req.Description,
+                SensitivityTier = tier,
+                // Seeded as 4 − tier, matching the built-ins: lower is more privileged, so a T4 persona
+                // lands at 0. Derived rather than accepted from the caller, so tier and level cannot disagree.
+                Level = 4 - int.Parse(tier[1..]),
+                OwnerTenantId = tenant,
+            };
+            var created = await roles.CreateAsync(role);
+            if (!created.Succeeded)
+                return Results.Problem(statusCode: 422, title: "create-failed",
+                    detail: string.Join("; ", created.Errors.Select(e => e.Description)));
+
+            // Grants are TENANT-LOCAL (21.1b): the role is authored here, so its scope set belongs to this
+            // tenant's bucket and not to the platform default every other tenant falls back to.
+            foreach (var s in wanted)
+                db.RoleScopes.Add(new RoleScope { TenantId = tenant, RoleName = name, ScopeName = s });
+            await db.SaveChangesAsync(http.RequestAborted);
+
+            await Audit(audit, me, "identity.role", name, AuditAction.Create, "RoleCreated",
+                $"{{\"tenant\":\"{tenant}\",\"tier\":\"{tier}\",\"scopes\":[{string.Join(",", wanted.Select(s => $"\"{s}\""))}]}}");
+            return Results.Created($"/identity/admin/roles/{name}",
+                new { name, tier, level = role.Level, scopes = wanted, custom = true });
+        });
+
         // ---- Role → scope matrix (data) --------------------------------------------------------------------
         g.MapPost("/roles/{role}/scopes", async (HttpContext http, string role, SetRoleScopesRequest req,
             IdentityStoreDbContext db, IAuditClient audit) =>
@@ -206,7 +550,18 @@ public static class AdminEndpoints
             if (err is not null) return err;
 
             role = role.ToLowerInvariant();
-            if (!IdentityContract.Roles.Contains(role)) return Results.Problem(statusCode: 404, title: "unknown-role");
+            // 28.9 — a CUSTOM role is editable too, and it has to be: a role designed here that could never
+            // be adjusted afterwards would have to be got right first time or abandoned. `IdentityContract.
+            // Roles` alone answered 404 for every role this tenant had just authored.
+            var custom = await db.Roles.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Name == role && r.OwnerTenantId != null, http.RequestAborted);
+            if (!IdentityContract.Roles.Contains(role) && custom is null)
+                return Results.Problem(statusCode: 404, title: "unknown-role");
+            // Another tenant's custom role is theirs. This is the same boundary the membership roster draws,
+            // and it is the reason OwnerTenantId is recorded at all.
+            if (custom is not null && custom.OwnerTenantId != (me!.GetClaim(HbmpClaimTypes.TenantId) ?? RoleScope.PlatformDefault))
+                return Results.Problem(statusCode: 403, title: "not-your-role",
+                    detail: "this role belongs to another organisation");
             var catalog = (await db.Scopes.Select(s => s.Name).ToListAsync(http.RequestAborted)).ToHashSet(StringComparer.Ordinal);
             if (!req.Scopes.All(catalog.Contains)) return Results.Problem(statusCode: 422, title: "unknown-scope");
 
@@ -610,6 +965,53 @@ public static class AdminEndpoints
         return (p, null);
     }
 
+    /// <summary>
+    /// Is this a usable email address?
+    ///
+    /// <para>Deliberately shallow — one '@', something either side of it, a dot in the domain, no spaces.
+    /// RFC 5322 permits addresses no mail server in this deployment would accept, and a regex claiming to
+    /// implement it rejects real addresses (plus-tags, long TLDs, non-ASCII domains) while still admitting
+    /// undeliverable ones. The only proof an address works is a message arriving at it, which is what the
+    /// reset link is; this check exists to catch a typo before that, not to be an authority.</para>
+    /// </summary>
+    /// <summary>
+    /// Trim a free-text field, collapsing "blank" to null.
+    ///
+    /// <para>A job title of <c>" "</c> is not a job title, and storing it would give the app bar a value that
+    /// is present, renders as nothing, and suppresses the fallback — a caption slot that is mysteriously
+    /// empty for one account. Absent and blank must be the same state here.</para>
+    /// </summary>
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsPlausibleEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace)) return false;
+        var at = value.IndexOf('@');
+        if (at <= 0 || at != value.LastIndexOf('@') || at == value.Length - 1) return false;
+        var domain = value[(at + 1)..];
+        return domain.Contains('.') && !domain.StartsWith('.') && !domain.EndsWith('.');
+    }
+
+    /// <summary>
+    /// A password for a new account that NOBODY knows, including the administrator creating it.
+    /// </summary>
+    /// <remarks>
+    /// It exists only because ASP.NET Identity needs a hash to store; the account is reached through the
+    /// reset link, never through this. Cryptographically random rather than a fixed placeholder, because a
+    /// deployment where every freshly created account shares a known password until its owner clicks a link
+    /// is a deployment with a standing back door. Never returned, never logged, never recoverable — if the
+    /// link fails, the remedy is another link.
+    /// </remarks>
+    private static string GenerateThrowawayPassword()
+    {
+        // The generated string must satisfy the configured policy (12+, upper, lower, digit, symbol) or
+        // CreateAsync refuses it — so the four required classes are appended explicitly rather than hoped for
+        // out of 32 random bytes.
+        var random = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        return $"Aa1!{random}";
+    }
+
     private static async Task Audit(IAuditClient audit, ClaimsPrincipal? me, string entityType, string entityId,
         AuditAction action, string outcome, string? afterState) =>
         await audit.EmitAsync(new AuditEventDraft
@@ -640,12 +1042,28 @@ public static class AdminEndpoints
     public sealed record SetOverrideRequest(
         string ScopeKey, string Effect, string Reason, DateTimeOffset? ValidUntil = null);
 
+    /// <summary>
+    /// 28.8 — <c>Email</c> is required and <c>Password</c> is not.
+    ///
+    /// <para>The two moved in opposite directions in the same change, and for the same reason. The address is
+    /// what the account signs in with and the only channel a reset can travel down, so an account without one
+    /// is unreachable. The password is generated server-side and thrown away, so that there is no moment at
+    /// which the administrator knows the credential (28.7's rule, applied to creation as well).</para>
+    ///
+    /// <para><c>Password</c> stays on the record, optional, for the seeders and integration tests that mint
+    /// fixture accounts and then sign in as them. No UI sends it.</para>
+    /// </summary>
     public sealed record CreateUserRequest(
-        string Username, string DisplayName, string Password, string TenantId,
-        string? Email = null, Guid? ProviderId = null, IReadOnlyList<string> Roles = null!)
+        string Username, string DisplayName, string TenantId, string Email,
+        string? Password = null, Guid? ProviderId = null, string? Lang = null,
+        IReadOnlyList<string> Roles = null!, string? Position = null)
     {
         public IReadOnlyList<string> Roles { get; init; } = Roles ?? [];
     }
+    /// <summary>Correct an account's display name or address. Both optional; an omitted field is left alone
+    /// rather than cleared, so a caller fixing one cannot silently erase the other.</summary>
+    /// <summary>An omitted <c>Position</c> is left alone; an EMPTY one clears it. See the handler.</summary>
+    public sealed record UpdateUserRequest(string? DisplayName = null, string? Email = null, string? Position = null);
     public sealed record SetRolesRequest(IReadOnlyList<string> Roles);
     /// <summary>
     /// 28.7 — an administrative reset carries a LANGUAGE, not a password.
@@ -656,4 +1074,14 @@ public static class AdminEndpoints
     /// </summary>
     public sealed record AdminResetRequest(string? Lang);
     public sealed record SetRoleScopesRequest(IReadOnlyList<string> Scopes);
+
+    /// <summary>
+    /// 28.9 — a role designed by a tenant from the access catalogue.
+    ///
+    /// <para><c>Level</c> is absent on purpose: it is derived from <c>SensitivityTier</c> so the two cannot
+    /// be set to disagree, which for an ordinal where lower means more privileged would be an invisible
+    /// mistake.</para>
+    /// </summary>
+    public sealed record CreateRoleRequest(
+        string Name, IReadOnlyList<string> Scopes, string? Description = null, string SensitivityTier = "T2");
 }

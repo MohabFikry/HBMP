@@ -224,7 +224,10 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
         var totalNet = byPayer.Sum(x => x.Net);
         var months = MonthsIn(f);
         var perMemberMonth = activeMembers > 0 && months > 0
-            ? Math.Round(totalNet / activeMembers / months, 2, MidpointRounding.AwayFromZero)
+            // Banker's, like every other 2dp amount on the platform (Mersal.Money). Per-member-per-month is
+            // read next to figures settlement produced, and rounding the two differently is how a dashboard
+            // and a payment disagree by a piastre with nobody able to say which is wrong.
+            ? Math.Round(totalNet / activeMembers / months, 2, MidpointRounding.ToEven)
             : 0m;
 
         var payerLabels = await LabelsAsync(tenant, "payer", ct);
@@ -334,7 +337,7 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
             var ar = Label(labels, planId, en: false);
             enrolment.Add(new AnalyticsPoint(planId.ToString(), en, ar, members, planId));
             costPerMember.Add(new AnalyticsPoint(planId.ToString(), en, ar,
-                members > 0 ? Math.Round(net / members, 2, MidpointRounding.AwayFromZero) : 0m, planId, net));
+                members > 0 ? Math.Round(net / members, 2, MidpointRounding.ToEven) : 0m, planId, net));
             utilization.Add(new AnalyticsPoint(planId.ToString(), en, ar,
                 util is { Limit: > 0m } ? UtilizationBands.PercentUsed(util.Limit, util.Consumed) ?? 0m : 0m, planId));
             oonRate.Add(new AnalyticsPoint(planId.ToString(), en, ar,
@@ -539,6 +542,7 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
     {
         if (f.From is not { } from || f.To is not { } to) return 1m;
         var days = Math.Max(1, to.DayNumber - from.DayNumber + 1);
+        // money-scale: not-money (a count of months, the DENOMINATOR of a per-member-per-month figure)
         return Math.Max(1m, Math.Round(days / 30.44m, 2, MidpointRounding.AwayFromZero));
     }
 }

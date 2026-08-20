@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
+import { Button, Card, Combobox, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   ActivationProblem,
@@ -125,9 +125,9 @@ export function PolicyPayers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={rows === null && !error}
           emptyLabel={t(S.noPayers)}
           columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.payerCode },
+            { key: "code", header: t(S.payerCode), cell: (r) => r.payerCode, sortable: true, sortValue: (r) => r.payerCode },
             { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "type", header: t(S.type), cell: (r) => r.payerType },
+            { key: "type", header: t(S.type), cell: (r) => r.payerType, sortable: true, sortValue: (r) => r.payerType },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />
@@ -213,9 +213,9 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={plans === null && !error}
           emptyLabel={t(S.noPlans)}
           columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.planCode },
+            { key: "code", header: t(S.payerCode), cell: (r) => r.planCode, sortable: true, sortValue: (r) => r.planCode },
             { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "category", header: t(S.category), cell: (r) => r.category },
+            { key: "category", header: t(S.category), cell: (r) => r.category, sortable: true, sortValue: (r) => r.category },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />
@@ -482,6 +482,22 @@ function PlanVersionEditor({
       {tiers.length === 0 && <InlineAlert tone="warn">{t(S.noTiers)}</InlineAlert>}
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
+      {/*
+        WRAPPED, and the wrapper is not decoration.
+        `.pol-grid` is `display: block; overflow-x: auto` — a table that is its own scrollport. That buys the
+        horizontal scroll and costs the table its layout: the browser wraps the rows in an anonymous
+        shrink-to-fit table, so `width: 100%` applies to the block box while the columns size to their own
+        content. `.pol-tablewrap > .pol-grid` resets it to a real table and takes the scroll onto the wrapper,
+        which is what the other 11 call sites of these two classes already do — these two were the only ones
+        that never got one.
+        The wrapper is also what makes the pane reachable: a region a pointer can scroll and a keyboard
+        cannot is WCAG 2.1.1, and `tabIndex` + `.mrs-scroll-focusable` is the treatment every other scrolling
+        pane in the product carries. `.mrs-scroll` brings the house scrollbar with it.
+        It is a prerequisite for the pickers inside this table becoming design-system comboboxes: an ancestor
+        with `overflow-x: auto` is a clipping context on BOTH axes (CSS Overflow §3 — `visible` computes to
+        `auto` when the other axis is not `visible`), so an option list opened in here would have been cut off.
+      */}
+      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
       <table className="pol-grid">
         <caption className="sr-only">{t(S.plans)}</caption>
         <thead>
@@ -517,18 +533,18 @@ function PlanVersionEditor({
                   />
                 </td>
                 <td>
-                  <select
+                  {/* These two carried NO class at all — the browser's untouched default control, in a table
+                      of Mersal-styled inputs. Safe to convert only after step 7 wrapped the table: an
+                      ancestor with `overflow-x: auto` clips on both axes, and a native popup was escaping it
+                      only because the OS draws it outside the page. */}
+                  <Combobox
                     aria-label={`${t(S.limitType)} — ${r.benefitCategoryCode}`}
-                    value={r.limitType}
+                    value={r.limitType || null}
                     disabled={!editable}
-                    onChange={(e) => patch(r.benefitCategoryCode, { limitType: e.target.value })}
-                  >
-                    {LIMIT_TYPES.map((x) => (
-                      <option key={x || "none"} value={x}>
-                        {x || "—"}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="—"
+                    onChange={(v) => patch(r.benefitCategoryCode, { limitType: v })}
+                    options={LIMIT_TYPES.filter(Boolean).map((x) => ({ value: x, label: x }))}
+                  />
                 </td>
                 <td>
                   <input
@@ -540,18 +556,13 @@ function PlanVersionEditor({
                   />
                 </td>
                 <td>
-                  <select
+                  <Combobox
                     aria-label={`${t(S.reset)} — ${r.benefitCategoryCode}`}
                     value={r.resetPeriod}
                     disabled={!editable}
-                    onChange={(e) => patch(r.benefitCategoryCode, { resetPeriod: e.target.value })}
-                  >
-                    {RESET_PERIODS.map((x) => (
-                      <option key={x} value={x}>
-                        {x}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => patch(r.benefitCategoryCode, { resetPeriod: v })}
+                    options={RESET_PERIODS.map((x) => ({ value: x, label: x }))}
+                  />
                 </td>
                 <td>
                   <input
@@ -597,6 +608,8 @@ function PlanVersionEditor({
                         {t(S.costShare)} — {r.benefitCategoryCode}
                       </legend>
                       {unpriced && <InlineAlert tone="warn">{t(S.unpricedHint)}</InlineAlert>}
+                      {/* Same treatment, same reasons — one column per tier, so this is the wider of the two. */}
+                      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
                       <table className="pol-costshare">
                         <thead>
                           <tr>
@@ -663,6 +676,7 @@ function PlanVersionEditor({
                           </tr>
                         </tbody>
                       </table>
+                      </div>
                     </fieldset>
                   </td>
                 </tr>
@@ -671,6 +685,7 @@ function PlanVersionEditor({
           })}
         </tbody>
       </table>
+      </div>
 
       <div className="pol-editor-actions">
         {editable && (

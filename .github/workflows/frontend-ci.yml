@@ -86,6 +86,56 @@ jobs:
       - name: Build (portals bundle)
         run: pnpm --filter @mersal/web build
 
+      # 2026-08-09 audit §2 — the deployed bundle must not CONTAIN the fixture backend. Builds both variants
+      # and reads the emitted JavaScript; see the script's header for why "unreachable behind a LIVE branch"
+      # was not good enough. Blocking: a demo sign-in compiled into a production bundle is not a warning.
+      - name: Guard selftest (a checker that cannot fail is not a check)
+        run: python3 tools/ci/check-live-bundle-clean.py --selftest
+      - name: Live bundle carries no fixture backend
+        id: gate_live_bundle
+        run: python3 tools/ci/check-live-bundle-clean.py
+
+      # 2026-08-10 table & button audit — the six static guards that hold the design standards.
+      #
+      # They already run in the suite above, so a VIOLATION is loud. What is not loud is DELETION: remove one
+      # and the suite goes green with one fewer file, which looks exactly like a good day. This gate names
+      # them and fails if one is gone — the same shape of hole openapi-drift fell through.
+      - name: Guard selftest (a checker that cannot fail is not a check)
+        run: python3 tools/ci/check-design-guards.py --selftest
+      - name: Design standards are still guarded
+        id: gate_design_guards
+        run: python3 tools/ci/check-design-guards.py
+
+      # The heartbeat the gate-health watchdog reads to tell "passing" from "never ran". Written to its OWN
+      # file: backend-ci owns gate-heartbeats.json, and an artifact from this workflow that also contained
+      # backend gates would carry a stale copy of them. check-gate-freshness.py merges every
+      # gate-heartbeats*.json in the directory, newest wins.
+      #
+      # ADVISORY (`|| true`, always()) and fail-safe by construction: a missed heartbeat makes the watchdog
+      # alarm tomorrow, so losing this step raises the alarm rather than silencing it.
+      - name: Record gate heartbeat
+        if: always()
+        run: |
+          [ "${{ steps.gate_live_bundle.outcome }}" = "skipped" ] || \
+            python3 tools/ci/check-gate-freshness.py --record live-bundle \
+              --state-dir .ci-state --state-file gate-heartbeats.frontend.json >/dev/null || true
+          [ "${{ steps.gate_design_guards.outcome }}" = "skipped" ] || \
+            python3 tools/ci/check-gate-freshness.py --record design-guards \
+              --state-dir .ci-state --state-file gate-heartbeats.frontend.json >/dev/null || true
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats-frontend
+          path: .ci-state
+          retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
+
   # 18.D3 (audit R2 U6) — colour contrast, in a browser.
   #
   # A separate job because it needs a Chromium binary and a BUILT bundle. It is not duplication of the axe

@@ -132,6 +132,55 @@ Reception's sections verbatim (dashboard, eligibility check, appointments, book 
 
 Licence status uses the four-cue rule — Valid / Expiring / **Expired** must differ by hue *and* icon *and* shape *and* word. A grey chip that means "this doctor may not legally practise" is a design failure.
 
+## 6b. What the 2026-08-11 audit of this portal found
+
+Five findings, all fixed. Recorded here because each was a gap between what this document specifies and what
+shipped, and the shape of the gap is the useful part.
+
+| # | Finding | Why it survived |
+|---|---|---|
+| A1 | The branch **write** path (`ResolveBookingBranch`, `DenyIfOutsideBranchAsync` in emr) still asked `ActiveBranchId ==`. A set-scoped clinics manager has no active branch until they filter, so the guard fell through and accepted the branch id off the request body without checking `PermittedBranchIds` — breaking §7 rule 2 across eleven call sites. | `BranchQueryScope` fixed this for READS and documents the bug in its own header. Nobody asked whether the writes had been migrated too. The failure is invisible in the direction that hides it: the supervisor sees and does MORE, so no one reports it. |
+| A2 | `provider_availability` had **no CRUD at all** — no GET, PUT or DELETE anywhere. Its only writer was `POST /appointment-slots`, which minted a fresh rule every call with no unique key, so rules accumulated. §4's "recurring rule" was unreadable and uneditable. | The existing idempotency test counts SLOTS, and slots have been deduplicated since 3.1. The rules behind them were not. Adding the unique index turned that test red immediately. |
+| A3 | No capacity model existed. §4 never asked for one, and "how many patients will this clinician see in a day" turned out to be the question a clinic manager actually needed answered. | Not a regression — a gap in this document. Now §4b. |
+| A4 | The only change history was the hash-chained audit store behind `audit:read`. The people who RUN a clinic could not ask who changed its roster. | §7 rule 10 says "every mutation is audited", and that was satisfied. It does not follow that anybody who needs the answer can read it. |
+| A5 | The portal's five screens bypassed the SPA's API seam, so the whole portal errored in the demo bundle and could not be rendered in a test. | Its only test exercised a status chip in isolation, and the axe route sweep skipped these routes while reporting itself complete. |
+
+Plus a client calling a route no service registers (`POST /roster-exceptions/{id}/withdraw`; emr maps
+`DELETE`), which nothing called — so the broken client and the unreachable action hid each other.
+
+**The pattern worth keeping.** Three of the five (A1, A2, A4) are cases where a control was built, documented
+and correct, and then a second surface was added that did not inherit it. The question that found all three is
+*"what enforces this, and does every path reach that enforcement?"* — the same question §8's mechanism column
+exists to ask of the sponsor decisions.
+
+## 4b. Capacity — maximum patients per practitioner per day
+
+`slot_minutes × (end_time − start_time)` cannot express "Dr Hala takes twenty patients a day however long the
+session runs". A six-hour day at fifteen minutes offers twenty-four appointments; a clinician who can safely
+see twenty had no way to say so except by shortening their day, which also changes when they finish and tells
+the desk something different from what was meant.
+
+`provider_availability.max_per_day` is that number. **NULL means uncapped**, so every rule predating it keeps
+its behaviour exactly.
+
+It lives on the RULE, which makes it **per practitioner, per clinic, per weekday**. A doctor working Maadi
+mornings and Dokki evenings holds two rules and two caps — deliberate, because the cap is administered by
+whoever runs the clinic, and a coordinator who reaches one branch must be able to set the cap that applies
+there without touching another clinic's. A network-wide cap across all clinics is a different control and is
+not in scope.
+
+**Enforced twice, and both are needed:**
+
+- **Generation** — `SlotGeneration` emits at most `max_per_day` slots per date, across every window the day
+  offers (the recurring one plus any `AdHocClinic`), applied *after* subtraction and filling from the
+  earliest window. Inside the one function availability is computed, per §7 rule 5.
+- **Booking** — the validator counts live appointments for (doctor, branch, Cairo date) under a
+  per-(doctor, day) **advisory lock** and refuses `409 urn:hbmp:daily-capacity-reached`.
+
+The lock is the load-bearing part. The existing `FOR UPDATE` slot lock serializes two people booking the
+*same* slot and does nothing for two people booking *different* slots against the same doctor's last place:
+both count nineteen, both see room, both commit. Counting inside a transaction is not counting under a lock.
+
 ## 7. Invariants
 
 1. **Coordinator and manager share one permission set**; they differ only in reach. Any capability added to one is automatically held by the other.
@@ -144,6 +193,19 @@ Licence status uses the four-cue rule — Valid / Expiring / **Expired** must di
 8. **Clinic inventory never dispenses to a patient.** No endpoint accepts a beneficiary id for issue; prescribed items go through `pharmacy-service`.
 9. Inventory carries **no PHI**.
 10. Every practitioner, roster, licence and stock mutation is audited; no hard deletes.
+11. **The branch WRITE path asks the same question as the branch READ path** — one implementation
+    (`BranchWriteScope`), three modes, fail closed. A set-scoped caller who names no branch is refused, not
+    defaulted: a write that could mean six clinics has to say which one.
+12. **One availability rule per practitioner, per clinic, per weekday**, enforced by a partial unique index.
+    Slot materialization READS a rule; it never creates one.
+13. **A daily cap is enforced at generation and again at booking**, the second under a per-(doctor, day)
+    advisory lock. Generation keeps the calendar honest; the booking check is what holds for a walk-in, an
+    ad-hoc clinic, or any path that books without consuming a slot.
+14. **Every administered change writes a domain history row in the same transaction as the change**, and the
+    audit event as well. Neither substitutes for the other.
+15. **Operational history is not the audit trail.** `audit:read` is never granted to a branch role — the
+    clinic's own record answers "who changed this", and the hash-chained store stays with Security,
+    Compliance and the DPO.
 
 ## 8. Decisions needed from the sponsor — **all five ratified as recommended, 2026-08-01**
 

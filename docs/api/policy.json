@@ -102,7 +102,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayerView"
+                }
+              }
+            }
           }
         }
       },
@@ -112,7 +119,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PayerView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -135,7 +152,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayerView"
+                }
+              }
+            }
           }
         }
       }
@@ -157,7 +181,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            }
           }
         }
       },
@@ -167,7 +198,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -190,7 +231,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanVersionView"
+                }
+              }
+            }
           }
         }
       }
@@ -212,7 +260,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanVersionView"
+                }
+              }
+            }
           }
         }
       }
@@ -235,7 +290,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanVersionView"
+                }
+              }
+            }
           }
         }
       }
@@ -258,7 +320,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanVersionView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -291,7 +363,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanVersionView"
+                }
+              }
+            }
           }
         }
       }
@@ -349,7 +428,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BenefitCategoryView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -381,7 +470,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanVersionView"
+                }
+              }
+            }
           }
         }
       }
@@ -421,7 +517,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostShareView"
+                }
+              }
+            }
           }
         }
       }
@@ -476,7 +579,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalView"
+                }
+              }
+            }
           }
         }
       }
@@ -509,7 +619,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyPlanView"
+                }
+              }
+            }
           }
         }
       },
@@ -530,7 +647,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyPlanView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -563,7 +690,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberGroupView"
+                }
+              }
+            }
           }
         }
       },
@@ -584,7 +718,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemberGroupView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -606,7 +750,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -629,7 +780,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -652,7 +810,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnrollmentEventView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -685,7 +853,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -718,7 +893,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -751,7 +933,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -784,7 +973,17 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CarryPreviewRow"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -817,7 +1016,17 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CarriedLimitView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1233,7 +1442,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityPhotoView"
+                }
+              }
+            }
           }
         }
       }
@@ -1969,7 +2185,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FamilyView"
+                }
+              }
+            }
           }
         }
       }
@@ -2080,7 +2303,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJobView"
+                }
+              }
+            }
           }
         }
       }
@@ -2103,7 +2333,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkJobView"
+                }
+              }
+            }
           }
         }
       }
@@ -2172,7 +2409,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkRowView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2195,7 +2442,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkValidationView"
+                }
+              }
+            }
           }
         }
       }
@@ -2218,7 +2472,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkCommitView"
+                }
+              }
+            }
           }
         }
       }
@@ -2251,7 +2512,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkRollbackView"
+                }
+              }
+            }
           }
         }
       }
@@ -2263,7 +2531,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkTemplateView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2318,7 +2596,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExtractDefinitionView"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -2338,7 +2626,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractDefinitionView"
+                }
+              }
+            }
           }
         }
       }
@@ -2376,7 +2671,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExtractRunView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2398,7 +2703,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractRunView"
+                }
+              }
+            }
           }
         }
       }
@@ -2474,7 +2786,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
           }
         }
       }
@@ -2550,7 +2869,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
           }
         }
       }
@@ -2657,7 +2983,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
           }
         }
       }
@@ -2695,6 +3028,24 @@
           "maxMembers": {
             "type": "integer",
             "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BenefitCategoryView": {
+        "type": "object",
+        "properties": {
+          "benefitCategoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
             "nullable": true
           }
         },
@@ -2801,12 +3152,507 @@
         },
         "additionalProperties": false
       },
+      "BenefitRuleTierView": {
+        "type": "object",
+        "properties": {
+          "ruleTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCovered": {
+            "type": "boolean"
+          },
+          "copayFixed": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayPercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "coinsurancePercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayCountsTowardDeductible": {
+            "type": "boolean"
+          },
+          "requiresPreauthOverride": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "limitMultiplier": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "effectiveRequiresPreauth": {
+            "type": "boolean"
+          },
+          "effectiveLimitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BenefitRuleView": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "benefitCategoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "benefitCategoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCovered": {
+            "type": "boolean"
+          },
+          "limitType": {
+            "type": "string",
+            "nullable": true
+          },
+          "limitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "resetPeriod": {
+            "type": "string",
+            "nullable": true
+          },
+          "deductible": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductibleWaived": {
+            "type": "boolean"
+          },
+          "waitingPeriodDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "requiresPreauth": {
+            "type": "boolean"
+          },
+          "preauthCostThreshold": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "exclusions": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenefitRuleTierView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkColumnView": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "descriptionEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "descriptionAr": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkCommitView": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/BulkJobView"
+          },
+          "totalErrors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkRowError"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkJobView": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "jobType": {
+            "type": "string",
+            "nullable": true
+          },
+          "fileName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "batchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totalRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "validRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "invalidRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "appliedRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failedRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "skippedRows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balances": {
+            "type": "boolean"
+          },
+          "failureCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "failureDetail": {
+            "type": "string",
+            "nullable": true
+          },
+          "fileDocumentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "errorDocumentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "submittedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rolledBackAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkRollbackView": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/BulkJobView"
+          },
+          "reversed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refused": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refusedRows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkRowError"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkRowError": {
+        "type": "object",
+        "properties": {
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "detailEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "detailAr": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkRowPreview": {
+        "type": "object",
+        "properties": {
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "summaryEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "changes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkRowView": {
+        "type": "object",
+        "properties": {
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorDetail": {
+            "type": "string",
+            "nullable": true
+          },
+          "errorDetailAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetRef": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "appliedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkTemplateView": {
+        "type": "object",
+        "properties": {
+          "jobType": {
+            "type": "string",
+            "nullable": true
+          },
+          "purposeEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "purposeAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkColumnView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BulkValidationView": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/BulkJobView"
+          },
+          "totalErrors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkRowError"
+            },
+            "nullable": true
+          },
+          "wouldChange": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulkRowPreview"
+            },
+            "nullable": true
+          },
+          "totalWouldChange": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "committable": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "CancelNote": {
         "type": "object",
         "properties": {
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CarriedLimitView": {
+        "type": "object",
+        "properties": {
+          "benefitCategoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "benefitCategoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "limitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "consumedValue": {
+            "type": "number",
+            "format": "double"
+          },
+          "remaining": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "exhausted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CarryPreviewRow": {
+        "type": "object",
+        "properties": {
+          "benefitCategoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "benefitCategoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "held": {
+            "type": "boolean"
+          },
+          "currentLimitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "consumedValue": {
+            "type": "number",
+            "format": "double"
+          },
+          "newLimitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "remaining": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "exhausted": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -2844,6 +3690,111 @@
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CostShareView": {
+        "type": "object",
+        "properties": {
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCovered": {
+            "type": "boolean"
+          },
+          "copayFixed": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayPercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "coinsurancePercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductible": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductibleWaived": {
+            "type": "boolean"
+          },
+          "copayCountsTowardDeductible": {
+            "type": "boolean"
+          },
+          "requiresPreauth": {
+            "type": "boolean"
+          },
+          "limitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CoveredFamilyMemberView": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memberNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "givenName": {
+            "type": "string",
+            "nullable": true
+          },
+          "familyName": {
+            "type": "string",
+            "nullable": true
+          },
+          "relationship": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "isPrincipal": {
+            "type": "boolean"
+          },
+          "planLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "isSubject": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -3108,6 +4059,40 @@
         },
         "additionalProperties": false
       },
+      "EnrollmentEventView": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "retroEffective": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "EnrollmentStatus": {
         "enum": [
           0,
@@ -3118,6 +4103,117 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "EnrollmentView": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyPlanId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "memberNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "relationship": {
+            "type": "string",
+            "nullable": true
+          },
+          "principalEnrollmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "waitingPeriodEndsOn": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "terminationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourcePlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "coveragesGenerated": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExtractDefinitionView": {
+        "type": "object",
+        "properties": {
+          "definitionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "entity": {
+            "type": "string",
+            "nullable": true
+          },
+          "format": {
+            "type": "string",
+            "nullable": true
+          },
+          "isShared": {
+            "type": "boolean"
+          },
+          "scheduleCron": {
+            "type": "string",
+            "nullable": true
+          },
+          "scheduleRunnable": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "ExtractFilter": {
         "type": "object",
@@ -3204,6 +4300,324 @@
         },
         "additionalProperties": false
       },
+      "ExtractRunView": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entity": {
+            "type": "string",
+            "nullable": true
+          },
+          "rowCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "withheld": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WithheldColumn"
+            },
+            "nullable": true
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "downloadPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FamilyView": {
+        "type": "object",
+        "properties": {
+          "enrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CoveredFamilyMemberView"
+            },
+            "nullable": true
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "withheld": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "IdentityPhotoView": {
+        "type": "object",
+        "properties": {
+          "linkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "signedUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MemberGroupView": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "groupType": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerView": {
+        "type": "object",
+        "properties": {
+          "payerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payerCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "payerType": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanVersionView": {
+        "type": "object",
+        "properties": {
+          "planVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "activatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "supersededByVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenefitRuleView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanView": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PolicyPlanView": {
+        "type": "object",
+        "properties": {
+          "policyPlanId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "eligibilityRule": {
+            "type": "string",
+            "nullable": true
+          },
+          "maxMembers": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
       "PreviewPlanChange": {
         "type": "object",
         "properties": {
@@ -3260,6 +4674,36 @@
           },
           "carryMembersForward": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RenewalView": {
+        "type": "object",
+        "properties": {
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "previousPolicyId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "membersCarried": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unmapped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -3377,6 +4821,104 @@
         },
         "additionalProperties": false
       },
+      "TimelineEntryView": {
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
+          },
+          "scopeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eventType": {
+            "type": "string",
+            "nullable": true
+          },
+          "eventCategory": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorUsername": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorDisplay": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "changeDiff": {
+            "type": "string",
+            "nullable": true
+          },
+          "diffWithheld": {
+            "type": "boolean"
+          },
+          "visibilityClass": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourceService": {
+            "type": "string",
+            "nullable": true
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetRef": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "targetKind": {
+            "type": "string",
+            "nullable": true
+          },
+          "derived": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TimelinePage": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntryView"
+            },
+            "nullable": true
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "origin": {
+            "$ref": "#/components/schemas/TimelineEntryView"
+          }
+        },
+        "additionalProperties": false
+      },
       "UtilizationBand": {
         "enum": [
           0,
@@ -3412,6 +4954,28 @@
         "type": "object",
         "properties": {
           "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "WithheldColumn": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonAr": {
             "type": "string",
             "nullable": true
           }

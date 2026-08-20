@@ -43,13 +43,13 @@ public static class AppealEndpoints
                         r.Appeal!.AppealId, claimId = id, resolution = r.Appeal.Resolution.ToString(),
                         r.Appeal.OriginalDecisionId, tenantId = deps.Tenant,
                     }, ct);
-                    await tx.CommitAsync(ct);
                     await deps.Audit.EmitAsync(new AuditEventDraft
                     {
                         EntityType = "claim_appeal", EntityId = r.Appeal.AppealId.ToString(), Action = AuditAction.StateChange,
                         ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, ProviderId = deps.ProviderId,
                         DecisionOutcome = r.Appeal.Resolution.ToString(), Severity = AuditSeverity.Notice, FieldClasses = ["financials"],
                     }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claims/{id}/appeals/{r.Appeal.AppealId}", new
                     {
                         r.Appeal.AppealId, resolution = r.Appeal.Resolution.ToString(),
@@ -80,7 +80,8 @@ public static class AppealEndpoints
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, FieldClasses = ["financials"],
             }, ct);
             return Results.Ok(result);
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:reconcile"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:reconcile"))
+        .Produces<ClaimsKpi>();
     }
 }
 

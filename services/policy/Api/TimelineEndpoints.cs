@@ -143,7 +143,8 @@ public static class TimelineEndpoints
             }
 
             return Results.Ok(new TimelinePage(views, hasMore ? rows[^1].OccurredAt : null, origin));
-        });
+        })
+        .Produces<TimelinePage>();
     }
 
     /// <summary>

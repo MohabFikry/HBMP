@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Icon, InlineAlert, InputField, Modal, Select, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, InputField, Modal, useToast } from "@mersal/design-system";
 import type {
   AllergenOption, AllergyRecord, AllergySeverity, BloodGroup, Localized,
 } from "@mersal/contracts";
@@ -222,13 +222,13 @@ function BloodGroupControl({
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
+          <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
         </>
       }
     >
       <div className="stack-3">
         {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-        <Select
+        <Combobox
           aria-label={t(S.bloodGroup)}
           value={choice}
           onChange={setChoice}
@@ -318,7 +318,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
           variant="ghost"
           size="sm"
           className="mc-add"
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         >
           {t(S.addAllergy)}
         </Button>
@@ -326,7 +326,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button
+          <Button leadingIcon={<Icon name="check2" />}
             variant="primary"
             loading={busy}
             disabled={catalogue.status === "error"}
@@ -345,7 +345,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
 
         <label className="mc-field">
           <span className="mc-field-label">{t(S.allergen)}</span>
-          <Select
+          <Combobox
             aria-label={t(S.allergen)}
             value={allergenId}
             onChange={setAllergenId}
@@ -357,7 +357,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
 
         <label className="mc-field">
           <span className="mc-field-label">{t(S.severity)}</span>
-          <Select
+          <Combobox
             aria-label={t(S.severity)}
             value={severity}
             onChange={(v) => setSeverity(v as AllergySeverity)}

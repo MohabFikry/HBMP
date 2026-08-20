@@ -8,7 +8,13 @@ public sealed record BreakGlassRequestBody(string ReasonCode, string Justificati
     IReadOnlyList<string> ScopedResourceTypes, IReadOnlyList<string>? ScopedResourceIds = null,
     int WindowMinutes = 60, string? Tenant = null);
 public sealed record BreakGlassRejectBody(string Reason, string? Tenant = null);
-public sealed record BreakGlassActivateBody(bool StepUpSatisfied, string? Tenant = null);
+/// <remarks>
+/// This carried a <c>StepUpSatisfied</c> boolean until the 2026-08-09 audit. The service trusted it, so the
+/// documented "requires step-up MFA to activate" amounted to the requester POSTing
+/// <c>{"stepUpSatisfied": true}</c> — the elevated window opened with no second factor anywhere in the flow.
+/// A caller cannot be asked to attest to their own authentication; the evidence has to come from the token.
+/// </remarks>
+public sealed record BreakGlassActivateBody(string? Tenant = null);
 public sealed record BreakGlassAccessBody(string ResourceType, string? ResourceId, string Action, string? Tenant = null);
 
 /// <summary>Tenant administration, break-glass lifecycle, and governance-dashboard endpoints (phase 8b.3).</summary>
@@ -29,14 +35,16 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.ManageTenant, ct);
             if (denied is not null) return denied;
             var t = await svc.UpsertAsync(AdminContracts.Actor(gate.Principal!), req.TenantId, req.Name, req.Active, ct);
-            return Results.Ok(new { t.TenantId, t.Name, t.Active });
-        });
+            return Results.Ok(new TenantView(t.TenantId, t.Name, t.Active));
+        })
+        .Produces<TenantView>();
         tenants.MapGet("/", async (AdminGate gate, TenantAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ManageTenant, ct);
             if (denied is not null) return denied;
             return Results.Ok(await svc.ListAsync(ct));
-        });
+        })
+        .Produces<IEnumerable<Mersal.Admin.Domain.Tenant>>();
 
         // -------------------------------------------------- Break-glass lifecycle
         // 18.B3 (S3) — the group requires authentication; the LIFECYCLE actions additionally require the
@@ -83,12 +91,13 @@ public static class PlatformEndpoints
             var tenant = scope.Tenant!;
 
             var r = await svc.ApproveAsync(AdminContracts.Actor(p), tenant, grantId, ct);
-            if (r.Ok) return Results.Ok(new { grantId, status = r.Grant!.Status.ToString() });
+            if (r.Ok) return Results.Ok(new GrantStatusView(grantId, r.Grant!.Status.ToString()));
             // A self-approval attempt is a dual-control violation.
             return r.ReasonCode == "self-approval-denied"
                 ? ProblemResults.Conflict(r.ReasonCode ?? "conflict")
                 : ProblemResults.Invalid(r.ReasonCode ?? "error");
-        });
+        })
+        .Produces<GrantStatusView>();
 
         bgAction.MapPost("/{grantId:guid}/reject", async (Guid grantId, BreakGlassRejectBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
@@ -110,11 +119,14 @@ public static class PlatformEndpoints
             var scope = gate.BindTenant(req.Tenant);
             if (!scope.IsAllowed) return scope.ToProblem();
             var tenant = scope.Tenant!;
-            var r = await svc.ActivateAsync(AdminContracts.Actor(p), tenant, grantId, req.StepUpSatisfied, ct);
+            // From the TOKEN, never from the body. MfaSatisfied is derived by MfaEvaluator from the acr/amr
+            // the issuer signed, so it is evidence the caller cannot author.
+            var r = await svc.ActivateAsync(AdminContracts.Actor(p), tenant, grantId, p.MfaSatisfied, ct);
             return r.Ok
-                ? Results.Ok(new { grantId, status = r.Grant!.Status.ToString(), r.Grant.ExpiresAt })
+                ? Results.Ok(new GrantActivationView(grantId, r.Grant!.Status.ToString(), r.Grant.ExpiresAt))
                 : ProblemResults.Invalid(r.ReasonCode ?? "error");
-        });
+        })
+        .Produces<GrantActivationView>();
 
         // Record + evaluate an access under a grant. 200 within scope, 403 out of scope (no field-deny bypass).
         bgAction.MapPost("/{grantId:guid}/access", async (Guid grantId, BreakGlassAccessBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
@@ -128,9 +140,10 @@ public static class PlatformEndpoints
 
             var granted = await svc.RecordAccessAsync(AdminContracts.Actor(p), tenant, grantId, req.ResourceType, req.ResourceId, req.Action, ct);
             return granted
-                ? Results.Ok(new { grantId, granted = true })
+                ? Results.Ok(new GrantAccessView(grantId, true))
                 : Results.Problem(statusCode: 403, title: "break-glass-out-of-scope", type: "urn:hbmp:break-glass-scope");
-        });
+        })
+        .Produces<GrantAccessView>();
 
         // -------------------------------------------------- Governance dashboards (tenant-scoped, audited view)
         var dash = app.MapGroup("/api/v1/admin/dashboards").WithTags("admin-dashboards").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
@@ -142,7 +155,8 @@ public static class PlatformEndpoints
             if (!scope.IsAllowed) return scope.ToProblem();
             var t = scope.Tenant!;
             return Results.Ok(await svc.BreakGlassAsync(AdminContracts.Actor(gate.Principal!), t, ct));
-        });
+        })
+        .Produces<IEnumerable<BreakGlassDashboardRow>>();
         dash.MapGet("/access-review", async (string? tenant, AdminGate gate, DashboardService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);
@@ -151,7 +165,8 @@ public static class PlatformEndpoints
             if (!scope.IsAllowed) return scope.ToProblem();
             var t = scope.Tenant!;
             return Results.Ok(await svc.AccessReviewAsync(AdminContracts.Actor(gate.Principal!), t, ct));
-        });
+        })
+        .Produces<IEnumerable<AccessReviewCampaignView>>();
         dash.MapGet("/sod-violations", async (string? tenant, AdminGate gate, DashboardService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);

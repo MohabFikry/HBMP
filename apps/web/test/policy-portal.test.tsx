@@ -673,14 +673,18 @@ describe("Family — who else this cover reaches", () => {
     });
     const dialog = await openFamily(api);
 
-    const rows = await within(dialog).findAllByTestId("family-row");
+    // Body rows by ROLE. The table is a `DataTable` now, so there is no hand-placed testid to select on —
+    // and selecting on the rendered table is closer to what the operator sees anyway.
+    await within(dialog).findByRole("table");
+    const rows = within(dialog).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(3);
     // Both facts are WORDS. A bold row would say nothing to a screen reader, and "which one is the principal"
     // is the question the list is read to answer.
     expect(within(rows[0]).getByText("Principal", { selector: ".mrs-chip, .mrs-chip *" })).toBeInTheDocument();
     expect(within(rows[1]).getByText("This member")).toBeInTheDocument();
-    // The member you opened is IN the list, not filtered out of it.
-    expect(rows[1].dataset.subject).toBe("true");
+    // The member you opened is IN the list, not filtered out of it — which the "This member" chip on row
+    // two, asserted just above, already states. The old `data-subject` attribute said the same thing a
+    // second time in markup no user could perceive.
   });
 
   it("says nobody else is covered rather than showing an empty table", async () => {
@@ -698,7 +702,7 @@ describe("Family — who else this cover reaches", () => {
     const dialog = await openFamily(api);
 
     expect(await within(dialog).findByText("Nobody else is enrolled under this cover.")).toBeInTheDocument();
-    expect(within(dialog).queryByTestId("family-table")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("says how many household members its payer scope withheld", async () => {
@@ -735,7 +739,8 @@ describe("Family — who else this cover reaches", () => {
     });
     const dialog = await openFamily(api);
 
-    const rows = await within(dialog).findAllByTestId("family-row");
+    await within(dialog).findByRole("table");
+    const rows = within(dialog).getAllByRole("row").slice(1);
     expect(within(rows[1]).getByText("Name unavailable")).toBeInTheDocument();
     expect(within(dialog).getByText(/Names could not be looked up/)).toBeInTheDocument();
   });

@@ -22,6 +22,17 @@ public sealed class ClaimDecision
     public bool PendingSecondApproval { get; set; }
     public Guid? ConfirmsDecisionId { get; set; }
     public string? IdempotencyKey { get; set; }
+
+    /// <summary>
+    /// SHA-256 of the canonical request this key produced (migration 0009).
+    /// </summary>
+    /// <remarks>
+    /// Without it the replay is answered from the key alone, and a DENY retried under a key already used to
+    /// APPROVE returned the approval: the officer believes they refused a line that is now payable, and
+    /// there is no error anywhere to investigate. NULL on rows written before the column — unverifiable, so
+    /// <see cref="Mersal.Events.IdempotencyKeyRules.Matches"/> treats it as a match.
+    /// </remarks>
+    public string? RequestHash { get; set; }
 }
 
 /// <summary>Pure rules for line decisions: what a decision requires (mandatory reason/rationale), how a line's status

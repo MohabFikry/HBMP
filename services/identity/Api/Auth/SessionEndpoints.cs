@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
@@ -36,6 +37,27 @@ public static class SessionEndpoints
         // — the endpoint answers 200 with HTML instead of 401, and the ownership check below never runs.
         // Caught by UiGatingIsCosmeticTests.
         var me = app.MapGroup("/identity/me").RequireAuthorization(IdentityAdminPolicies.Authenticated);
+
+        /*
+           The signed-in person's own display identity — 28.13.
+
+           WHY THIS IS NOT A TOKEN CLAIM. `docs/security/token-contract.md` is frozen, and every claim in it
+           is one that `libs/auth` or the SPA reads to make a DECISION. A job title is a caption. Putting it
+           in the token would ship a display string to the nineteen services that validate one, and would
+           make correcting a typo in somebody's title wait for their access token to expire.
+
+           Self-scoped: the subject comes from the token, never from the query, so there is no id to tamper
+           with and this discloses nothing the caller does not already hold.
+        */
+        me.MapGet("/profile", async (HttpContext http, IdentityStoreDbContext db) =>
+        {
+            if (SubjectOf(http) is not { } userId) return Results.Unauthorized();
+            var row = await db.Users.AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { displayName = u.DisplayName, position = u.Position })
+                .FirstOrDefaultAsync(http.RequestAborted);
+            return row is null ? Results.Problem(statusCode: 404, title: "not-found") : Results.Ok(row);
+        });
 
         me.MapGet("/sessions", async (HttpContext http, SessionService sessions) =>
         {
@@ -73,6 +95,68 @@ public static class SessionEndpoints
         {
             if (SubjectOf(http) is not { } userId) return Results.Unauthorized();
             return Results.Ok((await sessions.RecentAttemptsAsync(userId, take ?? 50, http.RequestAborted)).Select(View));
+        });
+
+        // ---- 28.8 — change my own password ------------------------------------------------------------------
+        //
+        // ============================================================================================================
+        // THE GAP THIS FILLS
+        // ============================================================================================================
+        // 28.6 gave a locked-out user a way back in, and 28.7 took away the administrator's power to choose a
+        // password for them. Between them they left the ordinary case unbuilt: a signed-in person who simply
+        // wants to change a password they already know had nowhere to do it. The workaround was to sign out
+        // and use "forgot password" — teaching staff that a routine, healthy act is indistinguishable from
+        // losing your credentials, and routing it through an email link every time.
+        //
+        // ============================================================================================================
+        // WHY THE CURRENT PASSWORD IS REQUIRED
+        // ============================================================================================================
+        // `ChangePasswordAsync` verifies it, and that verification is the whole security of this endpoint. A
+        // session cookie or a live bearer token proves somebody has the DEVICE; it does not prove they are
+        // the owner. Without the current password, an unattended unlocked workstation is a permanent account
+        // takeover — the attacker sets a password the owner does not know, and the owner's own recovery path
+        // is the one thing that would tell them it happened.
+        me.MapPost("/password", async (
+            HttpContext http, ChangePasswordRequest req,
+            UserManager<ApplicationUser> users, SessionService sessions, IAuditClient audit) =>
+        {
+            if (SubjectOf(http) is not { } userId) return Results.Unauthorized();
+            var user = await users.FindByIdAsync(userId.ToString());
+            if (user is null || !user.IsActive) return Results.Unauthorized();
+
+            if (string.IsNullOrEmpty(req.CurrentPassword) || string.IsNullOrEmpty(req.NewPassword))
+                return Results.Problem(statusCode: 422, title: "missing-field",
+                    detail: "both the current and the new password are required");
+
+            var result = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
+            if (!result.Succeeded)
+            {
+                // The policy failures are RETURNED verbatim and the wrong-current-password one is not
+                // distinguished from them in the status code — but they are distinguished in the detail,
+                // deliberately. This is not a sign-in surface: the caller has already authenticated as this
+                // account, so "that is not your current password" leaks nothing, and hiding it would leave
+                // somebody retyping a new password that was never the thing being rejected.
+                await Emit(audit, userId.ToString(), userId.ToString(), "PasswordChangeRefused");
+                return Results.Problem(statusCode: 422, title: "change-refused",
+                    detail: string.Join("; ", result.Errors.Select(e => e.Description)));
+            }
+
+            // ============================================================================================================
+            // EVERY OTHER SESSION ENDS
+            // ============================================================================================================
+            // The most common reason to change a password is the belief that somebody else has it. A change
+            // that leaves the other party's session live answers that fear with nothing — they keep the
+            // access, and the owner believes they have taken it away, which is worse than knowing they have
+            // not. `ChangePasswordAsync` rotates the security stamp, but the token endpoint checks IsActive
+            // and never compares stamps, so a live refresh token survives it (the same gap 21.5 found in
+            // deactivate). Revoked here for the same reason and by the same call.
+            //
+            // The CALLER's own session is not among them: they are holding a bearer token, not one of these
+            // rows, and signing somebody out of the screen they just used successfully reads as a failure.
+            await sessions.RevokeAllAsync(userId, userId.ToString(), "password changed", http.RequestAborted);
+
+            await Emit(audit, userId.ToString(), userId.ToString(), "PasswordChangedBySelf");
+            return Results.Ok(new { changed = true });
         });
 
         // ---- Administrative ---------------------------------------------------------------------------------
@@ -185,4 +269,9 @@ public static class SessionEndpoints
             EntityType = "identity.user_session", EntityId = entityId, Action = AuditAction.SoftDelete,
             ActorUserId = actor, DecisionOutcome = outcome,
         });
+
+    /// <summary>28.8 — a self-service password change. The current password is part of the signature because
+    /// it is what proves the person at the keyboard is the account's owner and not merely someone sitting at
+    /// their unlocked machine.</summary>
+    public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 }

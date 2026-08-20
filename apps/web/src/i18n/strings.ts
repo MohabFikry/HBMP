@@ -193,6 +193,13 @@ export const L = {
     ar: "استخدم الدخول الموحّد لمرسال للمتابعة.",
   },
   chooseRole: { en: "Role (demo sign-in)", ar: "الدور (دخول تجريبي)" },
+  // Dev-only. The picker cannot be exercised without a session holding more than one portal, and this is
+  // the only way to produce one with no issuer running.
+  extraPortals: { en: "Additional portals (demo)", ar: "بوابات إضافية (تجريبي)" },
+  extraPortalsHelp: {
+    en: "Tick more portals to sign in holding several, which is what the portal picker is for.",
+    ar: "حدّد بوابات إضافية للدخول بأكثر من بوابة، وهو ما تخدمه شاشة اختيار البوابة.",
+  },
   mfaLabel: { en: "Authenticator code", ar: "رمز المصادقة" },
   mfaHelp: { en: "Enter the 6-digit code from your authenticator app.", ar: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة." },
   mfaError: { en: "A valid 6-digit code is required.", ar: "يلزم رمز صحيح من 6 أرقام." },
@@ -200,6 +207,50 @@ export const L = {
   // Names the platform's own issuer. It said "via Keycloak" until phase 19 — long after ADR-0015 retired
   // Keycloak — so the screen told every operator their credentials were going somewhere they were not.
   signInVia: { en: "Secure sign-in via Mersal ID", ar: "تسجيل دخول آمن عبر هوية مرسال" },
+
+  // ---- Portal picker + in-app switcher ----------------------------------------------------------------
+  // `{name}` is substituted, never concatenated: Arabic puts the greeting and the name in the other order,
+  // and a `${greeting} ${name}` in the component would hard-code the English one for both languages.
+  welcomeBack: { en: "Welcome back, {name}", ar: "أهلاً بعودتك، {name}" },
+  portalPickerLede: {
+    en: "Choose where to work. Each portal shows only the data your role in it permits.",
+    ar: "اختر مكان العمل. كل بوابة تعرض فقط البيانات التي يسمح بها دورك فيها.",
+  },
+  portalPickerTitle: { en: "Choose a portal", ar: "اختر بوابة" },
+  portalSections: { en: "{n} sections", ar: "{n} أقسام" },
+  portalSectionsOne: { en: "1 section", ar: "قسم واحد" },
+  // The picker's app-bar search. It filters the CARDS — it is not the command palette, which searches the
+  // sections inside a portal and therefore has nothing to search until one is chosen.
+  searchPortals: { en: "Search portals", ar: "ابحث في البوابات" },
+  portalsMatch: { en: "{n} portals match", ar: "{n} بوابات مطابقة" },
+  portalsNoMatch: { en: "No portals match", ar: "لا توجد بوابات مطابقة" },
+  portalsNoMatchHelp: {
+    en: "Nothing here matches that. Clear the search to see every portal you hold.",
+    ar: "لا يوجد ما يطابق ذلك. امسح البحث لعرض كل البوابات التي تملكها.",
+  },
+  currentPortal: { en: "Current portal", ar: "البوابة الحالية" },
+  changePortal: { en: "Change portal", ar: "تغيير البوابة" },
+  openPortal: { en: "Open", ar: "فتح" },
+
+  // ---- 28.8: changing your own password, from the account pane ----------------------------------------
+  security: { en: "Security", ar: "الأمان" },
+  password: { en: "Password", ar: "كلمة المرور" },
+  changePassword: { en: "Change password", ar: "تغيير كلمة المرور" },
+  // Said BEFORE the change rather than after: signing every other device out is the reason somebody would
+  // choose this over doing nothing when they suspect their password is known.
+  changePasswordHelp: {
+    en: "You'll stay signed in here. Every other device is signed out.",
+    ar: "ستبقى مسجّلاً هنا. وسيتم إخراج كل الأجهزة الأخرى.",
+  },
+  currentPassword: { en: "Current password", ar: "كلمة المرور الحالية" },
+  newPassword: { en: "New password", ar: "كلمة المرور الجديدة" },
+  confirmPassword: { en: "Confirm new password", ar: "تأكيد كلمة المرور الجديدة" },
+  passwordPolicy: {
+    en: "At least 12 characters, with upper and lower case, a digit and a symbol.",
+    ar: "12 حرفًا على الأقل، مع أحرف كبيرة وصغيرة ورقم ورمز.",
+  },
+  passwordMismatch: { en: "These two do not match.", ar: "الحقلان غير متطابقين." },
+  passwordChanged: { en: "Password changed. Other devices have been signed out.", ar: "تم تغيير كلمة المرور. تم إخراج الأجهزة الأخرى." },
 
   // ---- 28.4: the sign-in happens HERE now (ADR-0036). Every string authored in both locales. ----
   usernameLabel: { en: "Username", ar: "اسم المستخدم" },

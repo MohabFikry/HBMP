@@ -148,8 +148,90 @@ nav.mrs-rail {
   /* Reserve the scrollbar's lane whether or not it is needed, so pages with and without a vertical
      scrollbar stop shifting ~16px horizontally against each other (QA P2-21). */
   scrollbar-gutter: stable;
-  padding: var(--sp6);
+  /* Exposed as a custom property because a sticky child has to CANCEL it. Sticky offsets are measured from
+     the scrollport's PADDING edge, so `top: 0` on a child pins 24px down from the top of this pane, leaving
+     a band that page content stays visible in as it scrolls past. A bar that wants to pin flush has to
+     offset by exactly this much — see `.profile-tabs` below. Naming it here keeps that one number in one
+     place; two hard-coded 24px values would drift apart the first time this padding changed, and the
+     symptom would be a gap that content scrolls through. */
+  --app-main-pad: var(--sp6);
+  padding: var(--app-main-pad);
 }
+/* ── Back to top ────────────────────────────────────────────────────────────────────────────────────────
+   The floating control that replaced the patient profile's sticky tab bar (see `.profile-tabs` below for the
+   trade). Fixed to the viewport rather than sticky inside `.app-main`, so it is unaffected by whatever the
+   pane's content is doing and needs no space reserved for it in the flow.
+
+   `z-index: 12` is the same slot the sticky bar occupied and for the same reasons: above the `thead th` (5)
+   and `.mrs-stickyend` (6) that worklist tables pin inside section cards, and below the popup layer (select
+   and combo lists at 40) and the modal layers above it (80, 90). A dropdown or a dialog must cover this
+   button; a table header must not.
+
+   Logical inset properties, not `right`/`bottom`: in Arabic the whole layout mirrors and the button belongs
+   on the other side, which `inset-inline-end` does for free. */
+.scrolltop-anchor { display: none; }
+.scrolltop {
+  position: fixed;
+  inset-block-end: var(--sp6);
+  inset-inline-end: var(--sp6);
+  z-index: 12;
+  /* 48, not the 44px floor: this floats over content with nothing around it to give it scale, and at 44 it
+     read as a stray dot. 44 (WCAG 2.5.8) is the minimum, not the target. */
+  inline-size: 48px;
+  block-size: 48px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  /* FILLED, in the accent, with the same treatment `.mrs-btn.mrs-primary` uses — the top-light gradient and
+     the inset highlight, so it reads as the same family of control rather than a circle someone drew.
+     It was `--surface-1` with a `--border` hairline, which is #ffffff on the #eef5f5 page behind a #d7e3e3
+     line: about 1.1:1 for the edge. On a white section card it disappeared completely and on the page it
+     looked like a rendering artefact. A floating control has no container to borrow structure from, so it
+     has to carry its own contrast.
+     `--on-accent` rather than a literal: it is #ffffff on the light theme and #04282a on the dark one, where
+     white over the lightened teal fails AA. */
+  background: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0));
+  color: var(--on-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-2);
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  animation: scrolltop-in 140ms ease-out;
+}
+/* `Icon` carries no intrinsic size — unsized in this grid it had none of its own and rendered as whatever the
+   SVG default resolved to, which is the thin, adrift chevron. Sized here explicitly. */
+.scrolltop svg {
+  inline-size: 22px;
+  block-size: 22px;
+  /* The design system ships one chevron, pointing down; this is the same glyph turned, so the two can never
+     drift apart. */
+  transform: rotate(180deg);
+}
+.scrolltop:hover {
+  background-color: var(--accent-press);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-3);
+  transform: translateY(-1px);
+}
+.scrolltop:active {
+  transform: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-1);
+}
+/* base.css gives every :focus-visible a 6px radius, which draws a rounded RECTANGLE around a circular button
+   — the one place the global rule is wrong. The ring itself (3px, offset 2) is inherited unchanged. */
+.scrolltop:focus-visible { border-radius: var(--r-pill); }
+@keyframes scrolltop-in {
+  from { opacity: 0; transform: translateY(var(--sp2)) scale(0.9); }
+  to   { opacity: 1; transform: none; }
+}
+/* The button's whole job is to move the viewport a long way; someone who has asked for less motion gets the
+   appearance without the slide, and `ScrollToTop` reads the same preference to jump rather than smooth-scroll. */
+@media (prefers-reduced-motion: reduce) {
+  .scrolltop { animation: none; transition: none; }
+  .scrolltop:hover { transform: none; }
+}
+
 /* Page header (v1.1 brand-tick eyebrow). */
 .pagehead {
   display: flex;
@@ -242,9 +324,36 @@ nav.mrs-rail {
 /* ---- Flagship screen (9.3) layout utilities ---- */
 .tnum {
   font-variant-numeric: tabular-nums;
+  /*
+   * BIDI ISOLATION (2026-08-09 audit §4).
+   *
+   * These two classes carry IDENTIFIERS — MRS-M-10231, RX-2026-000410, an ICD code, a batch number — into
+   * Arabic sentences. Under the Unicode bidi algorithm a Latin-and-digits run inside RTL text does not simply
+   * sit there: neighbouring punctuation and digits get reordered around it, so `RX-2026-000410` renders with
+   * its parts rearranged and the code an operator reads aloud down a phone is not the code in the database.
+   *
+   * `isolate` makes the run a self-contained bidi paragraph: it keeps its own internal LTR order and takes no
+   * part in reordering the text around it. One line, roughly twenty render sites, and it cannot be got wrong
+   * per-site because it lives on the class every identifier already uses.
+   */
+  unicode-bidi: isolate;
 }
 .stack {
   display: grid;
+  /*
+    `minmax(0, 1fr)`, not the implicit `auto`.
+    ===========================================================================================
+    A grid's default `auto` track sizes to at least the MIN-CONTENT of its items, and a track is
+    allowed to exceed the container to honour that. So a stack holding anything with a stubborn
+    intrinsic width — a nine-column table, a fieldset, a long unbroken string — grows WIDER than
+    the column it sits in, and everything inside it is painted over whatever comes next in the
+    layout. That is what put the encounter's Labs and OP-Procedures tables underneath the vitals
+    rail: the rail was exactly where it belonged, and the card beside it was 170px too wide.
+
+    A single-column stack has no business being wider than its container in any case, so this is
+    stated once here rather than patched at each screen that trips over it.
+  */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp4);
 }
 /* Tighter sibling of `.stack` for a short outcome group — a status chip, its one line of detail, and the
@@ -252,7 +361,62 @@ nav.mrs-rail {
    that panel rendered with no gap at all and the three elements ran together. */
 .stack-3 {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp3);
+}
+/*
+ * A SECTION heading that looks like a panel title.
+ *
+ * 2026-08-09 audit: eight admin screens went h1 → h3, because a card title WANTS to be h3-sized and the tag
+ * was picked for its size. Level and size are different questions — a screen-reader user navigating by
+ * heading is told a section was skipped, and on a screen made entirely of panels that is the whole page.
+ * This holds the h3 appearance (1.17em bold, the browser's own h3 metrics) on an `h2`, so the promotion is
+ * invisible on screen and audible where it matters.
+ *
+ * `test/heading-order.test.tsx` sweeps the route catalog for the skip; the axe gate next door cannot, because
+ * `heading-order` is a MODERATE rule and that gate filters to serious/critical.
+ */
+.panel-h {
+  font-size: 1.17em;
+  font-weight: 700;
+}
+/*
+ * THE INTRO PARAGRAPH under a page header or a panel title.
+ *
+ * 2026-08-11 audit: `.lede` existed only as `.branch-screen .lede`, so the three uses on the Access Catalogue
+ * rendered as a bare `<p>` — default browser margins, body size, body colour — directly beneath a heading
+ * that expected a lede under it. This is the second time the class has shipped unstyled (the first is
+ * recorded on the branch rule below), and the `css-classes-exist` guard cannot catch either: it collects
+ * class NAMES from anywhere in the stylesheet, so a name defined only under some ancestor counts as defined.
+ *
+ * Colour lives here as well as size. The branch screens pair it with `.muted` and got the colour that way;
+ * every other caller wrote the class alone and got neither, which is precisely the failure being fixed.
+ */
+.lede {
+  font-size: var(--fs-body-lg, 15px);
+  color: var(--text-2);
+  max-width: 68ch;
+  margin: 0 0 var(--sp3);
+}
+/*
+ * Search on the start edge, primary action on the end edge, one line.
+ *
+ * The same silhouette `TableToolbar` gives a `DataTableView`, for the two admin tables that search on the
+ * SERVER and so cannot use that component's own (client-side) search box. Logical properties throughout, so
+ * the action lands on the left under Arabic without a second rule.
+ */
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+  margin-bottom: var(--sp3);
+}
+.admin-toolbar > :first-child {
+  /* The search takes the slack; the button stays its own width. `min-width: 0` so a long placeholder cannot
+     push the button off the row — flex items refuse to shrink below min-content without it. */
+  flex: 1 1 16rem;
+  min-width: 0;
 }
 .section-h {
   font-size: 11.5px;
@@ -386,26 +550,16 @@ nav.mrs-rail {
   padding: 0;
 }
 
-/* Pharmacy dispense lines. */
-.rx-lines {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--sp3);
-}
-.rx-line {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--sp4);
-  padding: var(--sp3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-.rx-line .mrs-field {
-  min-width: 130px;
-}
+/*
+  `.rx-lines` / `.rx-line` were declared HERE as well as ~3,400 lines below, under a comment claiming they
+  were the pharmacy dispense lines. Nothing renders them there any more — the only users are the prescribing
+  and investigation composers, which the later block styles. So this was a dead duplicate of two class names,
+  far enough from its twin that neither could be read without finding the other, and it carried a
+  `min-width: 130px` that would have fought the wrapping row the composer now uses.
+
+  Removed rather than reconciled: two rules for one class is a stylesheet nobody can reason about, and the
+  later one already won on every property that mattered.
+*/
 
 /* Dashboard. */
 .kpi-row {
@@ -425,7 +579,7 @@ nav.mrs-rail {
   display: grid;
   gap: var(--sp3);
 }
-.bars li {
+.bars > li {
   display: grid;
   grid-template-columns: 120px 1fr 56px;
   align-items: center;
@@ -451,6 +605,17 @@ nav.mrs-rail {
   text-align: end;
   color: var(--text-1);
 }
+/*
+ * A chart's ACCESSIBLE EQUIVALENT, and small key/value summaries — not a data table.
+ *
+ * Every chart in the product ships the same numbers as a table so the figures are reachable without seeing
+ * the picture (`ExecutiveDashboard`, `PolicyPanels`, `FinancePortal`). Those are a rendering of one series,
+ * frequently `sr-only`, and want none of `DataTable`'s worklist behaviour — a sticky header and a sort
+ * control on a four-row chart equivalent is chrome around nothing.
+ *
+ * If the rows are records an operator works through rather than the numbers behind a picture, it is a
+ * `DataTable`.
+ */
 .mini-table {
   width: 100%;
   border-collapse: collapse;
@@ -906,6 +1071,15 @@ nav.mrs-rail {
   line-height: 1.15;
   text-transform: capitalize;
   white-space: nowrap;
+  /*
+    28.14 — the line KEEPS ITS HEIGHT while empty.
+
+    The caption renders as "" until the profile request settles, so that the person's job title never
+    replaces a portal label under the reader's eye. Without a reserved height the empty span collapses, the
+    button shrinks, and the app bar reflows a frame later — trading a text flicker for a layout one, which is
+    the more annoying of the two. `1.15em` is the line-height above, stated as a floor.
+  */
+  min-height: 1.15em;
 }
 @media (max-width: 560px) {
   /* `.vt-step` used to be collapsed here as well as in its own section 1000 lines below — two rules, two
@@ -914,11 +1088,26 @@ nav.mrs-rail {
     display: none;
   }
 }
+/*
+ * The ACCOUNT pane is wider than the notification pane it shares `.npane` with.
+ *
+ * They looked alike and hold different things: notifications are one-line summaries that read fine in a
+ * narrow column, while this pane pairs a label with a control on every row ("Appearance" / "Dark theme"),
+ * and at 380px those pairs were close enough to touch. The extra 60px is what lets the row read as two
+ * things rather than one crowded one — and it is a modifier rather than a change to `.npane`, because
+ * widening the notification pane would only make its short lines ragged.
+ */
+.npane.upane {
+  inline-size: min(440px, calc(100vw - 24px));
+}
 .upane-profile {
   display: flex;
   align-items: center;
   gap: var(--sp4);
-  padding: var(--sp5);
+  /* Tightened from `--sp5` all round. The pane was taller than it needed to be for six rows, which on a
+     laptop pushed Sign out towards the fold. Vertical only — the horizontal inset is what keeps it aligned
+     with the sections below. */
+  padding: var(--sp4) var(--sp5);
   border-bottom: 1px solid var(--border);
 }
 .upane-avatar {
@@ -934,6 +1123,126 @@ nav.mrs-rail {
   color: var(--on-accent, #fff);
   font-weight: 700;
   font-size: 20px;
+}
+/*
+ * A staff photograph, or the initials that stand in for one — 28.15.
+ *
+ * The SAME silhouette either way: a circle of the requested size, with `object-fit: cover` so a square
+ * upload and a stray non-square one both fill it rather than one of them letter-boxing. The size comes
+ * through the style attribute because one component serves a 36px app-bar avatar and a 64px pane one, and a
+ * class per size is a class per call site.
+ */
+.staff-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  object-fit: cover;
+  /* Decorative `--brand` fails contrast under white text; `--accent` is the one that passes (18.D2 U9). */
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-weight: 700;
+  overflow: hidden;
+}
+/*
+  28.16 — the PERSON cell of the Users & Access table: face, name, and the address they sign in with.
+
+  Three columns across two tables became one cell, so the three facts have to read as one thing rather than
+  as a paragraph. The avatar is fixed at its own size (`flex: 0 0 auto` on `.staff-avatar` above) and the text
+  column takes the rest, with `min-inline-size: 0` so a long address ELLIPSES instead of forcing the table
+  wider than its container — the grid-blowout guard exists because that failure is invisible until somebody
+  opens the screen at 1280px with a real directory in it.
+*/
+.person-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.person-cell-text {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+.person-cell-name {
+  font-weight: 600;
+}
+.person-cell-sub {
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The record header: the face beside who this is, at the reading size the account pane uses. */
+.person-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp3);
+  margin-bottom: var(--sp3);
+}
+
+.photo-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp4);
+}
+.photo-picker-controls {
+  display: grid;
+  gap: var(--sp2);
+  min-inline-size: 0;
+}
+/*
+ * THE AVATAR AS A BUTTON — the icon appears on hover AND on keyboard focus.
+ *
+ * Hover alone would make the only control in the account pane invisible to anyone not using a pointer. The
+ * button carries its verb in `aria-label` regardless, so the overlay is a hint rather than the affordance;
+ * revealing it on `:focus-visible` is what makes the hint reach a keyboard.
+ */
+.photo-drop {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 999px;
+  cursor: pointer;
+  /* The avatar is 64px, comfortably past the 44px target floor, so the button needs no padding to reach it. */
+}
+.photo-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  /* Dark scrim so a white glyph reads over ANY photograph — a light one would vanish against a pale shirt. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
+}
+/* `Icon` sets no intrinsic size — it is an SVG sized by whatever rule reaches it, and with none it filled
+   the whole 64px circle. 20px is a glyph over a face rather than a glyph instead of one. */
+.photo-drop-overlay svg {
+  inline-size: 20px;
+  block-size: 20px;
+}
+.photo-drop:hover .photo-drop-overlay,
+.photo-drop:focus-visible .photo-drop-overlay {
+  opacity: 1;
+}
+.photo-drop:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-drop-overlay { transition: none; }
+}
+.photo-picker--hover {
+  /* No control column beside the avatar in this variant, so the row is just the avatar (and an error, when
+     there is one) rather than a two-column layout with an empty second column. */
+  display: grid;
+  gap: var(--sp2);
+  justify-items: start;
 }
 .upane-identity {
   display: grid;
@@ -951,7 +1260,7 @@ nav.mrs-rail {
   text-transform: capitalize;
 }
 .upane-section {
-  padding: var(--sp5);
+  padding: var(--sp3) var(--sp5) var(--sp4);
   display: grid;
   gap: var(--sp1);
 }
@@ -960,7 +1269,10 @@ nav.mrs-rail {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp3);
-  min-block-size: 48px;
+  /* 44px, not 48 — and NOT lower. The row is only as tall as the control inside it, and `.mrs-btn` is 44px
+     because that is the minimum hit target (21-accessibility). Trimming the row is free; trimming the
+     button would not be. */
+  min-block-size: 44px;
 }
 /* Equal-width controls on the settings rail: two adjacent rows with differently-sized buttons read as
    ragged rather than as a column of settings (QA follow-up). */
@@ -986,9 +1298,24 @@ nav.mrs-rail {
 .cc-workspace > .mrs-card { padding: var(--sp5); }
 .cc-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .cc-callbar { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; min-block-size: 44px; }
-.cc-callbar select, .cc-wrapup select, .cc-cancel select, .cc-callmeta select {
-  min-block-size: 44px; padding: 0 var(--sp3); border: 1px solid var(--border);
-  border-radius: var(--r-sm); background: var(--surface-1); color: var(--text-1);
+/*
+ * The call centre's pickers size to their content, not to the bar.
+ *
+ * This rule used to restate `.mrs-control` — border, background, radius, height — for four bars' worth of
+ * native `<select>` elements, at `--r-sm` rather than the field radius and with no focus style of its own.
+ * There are no native selects here any more: they are design-system comboboxes, which bring all of that with
+ * them. What is left is the one thing the bars actually need, and it is a LAYOUT concern rather than a skin.
+ *
+ * `.mrs-combo` is `inline-size: 100%`, which is right for a field in a form grid and wrong for a control in a
+ * horizontal bar — as a flex item it would resolve against the bar and take every pixel the buttons beside it
+ * were not using. Same correction, same reason, as `.branch-select` in the app bar.
+ */
+.cc-callbar .mrs-combo,
+.cc-wrapup .mrs-combo,
+.cc-cancel .mrs-combo,
+.cc-callmeta .mrs-combo {
+  inline-size: auto;
+  min-inline-size: 220px;
 }
 .cc-muted { color: var(--text-2); }
 .cc-locked { display: flex; flex-direction: column; gap: var(--sp3); }
@@ -1001,7 +1328,7 @@ nav.mrs-rail {
 .cc-360 { display: flex; flex-direction: column; gap: var(--sp4); }
 .cc-360 section { border-top: 1px solid var(--border); padding-top: var(--sp3); }
 .cc-appts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
-.cc-appts li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
+.cc-appts > li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
 .cc-wrapup { display: flex; gap: var(--sp4); flex-wrap: wrap; align-items: flex-end; }
 /* The call's own metadata — reason and direction — side by side above the summary. Wraps to one column on a
    narrow screen rather than squeezing two selects into an unreadable width. */
@@ -1117,13 +1444,22 @@ nav.mrs-rail {
   padding: var(--sp4);
 }
 /*
-  A card INSIDE a card would otherwise be padded twice. There is no such nesting on these screens today —
-  checked across every analytics tab and the member detail's five — so this is a guard against the next one
-  rather than a fix for a current fault: the inner surface keeps whatever its parent gives it, which is what
-  the nesting was for.
+  A card INSIDE a card would otherwise be padded twice. The inner surface keeps whatever its parent gives it,
+  which is what the nesting was for.
+
+  `:not(.mrs-kpi)` — THE NESTING ARRIVED, AND THIS RULE FLATTENED IT. The note here used to say "there is no
+  such nesting on these screens today", and that stopped being true the moment the utilization panel started
+  rendering a `KpiList`: a KPI tile IS a `.mrs-card`, nested inside the panel card, so this selector (0,3,0)
+  beat `.mrs-kpi`'s own `padding: var(--sp5)` (0,1,0) and stripped every tile to zero. The label then sat on
+  the tile's top border under the 3px accent hairline — reading as clipped — and the 34px figure ran to the
+  bottom edge. Reported as "the padding is broken on this page", and it was, three selectors away.
+
+  A KPI tile is not the case this guard is about. That case is a panel nested in a panel, where the inner one
+  would be inset twice; a tile is a component with its own fixed internal spacing, and it is nested by
+  design. Excluding it by class keeps the guard doing its job for everything else.
 */
-.pol-screen .mrs-card .mrs-card,
-.pol-detail .mrs-card .mrs-card {
+.pol-screen .mrs-card .mrs-card:not(.mrs-kpi),
+.pol-detail .mrs-card .mrs-card:not(.mrs-kpi) {
   padding: 0;
 }
 .pol-detail { display: grid; gap: var(--sp4); margin-block-start: var(--sp4); }
@@ -1138,10 +1474,18 @@ nav.mrs-rail {
 .pol-searchbar { align-items: end; }
 .pol-searchbar .mrs-btn { margin-bottom: 1px; }
 
-.pol-kpis { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
-.pol-kpis > div { display: grid; gap: var(--sp1); }
-.pol-kpis dt { color: var(--text-2); font-size: 0.82rem; }
-.pol-kpis dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+/* `.pol-facts` — a short list of label/value FACTS. Renamed from `.pol-kpis`, which is what it was called
+   while four screens used it for figures; those four now render `KpiList`, which is the 0B §10b treatment
+   figures are supposed to get (hairline, uppercase micro-label, 34px tabular numerals) rather than a 0.82rem
+   label over a 1.25rem value, which is plain text with a size difference.
+   The one remaining caller is the tier resolver's result, and it is NOT figures: a status chip and the word
+   "DefaultOutOfNetwork". Putting those in KPI tiles would set a chip and a vocabulary term at headline size
+   and claim they are measurements. So the treatment stays for this case and the NAME stops overselling it —
+   a class called `kpis` is how the wrong content ends up in it again. */
+.pol-facts { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
+.pol-facts > div { display: grid; gap: var(--sp1); }
+.pol-facts dt { color: var(--text-2); font-size: 0.82rem; }
+.pol-facts dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 
 .pol-identity { display: grid; gap: var(--sp2); }
 .pol-identity dl { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
@@ -1179,7 +1523,7 @@ nav.mrs-rail {
 /* The general-information strip. Icon + value pairs, wrapping — never a fixed row, because a phone number and
    a two-letter nationality do not want the same width and a grid would give them one. */
 .mem-info { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp1) var(--sp4); }
-.mem-info li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.mem-info > li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
 .mem-info svg { color: var(--text-3); flex: 0 0 auto; }
 
 .mem-facts {
@@ -1209,8 +1553,27 @@ nav.mrs-rail {
 */
 .mem-actions-end { margin-inline-start: 0; }
 
-/* The two-level grid. Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own
-   container — the page body must never scroll sideways. */
+/*
+ * ============================================================================================================
+ * `.pol-grid` / `.pol-costshare` ARE NOT FOR DATA TABLES
+ * ============================================================================================================
+ * A read-only list of rows belongs to `DataTable`, which brings the sticky header, `aria-sort`, the
+ * loading/empty/error states, numeric alignment and one cell padding shared with every other table in the
+ * product. These two exist for the things it is NOT:
+ *
+ *  - `.pol-grid` — a MASTER/DETAIL grid whose rows expand into a `.pol-grid-sub` panel (member coverage, plan
+ *    benefit categories). `DataTable` has no row-expansion concept, and giving it one to serve two screens
+ *    would be a large component for a small need.
+ *  - `.pol-costshare` — an EDIT grid: every cell is a checkbox, a select or a number field, and the table is
+ *    a form laid out in columns rather than a list of values.
+ *
+ * The household roster used to live here and has moved to `DataTable`; it was a plain list of rows all
+ * along, and the only thing distinguishing it was that it sat at this file's 8/12px cell padding while every
+ * other table in the app sits at 14/16px. If what you are adding is a list of rows, that is the lesson.
+ *
+ * Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own container — the page body
+ * must never scroll sideways.
+ */
 .pol-grid, .pol-costshare { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
 /*
  * `display: block` buys the horizontal scroll, but it also takes the table OUT of table layout: the browser
@@ -1254,7 +1617,7 @@ nav.mrs-rail {
 .pol-editor-head { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
 .pol-editor-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; margin-block-start: var(--sp3); }
 .pol-problems, .pol-diff, .pol-versions { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
-.pol-versions li { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
+.pol-versions > li { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
 
 /* Notes. A cancelled note is dimmed and struck through — and STILL RENDERED, with its canceller, reason and
    timestamp. Opacity never carries the status on its own: the chip says the word "Cancelled". */
@@ -1294,7 +1657,7 @@ nav.mrs-rail {
 .pol-doc-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
 
 .pol-timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp3); }
-.pol-timeline li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
+.pol-timeline > li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
 .pol-timeline p { margin: var(--sp1) 0 0; }
 .pol-timeline-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--text-2); }
 /* The origin is the anchor, not the newest thing that happened — it carries the accent rail and a label so
@@ -1395,36 +1758,47 @@ nav.mrs-rail {
    to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
    without relying on hue (0B four-cue rule). */
 .patient-profile { display: grid; gap: var(--sp4); }
-/* The tab bar sticks at the same offset the old side nav used. Sticky lives on `.mrs-tabs--pill` (the Radix
-   `List`) rather than on `.profile-tabs` (the Tabs `Root`) — a previous version of this rule had it the other
-   way round and that broke stickiness itself: `Root`'s own box is exactly `List`-height +
-   active-`Content`-height combined (the seven `Content` panes are `forceMount`ed siblings of `List` inside
-   `Root`, but `hidden` when inactive, so only the active one has layout), which leaves `Root` no taller
-   container to visibly travel within — a sticky element needs room in its *containing block* to still "stick"
-   while a sibling scrolls past, and `Root` has none of its own. `List` does, because `Root` (List height +
-   Content height) is taller than `List` alone.
+/* THE TAB BAR DOES NOT STICK. It scrolls away with the content, and `ScrollToTop` is what brings you back.
+   Deliberate, and a reversal of the earlier design — the history is kept because the sticky version was not
+   wrong so much as it bought less than it cost:
 
-   The backdrop still needs to be OPAQUE and FULL WIDTH so page content scrolling up doesn't show through
-   beside it — but `.mrs-tabs--pill` is `display: inline-flex` (shrink-to-fit) and carries its own
-   `background: var(--surface-2)` pill-track tint plus a border and `--r-pill` radius. Stretching the element
-   itself to `width: 100%` would stretch that bordered, rounded track into a full-row stadium shape with the
-   pills bunched at one end — not the look. Setting `background` here directly would also collide at higher
-   specificity with `.mrs-tabs--pill`'s own `background: var(--surface-2)` and re-lose the tint, which is the
-   exact bug the old `.profile-tabs`-not-`.mrs-tabs--pill` placement was chosen to dodge — moving sticky back
-   onto `List` without solving this would just trade one bug for the other.
+   - It only ever worked at >=60rem. Below that the seven tabs wrap to three rows and a 156px sticky bar
+     holds 24% of a 360x640 viewport for the whole session, so it was switched off exactly where a small
+     screen needed the help most. The button has no such restriction — it works at every width, which is the
+     point of replacing one with the other.
+   - Being sticky made it a participant in the page's stacking order. It had to be lifted to `z-index: 10` to
+     stop the worklist tables INSIDE its own panels painting over it, and kept under the popup layer so a
+     select opened in a section card was not covered BY it. A bar that scrolls away has neither problem.
+   - It needed an opaque full-bleed backdrop (a `box-shadow` bled to `100vmax`, clipped back with
+     `clip-path`) purely so content scrolling underneath did not show through beside the shrink-to-fit track.
+     All of that machinery existed to serve the pinning, and went with it.
 
-   So the backdrop is a `box-shadow` bled out to `100vmax` (opaque, painted BEHIND the element's own
-   background within its own bounds, so the surface-2 tint on the actual track is undisturbed — only visible
-   in the margin beyond the track, which is the point) and `clip-path` clipped back to the element's own row
-   height so it doesn't bleed into the row above/below. Nothing here touches `display`, `width`, or
-   `background` on `.mrs-tabs--pill`, so the pill buttons stay exactly as compact as they already were. */
+   What is KEPT from that work is the wrap handling, because the bar still wraps: `--r-pill` is 999px, which
+   draws the intended stadium on a 62px one-row track and a lozenge with the first and last rows cut into by
+   the curve on a 156px three-row one. Measured in Chromium against the real webfonts, the seven tabs wrap
+   below 688px in English and below 780px in Arabic. So the capsule radius stays inside the width query that
+   knows the row count — 60rem, deliberately well above the 780px measurement rather than snug to it, because
+   the labels are translated strings and the fonts are remote, so the wrap point is not a constant this file
+   can pin down. */
 .profile-tabs .mrs-tabs--pill {
-  position: sticky;
-  top: var(--sp4);
-  z-index: 1;
-  padding-block: var(--sp2);
-  box-shadow: 0 0 0 100vmax var(--surface-0);
-  clip-path: inset(0 -100vmax);
+  /* Centred rather than left-aligned. `inline-flex` is inline-level, so `margin-inline: auto` alone does
+     nothing to it — it needs to be block-level AND still shrink-to-fit, which is `display: flex` plus
+     `inline-size: fit-content`. Stretching it to `100%` instead would pull the bordered, tinted track into a
+     full-row stadium with the pills bunched at one end, which is what the note above warns off. The pills
+     themselves are untouched and stay exactly as compact as they were.
+     `justify-content: center` matters only once the row wraps: without it the last row (one tab, at 360px)
+     hangs off the leading edge under two full ones. */
+  display: flex;
+  inline-size: fit-content;
+  margin-inline: auto;
+  justify-content: center;
+  padding-block: var(--sp3);
+}
+@media (min-width: 60rem) {
+  .profile-tabs .mrs-tabs--pill {
+    /* The stadium track `.mrs-seg` wears, restored where the row count is known to be one. */
+    border-radius: var(--r-pill);
+  }
 }
 .profile-sections { display: grid; gap: var(--sp4); }
 .profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
@@ -1536,7 +1910,7 @@ nav.mrs-rail {
   flex-wrap: wrap;
   gap: var(--sp1) var(--sp4);
 }
-.profile-idfacts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.profile-idfacts > li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
 .profile-idfacts svg { color: var(--text-3); flex: 0 0 auto; }
 /* A fact that is present but UNRECORDED (blood group, today). Dimmed and italic rather than hidden: the slot
    stays so the reader sees that the question was asked and has no answer. Never the only cue — the value
@@ -1772,7 +2146,7 @@ nav.mrs-rail {
 /* ── Branch switcher (app bar) ───────────────────────────────────────────────
    The control WAS a bare browser <select> beside a bold "Active branch" label: unstyled against a glass bar,
    a visible label restating what the control already shows, and — the part CSS could not fix — an option list
-   drawn by the OS in system blue. It is now the design-system Select (see .mrs-select), which owns its own
+   drawn by the OS in system blue. It is now the design-system Combobox (see .mrs-combo), which owns its own
    list; this file only sizes it for the app bar. */
 .branch-switcher {
   display: flex;
@@ -1789,7 +2163,17 @@ nav.mrs-rail {
   flex: none;
   color: var(--accent);
 }
+/*
+ * The switcher sizes to its content with a floor, not to its container.
+ *
+ * `Select` was `display: inline-flex`, so it shrank to fit and this rule only had to set a floor. `Combobox`
+ * is a form field — `inline-size: 100%` is right for one sitting in a grid — and as a flex item in the app
+ * bar that resolves against the bar, so the branch picker would have taken every pixel the title and the
+ * account controls were not using. `inline-size: auto` puts it back on flex-basis content sizing; the floor
+ * below is unchanged and is what keeps a one-word branch name from collapsing to a stub.
+ */
 .branch-select {
+  inline-size: auto;
   min-inline-size: 208px;
 }
 .branch-switcher--member > span:not(.sr-only) {
@@ -1904,7 +2288,7 @@ nav.mrs-rail {
 /* Named explicitly rather than reached as `.book-hits li`: the row is a component now — a pickable button
    or a blocked line — and a descendant selector hid that from anyone reading either half on its own. */
 .book-hit,
-.book-hits li,
+.book-hits > li,
 .book-chosen {
   display: flex;
   align-items: center;
@@ -1990,7 +2374,10 @@ nav.mrs-rail {
   align-content: start;
   min-inline-size: 0;
 }
-.book-field .mrs-select {
+/* The picker fills its cell. `Combobox` is already `inline-size: 100%`, but `.book-field` is also used as a
+   `ComboboxField`'s className — where the width belongs to the field wrapper rather than to the control. */
+.book-field.mrs-field,
+.book-field .mrs-combo {
   inline-size: 100%;
 }
 /* Times wrap into a grid of equal targets — a long single column makes 09:00 and 16:45 far apart in a list
@@ -2978,8 +3365,8 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
-.reg-docs li,
-.reg-failures li {
+.reg-docs > li,
+.reg-failures > li {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
@@ -2993,13 +3380,13 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   max-block-size: var(--scroll-picker);
   overflow-y: auto;
 }
-.reg-bulklist li {
+.reg-bulklist > li {
   display: flex;
   align-items: center;
   gap: var(--sp2);
 }
 /* The refusal reason wraps under the name rather than pushing it off the modal. */
-.reg-failures li { display: grid; gap: 2px; }
+.reg-failures > li { display: grid; gap: 2px; }
 
 /* ---- advanced search on the Beneficiaries roster ----------------------------------------------------------
    Ten filters. A flex row would leave a ragged last line and fields of three different widths; the grid gives
@@ -3077,8 +3464,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .branch-screen .mrs-tabpane .mrs-card {
   padding: var(--sp4);
 }
-/* A card inside a card keeps whatever its parent gives it, rather than being inset twice. */
-.branch-screen .mrs-card .mrs-card {
+/* A card inside a card keeps whatever its parent gives it, rather than being inset twice. `:not(.mrs-kpi)`
+   for the reason spelled out on the identical guard in the policy screens above: a KPI tile is a card by
+   construction and carries its own spacing, so flattening it strips the padding off the tile rather than
+   preventing a double inset. This screen has no KPI row today — it is excluded here so it cannot acquire the
+   same defect the moment it gains one. */
+.branch-screen .mrs-card .mrs-card:not(.mrs-kpi) {
   padding: 0;
 }
 /* The intro paragraph sits directly under the page header, so it carries the header's own bottom rhythm
@@ -3086,6 +3477,67 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    `.muted` beside it is the colour. */
 .branch-screen .lede {
   font-size: var(--fs-body-lg, 15px);
+  max-width: 68ch;
+  margin: 0;
+}
+
+/* ============================================================================================================
+   THE CHANGE TIMELINE — who altered this clinic's roster, licence or weekly pattern, and when.
+
+   A LIST, not a table. Each entry has a different number of changed fields, so a table would spend most of
+   its cells on "unchanged" — and the reason someone opens a timeline is to find the one thing that moved.
+
+   The rail is a border on the list with a dot per entry, drawn with logical properties throughout so it
+   mirrors in Arabic without a second rule. A left border here would sit on the wrong side of an RTL page,
+   which is the kind of mistake that survives review because the reviewer reads in English.
+   ============================================================================================================ */
+.change-timeline {
+  display: grid;
+  gap: var(--sp3);
+}
+.change-timeline__list {
+  list-style: none;
+  margin: 0;
+  padding-inline-start: var(--sp4);
+  border-inline-start: 2px solid var(--border);
+  display: grid;
+  gap: var(--sp4);
+}
+.change-timeline__entry {
+  position: relative;
+}
+/* The dot. `aria-hidden` is unnecessary — a pseudo-element is not in the accessibility tree — and it must
+   not carry meaning on its own: the entry's date and actor are the content, in words, directly beside it. */
+.change-timeline__entry::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--sp4) - 5px);
+  inset-block-start: 0.45em;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.change-timeline__when {
+  margin: 0 0 var(--sp1);
+}
+.change-timeline__changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp1);
+}
+.change-timeline__field {
+  color: var(--text-2);
+}
+/* The superseded value, de-emphasised but NOT struck through: a strikethrough reads as "deleted", and this
+   value was not deleted, it was replaced. It also has to stay legible — half the point of showing it is that
+   the reader compares the two. */
+.change-timeline__from {
+  color: var(--text-2);
+}
+.change-timeline__note {
   max-width: 68ch;
   margin: 0;
 }
@@ -3181,12 +3633,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .profile-section {
   display: grid;
   min-inline-size: 0;
-  /* WCAG 2.4.11 (Focus Not Obscured): the sticky `.profile-tabs` bar above sits roughly a 44px-min-height
-     pill row + ~6px track padding + `var(--sp2)` padding-block top and bottom, plus its own `top: var(--sp4)`
-     offset before it starts sticking. Without this, tabbing into a control just below the fold scrolls it
-     under the bar. `calc(var(--sp4) + 80px)` is a generous estimate, not a pixel-exact one — this can't be
-     verified without a browser in this session, so it errs generous rather than exact. */
-  scroll-margin-block-start: calc(var(--sp4) + 80px);
+  /* Breathing room above a section scrolled to by the jump nav or by tabbing into it — NOT the 96px it used
+     to be. That figure was clearance for the sticky `.profile-tabs` bar (70px of bar plus margin), and the
+     bar no longer sticks, so there is nothing left inside this scrollport for a focused control to land
+     under: `.app-bar` is sticky but it is a grid SIBLING of `.app-main`, in the row above, so it never
+     overlaps this pane's content. WCAG 2.4.11 is satisfied by there being no overlay, rather than by
+     reserving space for one. What remains is ordinary spacing, so a section does not land flush against the
+     top edge of the pane. */
+  scroll-margin-block-start: var(--sp4);
 }
 .profile-section > * { min-inline-size: 0; }
 
@@ -3288,10 +3742,28 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .enc-main {
   min-inline-size: 0;
 }
+/* The tab panel is a block inside that column and must not become the one link in the chain that
+   reintroduces an intrinsic minimum. */
+.enc-main .mrs-tabpane {
+  min-inline-size: 0;
+}
 .enc-rail {
   display: grid;
   gap: var(--sp4);
   align-content: start;
+  /*
+    ABOVE the note column, always.
+    ===========================================================================================
+    A worklist's pinned actions column (`.mrs-wl th.mrs-stickyend`) carries `z-index: 1`, and two
+    positioned elements with `z-index: auto` otherwise paint in DOM order — so the moment a table
+    beside this rail overflowed, its ACTIONS header punched straight through the vitals card and
+    the two sets of text stacked on each other.
+
+    The overflow itself is fixed above; this is the guard that keeps the NEXT one from landing on
+    top of a patient's readings. A rail that renders over the content beside it is the correct
+    outcome either way: it is the thing anchored to the viewport.
+  */
+  z-index: 2;
   /* Follows the note down a long consultation — the save actions must never be a scroll away from the text
      they save. `align-content: start` above keeps the two cards their own height rather than stretching. */
   position: sticky;
@@ -3315,6 +3787,7 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    below where the rail's offset above expects it. */
 .enc-soap {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp4);
 }
 .soap-card {
@@ -3501,7 +3974,20 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
-.dx-staged-list li {
+/*
+ * `> li`, NOT ` li` — and the same everywhere else in this sheet.
+ *
+ * The rank picker on each staged row is a `Select`, which renders its own listbox as a `<ul>` of `<li>`
+ * INSIDE the row it belongs to. Under a descendant selector every option therefore inherited this
+ * four-column grid: the check glyph took track one, the label landed in `minmax(0, 1fr)`, which resolves to
+ * 0px once the fixed 9rem track is placed — and both options rendered as empty rows. Measured in the
+ * browser: option 200px wide, its label 0px wide, its text 54px of it out of view.
+ *
+ * Nothing was wrong with the data, the markup or the component. A rule for THIS list's rows simply also
+ * described elements that are not its rows. See test/popup-not-restyled.test.ts, which asserts it of every
+ * list in this file rather than of this one.
+ */
+.dx-staged-list > li {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 9rem auto;
   align-items: center;
@@ -3517,7 +4003,7 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: 0;
 }
 @media (max-width: 560px) {
-  .dx-staged-list li {
+  .dx-staged-list > li {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
   .dx-staged-list .mrs-field {
@@ -3914,10 +4400,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   padding: 0;
   list-style: none;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp4);
 }
 .rx-line {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp3);
   padding: var(--sp3);
   border: 1px solid var(--border);
@@ -4050,19 +4538,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   flex: 0 1 11rem;
 }
 
-/* ---- 29.6 — the dose, and the unit master data records for it ------------------------------- */
-.rx-dose {
-  display: flex;
-  align-items: center;
-  gap: var(--sp2);
-}
-/* The unit is a FACT about the product, not a choice — so it reads as a suffix on the field rather than as
-   another control. A drug whose unit the catalogue does not record simply has no suffix. */
-.rx-dose-unit {
-  font-size: 0.8125rem;
-  color: var(--text-2);
-  white-space: nowrap;
-}
+/* 31.3 — `.rx-dose` and `.rx-dose-unit` were deleted here. The unit used to render as a chip beside the
+   dose input, which cost a column of width on the composer's narrowest row and left the label reading
+   "Dose" on every medicine in the catalogue. It is now IN the label — "Dose (IU)", "Dose (tabs)" — so the
+   pair had nothing left to style. */
 /* How the quantity was reached, or which master-data field stopped it being reached. A prescriber can
    overrule the number; they cannot check it unless they are told what it came from. */
 .rx-quantity-note {
@@ -4077,11 +4556,17 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp3);
 }
 /* The collection schedule, shown before submit. Scrolls on its own rather than widening the page: five
-   dated columns do not fit a narrow viewport, and a body that scrolls sideways loses the composer. */
+   dated columns do not fit a narrow viewport, and a body that scrolls sideways loses the composer.
+   Per-axis overscroll, matching `.mrs-wl-scroll` rather than plain `.mrs-scroll`: `block: auto` so the page
+   keeps scrolling under a cursor that happens to be over the schedule, `inline: contain` because horizontal
+   overscroll is what browsers map to back/forward navigation — a sideways flick here must not leave the
+   composer. `.mrs-scroll` on the element brings the house scrollbar. */
 .rx-schedule {
   display: grid;
   gap: var(--sp2);
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
 /* 29.2 — what a chosen code will CREATE, stated before the doctor commits (design 45 §2). Sits under the
    combobox and above the fields, because it changes which fields are there. */
@@ -4128,13 +4613,25 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
+/*
+ * `center`, not `flex-end`. The row holds a medicine name — one line of text — beside a labelled quantity
+ * field, which is a label stacked over a box. Bottom-aligning the two put the name on the INPUT's baseline,
+ * a whole label's height below the row's top edge, so each row read as a name that had slipped downwards.
+ * The padding is the row's own; it was 8px against a 16px-inset card, which is tighter than anything else
+ * on the dialog.
+ */
 .txn-line {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--sp3);
-  padding: var(--sp2) 0;
+  padding: var(--sp3) 0;
   border-bottom: 1px solid var(--border);
+}
+/* The last row's rule would otherwise draw a line directly above the reason picker, reading as a divider
+   between two things that are not divided. */
+.txn-line:last-child {
+  border-bottom: 0;
 }
 /* The line's own name leads and takes the slack, because it is what the doctor is deciding about; the
    quantity and the lock chip are fixed-width facts beside it. `min-inline-size` lets a long medicine name
@@ -4256,12 +4753,11 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   opacity: 0.7;
 }
 
-/* The compose block sits inside the "prescriptions for this patient" card, under the list of what has
-   already been written — the doctor decides what to add while looking at what is there. */
+/* 31.4 — the compose block now HAS its own card, so it carries no divider and no top inset of its own. It
+   was separated from the history by a rule inside a shared card; the two are separate cards now, and a rule
+   above the first thing in a card is a line under nothing. */
 .rx-compose {
-  margin-block-start: var(--sp5);
-  padding-block-start: var(--sp4);
-  border-block-start: 1px solid var(--border);
+  margin-block-start: 0;
 }
 .rx-compose-h {
   margin-block-start: 0;
@@ -4657,9 +5153,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 
 /* Wide content scrolls INSIDE its own container. The page body must never scroll sideways — a counter screen
-   that shifts horizontally while a quantity is being typed is how the wrong row gets filled in. */
+   that shifts horizontally while a quantity is being typed is how the wrong row gets filled in.
+   Per-axis overscroll for the reason spelled out on `.rx-schedule` above and on `.mrs-wl-scroll`: this is a
+   block IN the page and usually the tallest thing on it, so containing the block axis would stop the page
+   scrolling wherever the cursor sat over the table. */
 .rx-dispense-scroll {
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
 
 .rx-dispense-table {
@@ -5496,4 +5997,456 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
      system this is, and a bare form on a phone could be anybody's. */
   .login-hero-compact-hide { display: none; }
   .login-headline { font-size: clamp(24px, 6vw, 30px); }
+}
+
+/* =============================================================================================
+ * PORTAL PICKER  (/portals)
+ * =============================================================================================
+ *
+ * The screen a sign-in lands on when the caller holds more than one portal. It sits OUTSIDE the app shell —
+ * there is no rail, no branch and no portal to name in an app bar until one is chosen — so it brings its own
+ * page frame rather than borrowing `.app-grid`'s.
+ *
+ * Everything here is drawn from tokens that already existed. No new colour, font or spacing step enters the
+ * system for this screen: the zone dots are `--accent`, `--st-info-fg` and `--st-part-fg`, the surfaces and
+ * hairlines are the same ones every card in the product uses, and the type sizes are the existing scale.
+ */
+/*
+ * The picker is a BAR plus a page, so the bar can be full-bleed while the cards stay in a reading column.
+ *
+ * `.picker-page` used to be the whole screen and carried the header inside its own 1240px column, which is
+ * why the bar stopped short of the window edge and scrolled away — the one screen in the product whose
+ * header did not behave like a header. The shell owns the background and the full width now; the page keeps
+ * the column.
+ */
+.picker-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--page-wash);
+}
+.picker-page {
+  padding: var(--sp8) clamp(var(--sp4), 5vw, var(--sp12)) var(--sp12);
+  /* The grid is capped rather than the viewport: on a wide monitor `auto-fill` would otherwise run six or
+     seven 268px cards across a single row and the zone groupings would stop reading as groups. */
+  max-width: 1240px;
+  margin-inline: auto;
+}
+/*
+ * `.app-bar` carries `grid-column: 1 / 3` for the AppShell's two-column grid; this shell is not a grid, so
+ * the declaration is inert here and no override is needed. What DOES need saying is the sizing the shell
+ * does not inherit from that grid.
+ */
+.picker-appbar {
+  min-height: 64px;
+}
+/* `margin-inline-start: auto` and not `justify-content: flex-end` — the logical property is what moves the
+   controls to the LEFT under RTL without a second rule. */
+.picker-appbar .app-actions {
+  margin-inline-start: auto;
+}
+.picker-status {
+  /* Reserves no space when empty: a status line that is always in the layout pushes the first zone down by a
+     row for the whole time nobody is searching. */
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+.picker-status:not(:empty) {
+  margin-top: var(--sp4);
+}
+.picker-empty {
+  margin-top: var(--sp6);
+  padding: var(--sp6);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  color: var(--text-2);
+  text-align: center;
+}
+/* `.picker-signout` lived here. 28.13 moved sign-out, language and theme into `UserPane` — the same pane
+   every other screen opens from the same button — so the rule had nothing left to style. Deleted rather than
+   left behind: `css-classes-exist` catches markup pointing at absent CSS, and nothing catches the reverse. */
+
+.picker-greeting {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--text-1);
+}
+.picker-lede {
+  margin: var(--sp2) 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-body-lg);
+  max-width: 62ch;
+}
+
+.picker-zone { margin-top: var(--sp10); }
+/* The label and the rule are flex siblings, so the hairline takes whatever width the label leaves and the
+   pair reverses end-for-end under RTL with nothing further to write. */
+.picker-zone-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  margin-bottom: var(--sp4);
+}
+.picker-zone-label {
+  margin: 0;
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+  white-space: nowrap;
+}
+.picker-zone-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: var(--sp4);
+}
+
+.picker-card {
+  display: grid;
+  /* Explicit rows so the meta line pins to the BOTTOM of the tallest card in the row: descriptions run one
+     or two lines, and a footer that floats up under the shorter ones makes a tidy grid look ragged. */
+  grid-template-rows: auto auto 1fr auto;
+  gap: var(--sp2);
+  padding: var(--sp5);
+  text-align: start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--elev-1);
+  cursor: pointer;
+  font: inherit;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.picker-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--elev-hover);
+}
+.picker-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* The lift is the one piece of motion on this page, and it is the one thing somebody with a vestibular
+   disorder would ask for less of. The border and shadow still answer hover, so the affordance survives. */
+@media (prefers-reduced-motion: reduce) {
+  .picker-card { transition: none; }
+  .picker-card:hover { transform: none; }
+}
+.picker-card-tile {
+  inline-size: 44px;
+  block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  background: var(--accent-tint);
+  color: var(--accent-press);
+  margin-bottom: var(--sp1);
+}
+.picker-card-tile svg { width: 22px; height: 22px; }
+.picker-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.picker-card-desc {
+  font-size: var(--fs-subhead);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.picker-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding-top: var(--sp3);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+/* Decorative: the zone heading directly above the grid carries the meaning, so this dot adds a second,
+   redundant cue rather than being the only one. Nothing is identified by colour alone. */
+.picker-card-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+
+/* =============================================================================================
+ * PORTAL SWITCHER  (top of the nav rail, every portal)
+ * ============================================================================================= */
+.portal-switch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-height: 44px;
+  padding: 10px var(--sp3);
+  margin-bottom: var(--sp3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.portal-switch:hover { border-color: var(--accent); }
+.portal-switch:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.portal-switch-tile {
+  inline-size: 28px;
+  block-size: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+  color: var(--accent-press);
+}
+.portal-switch-tile svg { width: 16px; height: 16px; }
+/* `min-width: 0` so a long portal name can ellipsize instead of pushing the switch glyph out of the rail. */
+.portal-switch-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.portal-switch-name {
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portal-switch-sub {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+/* No mirroring rule: the glyph shows both arrows, so it means "exchange" in either direction. */
+.portal-switch-glyph {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-3);
+}
+
+/* =============================================================================================
+ * DEV LOGIN — additional portals
+ * =============================================================================================
+ * Fixture builds only (`src/dev/DevLoginForm.tsx`). It is the only way to produce a multi-portal session
+ * with no issuer running, which is how the whole frontend suite exercises the picker and the switcher.
+ */
+.dev-extra-portals {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.dev-extra-portals legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.dev-extra-portals-help {
+  margin: 0 0 var(--sp2);
+  font-size: var(--fs-caption);
+}
+.dev-extra-portals-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp1) var(--sp3);
+  max-height: var(--scroll-picker);
+  overflow: auto;
+}
+.dev-extra-portal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 32px;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/* =============================================================================================
+ * USER ADMINISTRATION + ACCESS CATALOGUE  (28.8 / 28.9)
+ * ============================================================================================= */
+
+/* A permission key is an identifier, not prose: monospace so `finance:write` and `finance:approve` differ
+   at a glance, which on this screen is the difference between two halves of a separated duty. */
+.scope-key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-1);
+}
+
+/* A row of chips or small buttons that must not run edge-to-edge — JSX drops newline-only whitespace
+   between elements, so adjacent chips render touching without an explicit gap. */
+.chip-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+
+/* ---- The portal checklist, grouped by the picker's own three zones -------------------------- */
+.portal-checklist-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.portal-checklist-wrap > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.portal-checklist-help {
+  margin: 0 0 var(--sp3);
+  font-size: var(--fs-caption);
+}
+.portal-checklist {
+  display: grid;
+  gap: var(--sp3);
+  max-height: var(--scroll-panel);
+  overflow: auto;
+}
+.portal-checklist-zone {
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: var(--sp3) 0 0;
+  margin: 0;
+}
+.portal-checklist-zone:first-child { border-top: 0; padding-top: 0; }
+.portal-checklist-zone > legend {
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+  padding: 0;
+}
+.portal-checklist-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--sp2);
+  min-height: 36px;
+  cursor: pointer;
+}
+.portal-checklist-name {
+  font-size: var(--fs-subhead);
+  color: var(--text-1);
+}
+/* The role's own eyebrow, on the second row under the portal name: two roles share the Clinic Management
+   portal, and without it the list shows the same title twice with nothing to tell them apart. */
+.portal-checklist-eyebrow {
+  grid-column: 2;
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+
+/* ---- The role designer's permission picker --------------------------------------------------- */
+.scope-picker {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.scope-picker > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.scope-picker-list {
+  display: grid;
+  gap: var(--sp4);
+  max-height: var(--scroll-panel);
+  overflow: auto;
+  margin-top: var(--sp2);
+}
+.scope-picker-group { display: grid; gap: var(--sp1); }
+.scope-picker-domain {
+  margin: 0 0 var(--sp1);
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+}
+.scope-picker-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--sp2);
+  align-items: start;
+  padding: var(--sp1) 0;
+  min-height: 36px;
+  cursor: pointer;
+}
+/* A key the server refuses for a human principal. Dimmed AND the cursor says so — a disabled control that
+   looks merely quiet reads as a bug rather than as a rule. */
+.scope-picker-item:has(input:disabled) {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+.scope-picker-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+.scope-picker-desc {
+  grid-column: 2;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+
+/* ---- Sensitivity tier, as a radio row --------------------------------------------------------- */
+.tier-choice {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp2) var(--sp3);
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp4);
+}
+.tier-choice > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.tier-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 36px;
+  cursor: pointer;
+}
+
+/* ---- Change-my-password, inside the account drawer -------------------------------------------- */
+.upane-pwform {
+  display: grid;
+  gap: var(--sp3);
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.upane-pwform-help { margin: 0; font-size: var(--fs-caption); }
+.upane-pwform-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
 }

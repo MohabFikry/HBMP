@@ -51,6 +51,18 @@ export interface Column<Row> {
    * quantity you would COMPARE down the column.</p>
    */
   numeric?: boolean;
+  /**
+   * This column NAMES the row — render it as `<th scope="row">` rather than `<td>`.
+   *
+   * <p>For the one column that says which thing each row is: the person's name, the benefit category code,
+   * the item. A screen reader reading across a wide row announces the row header with every cell, so the
+   * listener hears "Nour Ali, plan, Standard" instead of six unattributed values; without it the only way to
+   * know whose plan is being read is to remember which row you arrowed into.</p>
+   *
+   * <p>At most one column should set it — two row headers name the row twice and the announcement gets
+   * longer rather than clearer.</p>
+   */
+  rowHeader?: boolean;
 }
 
 export type SortDir = "ascending" | "descending" | "none";
@@ -348,15 +360,21 @@ export function DataTable<Row>({
                     />
                   </td>
                 )}
-                {columns.map((c) => (
-                  <td
-                    key={c.key}
-                    role={interactive ? "gridcell" : undefined}
-                    className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
-                  >
-                    {c.cell(row)}
-                  </td>
-                ))}
+                {columns.map((c) => {
+                  // `rowHeader` swaps the element, not the styling: a row header is still a cell to look at
+                  // and only a different thing to LISTEN to.
+                  const Cell = c.rowHeader ? "th" : "td";
+                  return (
+                    <Cell
+                      key={c.key}
+                      scope={c.rowHeader ? "row" : undefined}
+                      role={interactive ? "gridcell" : undefined}
+                      className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
+                    >
+                      {c.cell(row)}
+                    </Cell>
+                  );
+                })}
               </tr>
             );
           })}

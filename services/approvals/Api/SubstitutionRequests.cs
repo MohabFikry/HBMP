@@ -131,7 +131,6 @@ public static class SubstitutionRequestEndpoints
                 requestedByUserId = auth.CreatedBy,
             }, ct);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -140,9 +139,11 @@ public static class SubstitutionRequestEndpoints
                 AfterState = $"{{\"authNo\":\"{auth.AuthNo}\",\"source\":\"OrderLine\",\"kind\":\"substitution\"}}",
                 Purpose = "substitution-request", Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-substitution"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-substitution"))
+        .Produces<AuthorizationStateView>();
     }
 }
 

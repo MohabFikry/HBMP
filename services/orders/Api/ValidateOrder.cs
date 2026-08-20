@@ -86,7 +86,8 @@ public static class ValidateOrderEndpoints
                     f.LineId, f.Kind.ToString(), f.State.ToString(), f.MessageEn, f.MessageAr,
                     f.RequiresAcknowledgement, f.IsBlocking, f.SourceName, f.Caveat)).ToList(),
                 byLine));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<IEnumerable<OrderFindingView>>();
     }
 }
 

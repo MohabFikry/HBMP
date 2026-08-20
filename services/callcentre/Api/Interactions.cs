@@ -48,7 +48,8 @@ public static class Interactions
             await deps.AuditAsync("call_interaction", i.InteractionId.ToString(), AuditAction.Create,
                 "CallInteractionOpened", i.CallRef, after: i.Status.ToString());
             return Results.Created($"/api/v1/call-interactions/{i.InteractionId}", InteractionView.From(i, false));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"))
+        .Produces<InteractionView>();
 
         // --- Record the agent's caller-identity attestation --------------------------------------------------
         //
@@ -98,7 +99,8 @@ public static class Interactions
                 "CallerIdentityAttested", i.CallRef, severity: AuditSeverity.Notice,
                 after: "method:OffSystem", fieldClasses: ["identity"]);
             return Results.Ok(VerificationView.From(v));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:verify"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:verify"))
+        .Produces<VerificationView>();
 
         // --- Update the call log (reason/outcome/summary) ---------------------------------------------------
         v1.MapPatch("/{id:guid}", async (Guid id, UpdateInteractionRequest req, CallDeps deps, CancellationToken ct) =>
@@ -126,7 +128,8 @@ public static class Interactions
             await deps.AuditAsync("call_interaction", id.ToString(), AuditAction.Update, "CallInteractionUpdated", i.CallRef);
             var verified = i.BeneficiaryId is { } b && await deps.Verification.IsVerifiedAsync(id, b, ct);
             return Results.Ok(InteractionView.From(i, verified));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"))
+        .Produces<InteractionView>();
 
         // --- Close the interaction (wrap-up; verification expires) ------------------------------------------
         v1.MapPost("/{id:guid}/close", async (Guid id, UpdateInteractionRequest? req, CallDeps deps, CancellationToken ct) =>
@@ -168,7 +171,8 @@ public static class Interactions
                 i.CallRef, after: i.Outcome?.ToString());
             // Once closed the verification gate returns false → member detail is no longer disclosable on this call.
             return Results.Ok(InteractionView.From(i, false));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"))
+        .Produces<InteractionView>();
 
         // --- Correct the summary (phase 20.3b) — an EDIT WITH HISTORY, never a silent overwrite -------------
         // Available after close, unlike the rest of the call log: the summary is the one field other roles rely
@@ -212,7 +216,8 @@ public static class Interactions
                 i.CallRef, severity: AuditSeverity.Notice, before: "(previous summary retained in history)",
                 after: "edited");
             return Results.Ok(InteractionView.From(i, false));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"))
+        .Produces<InteractionView>();
 
         // --- List interactions (agent sees own; supervisor sees the team) — cursor paged --------------------
         v1.MapGet("", async (CallDeps deps, CancellationToken ct,
@@ -252,7 +257,8 @@ public static class Interactions
             var next = rows.Count > take ? page[^1].InteractionId.ToString() : null;
             return Results.Ok(new InteractionListResponse(
                 page.Select(x => InteractionView.From(x, false)).ToList(), next));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"))
+        .Produces<IEnumerable<InteractionView>>();
     }
 
     /// <summary>Whether this principal may WRITE to this interaction: the agent who took the call, or a

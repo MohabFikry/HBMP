@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
+using Mersal.Authz;
 using Mersal.Document.Domain;
 using Mersal.Document.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -110,10 +111,25 @@ public static class OperationalDocumentEndpoints
 
         app.MapGet("/api/v1/operational-documents/{id:guid}/content", async (
             Guid id, DocumentDbContext db, IBlobStore blobs, IAuditClient audit,
-            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+            IAuthorizationEngine engine, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var principal = me.Principal;
             if (principal is null) return Results.Unauthorized();
+
+            // The upload above requires document:write; this required only a valid token. Every operational
+            // kind is PHI-bearing — the audit below calls each download an Export for that reason — so any
+            // authenticated caller in the tenant, of any role, could walk ids and stream lists of identified
+            // people. RLS bounded that to the tenant and nothing bounded it further. Through the engine, so
+            // the refusal is audited as an attempted PHI access rather than being a silent 403.
+            var resource = new ResourceRef
+            {
+                Type = DocumentPolicies.Resource, Id = id.ToString(), TenantId = principal.TenantId,
+            };
+            var decision = await engine.EvaluateAsync(
+                new AuthzRequest(principal, DocumentPolicies.OperationalRead, resource, "operational-document-read"), ct);
+            if (!decision.IsAllowed)
+                return GateResults.Forbidden("urn:hbmp:document-access-denied",
+                    detail: "You are not permitted to download operational documents.", reason: decision.ReasonCode);
 
             var doc = await db.OperationalDocuments.AsNoTracking()
                 .FirstOrDefaultAsync(d => d.DocumentId == id && !d.IsDeleted, ct);

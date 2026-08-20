@@ -65,7 +65,8 @@ public static class PlanEndpoints
             var rows = await db.BenefitCategories.AsNoTracking()
                 .OrderBy(c => c.Code).ToListAsync(ct);
             return Results.Ok(rows.Select(c => new BenefitCategoryView(c.BenefitCategoryId, c.Code, c.Name)));
-        });
+        })
+        .Produces<IEnumerable<BenefitCategoryView>>();
     }
 
     // ---- Payers ------------------------------------------------------------------------------------------
@@ -111,7 +112,8 @@ public static class PlanEndpoints
                 }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/payers/{payer.PayerId}", PayerView.From(payer));
-        });
+        })
+        .Produces<PayerView>();
 
         v1.MapGet("/payers", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -120,7 +122,8 @@ public static class PlanEndpoints
             var rows = await db.Payers.AsNoTracking().Where(p => !p.IsDeleted)
                 .OrderBy(p => p.PayerCode).ToListAsync(ct);
             return Results.Ok(rows.Select(PayerView.From));
-        });
+        })
+        .Produces<IEnumerable<PayerView>>();
 
         v1.MapGet("/payers/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -128,7 +131,8 @@ public static class PlanEndpoints
             if (denied is not null) return denied;
             var payer = await db.Payers.AsNoTracking().FirstOrDefaultAsync(p => p.PayerId == id && !p.IsDeleted, ct);
             return payer is null ? NotFound() : Results.Ok(PayerView.From(payer));
-        });
+        })
+        .Produces<PayerView>();
     }
 
     // ---- Plans -------------------------------------------------------------------------------------------
@@ -159,7 +163,8 @@ public static class PlanEndpoints
                 Action = AuditAction.Create, ActorUserId = gate.Subject,
             }, ct);
             return Results.Created($"/api/v1/plans/{plan.PlanId}", PlanView.From(plan));
-        });
+        })
+        .Produces<PlanView>();
 
         v1.MapGet("/plans", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -167,7 +172,8 @@ public static class PlanEndpoints
             if (denied is not null) return denied;
             var rows = await db.Plans.AsNoTracking().Where(p => !p.IsDeleted).OrderBy(p => p.PlanCode).ToListAsync(ct);
             return Results.Ok(rows.Select(PlanView.From));
-        });
+        })
+        .Produces<IEnumerable<PlanView>>();
 
         // Amend = clone the version in force into a new Draft. This is the ONLY way to change a live plan.
         v1.MapPost("/plans/{id:guid}/amend", async (Guid id, PolicyDbContext db, PolicyGate gate,
@@ -194,7 +200,7 @@ public static class PlanEndpoints
                 // The successor's window is open-ended and starts where the author later decides; seeding it at
                 // the predecessor's start would collide the moment it activates, so we seed "today" and let the
                 // author move it while it is still a draft.
-                EffectiveFrom = DateOnly.FromDateTime(now.UtcDateTime),
+                EffectiveFrom = BusinessCalendar.DateIn(now),
                 Status = PlanVersionStatus.Draft,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
                 Rules = [.. active.Rules.Select(r => CloneRule(r, now, gate.SubjectId))],
@@ -210,7 +216,8 @@ public static class PlanEndpoints
             }, ct);
             return Results.Created($"/api/v1/plan-versions/{draft.PlanVersionId}",
                 PlanVersionView.From(draft, await CategoryCodesAsync(db, ct)));
-        });
+        })
+        .Produces<PlanVersionView>();
     }
 
     /// <summary>The two lookups the shared pricing path calls on every quote, reachable by anyone entitled to
@@ -231,7 +238,8 @@ public static class PlanEndpoints
             return version is null
                 ? ProblemResults.Conflict("NO_VERSION_IN_FORCE", $"Plan {id} had no benefit configuration in force on {date:yyyy-MM-dd}.")
                 : Results.Ok(PlanVersionView.From(version, await CategoryCodesAsync(db, ct)));
-        });
+        })
+        .Produces<PlanVersionView>();
 
         v1.MapGet("/plan-versions/{id:guid}/cost-share", async (Guid id, string benefitCategoryCode,
             Guid networkTierId, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
@@ -267,7 +275,8 @@ public static class PlanEndpoints
                 rule.Deductible, rule.DeductibleWaived,
                 tier.CopayCountsTowardDeductible,
                 tier.ResolvesPreauth(rule), tier.ResolvesLimit(rule)));
-        });
+        })
+        .Produces<CostShareView>();
     }
 
     /// <summary>benefit-category id → code, for projecting a rule set the caller can write back (19.6).
@@ -306,7 +315,8 @@ public static class PlanEndpoints
                 Action = AuditAction.Create, ActorUserId = gate.Subject,
             }, ct);
             return Results.Created($"/api/v1/plan-versions/{version.PlanVersionId}", PlanVersionView.From(version));
-        });
+        })
+        .Produces<PlanVersionView>();
 
         v1.MapGet("/plan-versions/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -317,7 +327,8 @@ public static class PlanEndpoints
             return version is null
                 ? NotFound()
                 : Results.Ok(PlanVersionView.From(version, await CategoryCodesAsync(db, ct)));
-        });
+        })
+        .Produces<PlanVersionView>();
 
         v1.MapGet("/plans/{planId:guid}/versions", async (Guid planId, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -327,7 +338,8 @@ public static class PlanEndpoints
                 .Where(v => v.PlanId == planId).OrderByDescending(v => v.VersionNo).ToListAsync(ct);
             var codes = await CategoryCodesAsync(db, ct);
             return Results.Ok(rows.Select(v => PlanVersionView.From(v, codes)));
-        });
+        })
+        .Produces<IEnumerable<PlanVersionView>>();
 
         // Replace the draft's benefit configuration wholesale. A rule set is a unit — accepting partial edits
         // would let an author activate a version they only half-reviewed.
@@ -423,7 +435,8 @@ public static class PlanEndpoints
             var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstAsync(v => v.PlanVersionId == id, ct);
             return Results.Ok(PlanVersionView.From(saved, await CategoryCodesAsync(db, ct)));
-        });
+        })
+        .Produces<PlanVersionView>();
 
         // 19.1b — THE cost-share lookup approvals, eligibility and claims all resolve against, via the shared
         // libs/benefit-pricing path. It answers "what did this version agree for this category at this tier",

@@ -84,6 +84,11 @@ BEGIN
             ('pharmacist',     'b0000000-0000-4000-8000-000000000004'::uuid, 'Nile Pharmacy (PRV-0004)'),
             ('lab_tech',       'b0000000-0000-4000-8000-000000000005'::uuid, 'Cairo Central Laboratory (PRV-0005)'),
             ('imaging_tech',   'b0000000-0000-4000-8000-000000000006'::uuid, 'Nile Imaging Centre (PRV-0006)'),
+            -- The FIFTH one, added after `ProviderBindingCheck` kept naming it at every startup. It is the
+            -- case this file's own README predicted: "if the check names a role this file does not handle,
+            -- add it here rather than starting a second file". Same site as `imaging_tech` because it is the
+            -- same work — radiology and imaging are one bench, and both roles read `Imaging` capability.
+            ('radiology_tech', 'b0000000-0000-4000-8000-000000000006'::uuid, 'Nile Imaging Centre (PRV-0006)'),
             ('provider_admin', 'b0000000-0000-4000-8000-000000000001'::uuid, 'Nile Central Hospital (PRV-0001)')
         ) AS t(login, provider, label)
     LOOP
@@ -150,12 +155,17 @@ BEGIN
     ON CONFLICT (order_id) DO UPDATE
         SET status = 'Active', beneficiary_id = EXCLUDED.beneficiary_id, encounter_id = EXCLUDED.encounter_id;
 
+    -- `requested_quantity` is STATED, not defaulted. deferred/0018 made the column NOT NULL and deliberately
+    -- gave it no DEFAULT: it records what the doctor ASKED FOR, and a default would fabricate the one number
+    -- the column exists to preserve. This script predated that migration and had been failing on it ever
+    -- since — aborting the single transaction it all runs in, so the four provider bindings above rolled back
+    -- with it and the whole step silently did nothing. Nothing was amended here, so it equals quantity_ordered.
     INSERT INTO orders.order_line
-        (order_line_id, order_id, code_system, code, description, quantity_ordered, quantity_consumed,
-         status, examination_type_id, sensitivity_level, tenant_id)
+        (order_line_id, order_id, code_system, code, description, quantity_ordered, requested_quantity,
+         quantity_consumed, status, examination_type_id, sensitivity_level, tenant_id)
     VALUES
         ('0d900000-0000-4000-8000-000000000002', '0d900000-0000-4000-8000-000000000001',
-         'CPT', '71046', 'Chest X-Ray', 1, 0, 'Active',
+         'CPT', '71046', 'Chest X-Ray', 1, 1, 0, 'Active',
          '0190c100-0000-7000-8000-000000000003', 'Standard', '11111111-1111-1111-1111-111111111111')
     ON CONFLICT (order_line_id) DO UPDATE
         SET status = 'Active', quantity_consumed = 0;

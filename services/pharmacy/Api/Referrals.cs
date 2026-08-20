@@ -95,7 +95,6 @@ public static class ReferralEndpoints
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("ReferralRequested", "pharmacy.events",
                 new { tenantId = referral.TenantId, referralId = referral.ReferralId, referral.ReferralNo, referral.TargetSpecialty, beneficiaryId = referral.BeneficiaryId }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -103,9 +102,11 @@ public static class ReferralEndpoints
                 ActorUserId = actor, DecisionOutcome = "Requested",
                 AfterState = $"{{\"referralNo\":\"{referral.ReferralNo}\",\"specialty\":\"{referral.TargetSpecialty}\"}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/referrals/{referral.ReferralId}", ReferralResponse.From(referral));
-        }).RequireAuthorization(HbmpPolicies.Scope("referral:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("referral:write"))
+        .Produces<ReferralResponse>();
 
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
@@ -114,6 +115,7 @@ public static class ReferralEndpoints
             var denied = await gate.CheckAsync(PharmacyPolicies.ReferralCreate, "referral", id.ToString(), r.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(ReferralResponse.From(r));
-        });
+        })
+        .Produces<ReferralResponse>();
     }
 }

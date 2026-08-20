@@ -88,7 +88,8 @@ public static class UsersEndpoints
 
             var rows = await svc.ReadAccessMatrixAsync(AdminContracts.Actor(p), t, ct);
             return Results.Ok(rows.Select(BindingView.Of));
-        });
+        })
+        .Produces<IEnumerable<BindingView>>();
 
         // The effective roles a subject currently holds (empty ⇒ de-provisioned / no active grant). This is the
         // seam the auth layer / other portals consult so a de-provision denies access everywhere immediately.
@@ -102,8 +103,9 @@ public static class UsersEndpoints
             var t = scope.Tenant!;
 
             var roles = await svc.EffectiveRolesAsync(t, subject, ct);
-            return Results.Ok(new { subject, tenant = t, roles });
-        });
+            return Results.Ok(new EffectiveRolesView(subject, t, [.. roles]));
+        })
+        .Produces<EffectiveRolesView>();
 
         // The full expanded SoD conflict matrix (10-role-matrix §7) for the admin UI — a static reference read.
         g.MapGet("/sod-matrix", async (AdminGate gate, CancellationToken ct) =>
@@ -111,7 +113,8 @@ public static class UsersEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
             if (denied is not null) return denied;
             return Results.Ok(SegregationOfDuties.ConflictRules
-                .Select(r => new { r.TokenA, r.TokenB, r.Reason }));
-        });
+                .Select(r => new SodConflictView(r.TokenA, r.TokenB, r.Reason)));
+        })
+        .Produces<IEnumerable<SodConflictView>>();
     }
 }

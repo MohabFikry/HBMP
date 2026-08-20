@@ -120,3 +120,11 @@ unchanged since cards inside a tab still use them.
   decision left to make).
 - Whether `.mrs-tabs--pill`'s 44px min-height target needs any adjustment for the 7-tab bar to fit at 360px
   reflow — an implementation-time check against the accessibility DoD (0B, WCAG 2.5.8), not a design fork.
+
+  **Resolved.** Measured in Chromium with the real webfonts: the bar wraps below 688px (EN) / 780px (AR), and
+  at 360px it is three rows and 156px tall. The 44px target is fine; the two things that were not are that
+  `--r-pill` drew the wrapped track as a lozenge, and that a 156px sticky bar overshot the
+  `scroll-margin-block-start` compensating for it, reopening WCAG 2.4.11 and taking 24% of a 360x640
+  viewport. The track radius is now `--r-lg` (`--r-pill` restored above 60rem, where the row count is known),
+  and sticky is confined to that same query. Guarded by `apps/web/test/profile-tab-bar-wrap.test.ts` — a
+  static stylesheet check, because jsdom has no layout and the full suite passed over both defects.

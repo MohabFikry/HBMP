@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -20,6 +20,7 @@ import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { BulkTemplateActions } from "./BulkTemplateActions";
+import { BulkErrorReportButton } from "./BulkErrorReport";
 
 /**
  * Phase 19.6 — the operator's side of the 19.5b bulk engine.
@@ -80,6 +81,14 @@ const S = {
   errorFile: {
     en: "The error report contains member data and is downloaded through an authorized, audited request.",
     ar: "يحتوي تقرير الأخطاء على بيانات أعضاء ويُنزَّل عبر طلب مصرّح به ومُدقَّق.",
+  },
+  changesTruncated: {
+    en: "Showing the first {shown} of {total} changes.",
+    ar: "يتم عرض أول {shown} من أصل {total} تغيير.",
+  },
+  errorsTruncated: {
+    en: "Showing the first {shown} of {total} errors. Fixing only these will not make the file pass.",
+    ar: "يتم عرض أول {shown} من أصل {total} خطأ. إصلاح هذه وحدها لن يجعل الملف يمرّ.",
   },
   infected: {
     en: "This file failed the malware scan and was never parsed.",
@@ -222,7 +231,18 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
     }
   }
 
-  const errors = commit?.errors ?? validation?.errors ?? [];
+  /*
+    The report the errors below came from, held whole rather than reaching for `.errors` twice.
+
+    The server caps the INLINE error list at 50 (BulkJobEngine.InlineErrorLimit) and returns the real count
+    beside it, because the full list names people and belongs in the stored, access-controlled report instead.
+    That cap is right. Rendering the 50 and dropping `totalErrors` was not: a 3,000-error file showed fifty rows
+    with nothing after them, which reads as "these are the errors" — and fixing those fifty and re-uploading
+    fails again for the other 2,950.
+  */
+  const report = commit ?? validation ?? null;
+  const errors = report?.errors ?? [];
+  const totalErrors = report?.totalErrors ?? 0;
 
   return (
     <div className="pol-screen">
@@ -233,16 +253,20 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
         {/* QA P1-10: this card was raw browser controls crammed into one unspaced row while every other
             screen wears the design system — the controls now use the shared field classes and breathe. */}
-        <div className="mrs-field" style={{ maxWidth: 360 }}>
-          <label className="mrs-label" htmlFor="bulk-type">{t(S.jobType)}</label>
-          <select className="mrs-control" id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
-            {JOB_TYPES.map((x) => (
-              <option key={x} value={x}>
-                {JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ComboboxField
+          id="bulk-type"
+          label={t(S.jobType)}
+          style={{ maxWidth: 360 }}
+          value={jobType}
+          onChange={(v) => { setJobType(v); reset(); }}
+          options={JOB_TYPES.map((x) => ({
+            value: x,
+            label: JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x,
+            // The engine's job type is the value and is sent verbatim; it is also what an operator who knows
+            // the API will type, so it is searchable without being shown as the answer.
+            keywords: x,
+          }))}
+        />
 
         {/* Hint stays inline; the column TABLE lives in the modal behind the paired trigger (0B §11). */}
         <InlineAlert tone="info">{t(S.templateHint)}</InlineAlert>
@@ -265,7 +289,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
         </div>
         <div>
           <Button variant="primary"
-              leadingIcon={<Icon name="download" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
+              leadingIcon={<Icon name="upload" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
             {t(S.upload)}
           </Button>
         </div>
@@ -282,14 +306,21 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
               {job.failureCode === "FILE_INFECTED" ? t(S.infected) : job.failureDetail}
             </InlineAlert>
           )}
-          <dl className="pol-kpis">
-            <div><dt>{t(S.submitted)}</dt><dd>{fmt.number(job.totalRows)}</dd></div>
-            <div><dt>{t(S.valid)}</dt><dd>{fmt.number(job.validRows)}</dd></div>
-            <div><dt>{t(S.invalid)}</dt><dd>{fmt.number(job.invalidRows)}</dd></div>
-            <div><dt>{t(S.applied)}</dt><dd>{fmt.number(job.appliedRows)}</dd></div>
-            <div><dt>{t(S.failed)}</dt><dd>{fmt.number(job.failedRows)}</dd></div>
-            <div><dt>{t(S.skipped)}</dt><dd>{fmt.number(job.skippedRows)}</dd></div>
-          </dl>
+          {/* `KpiList`, not the `pol-kpis` definition list this used to be — the same migration the two
+              utilization panels made. Six row counts are exactly what the KPI treatment is for, and on the
+              screen an operator watches to decide whether to commit a file, "how many rows failed" should not
+              be set smaller than the body copy beside it. Same definition-list semantics, same classes as
+              `KpiCard`. */}
+          <KpiList
+            items={[
+              { label: t(S.submitted), value: fmt.number(job.totalRows) },
+              { label: t(S.valid), value: fmt.number(job.validRows) },
+              { label: t(S.invalid), value: fmt.number(job.invalidRows) },
+              { label: t(S.applied), value: fmt.number(job.appliedRows) },
+              { label: t(S.failed), value: fmt.number(job.failedRows) },
+              { label: t(S.skipped), value: fmt.number(job.skippedRows) },
+            ]}
+          />
 
           <div className="pol-editor-actions">
             <Button variant="secondary" onClick={doValidate} disabled={busy || job.status === "Failed"}>
@@ -312,29 +343,51 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           {commit && commit.job.failedRows > 0 && <InlineAlert tone="warn">{t(S.partial)}</InlineAlert>}
 
           {errors.length > 0 && (
-            <DataTable
-              caption={t(S.detail)}
-              rows={errors}
-              rowKey={(r) => String(r.rowNumber)}
-              density="compact"
-              columns={[
-                { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
-                { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} /> },
-                { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
-              ]}
-            />
+            <>
+              {/* Above the table, not below it: the count changes what the operator does with the rows they can
+                  see, so it has to be read before them. The error-report note comes along when a report was
+                  actually written — the reconciliation panel says the same thing, but only after a commit, and
+                  this is the moment the whole list is wanted. */}
+              {totalErrors > errors.length && (
+                <InlineAlert tone="warn">
+                  {t(S.errorsTruncated)
+                    .replace("{shown}", fmt.number(errors.length))
+                    .replace("{total}", fmt.number(totalErrors))}
+                  {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
+                </InlineAlert>
+              )}
+              <BulkErrorReportButton documentId={report?.job.errorDocumentId} jobId={report?.job.jobId ?? ""} />
+              <DataTable
+                caption={t(S.detail)}
+                rows={errors}
+                rowKey={(r) => String(r.rowNumber)}
+                density="compact"
+                columns={[
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
+                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} />, sortable: true, sortValue: (r) => r.code },
+                  { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
+                ]}
+              />
+            </>
           )}
 
           {validation && validation.wouldChange.length > 0 && !commit && (
             <>
               <h4>{t(S.wouldChange)}</h4>
+              {validation.totalWouldChange > validation.wouldChange.length && (
+                <InlineAlert tone="info">
+                  {t(S.changesTruncated)
+                    .replace("{shown}", fmt.number(validation.wouldChange.length))
+                    .replace("{total}", fmt.number(validation.totalWouldChange))}
+                </InlineAlert>
+              )}
               <DataTable
                 caption={t(S.wouldChange)}
                 rows={validation.wouldChange}
                 rowKey={(r) => String(r.rowNumber)}
                 density="compact"
                 columns={[
-                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
                   { key: "summary", header: t(S.detail), cell: (r) => (lang === "ar" ? r.summaryAr : r.summaryEn) },
                 ]}
               />
@@ -360,7 +413,12 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
                   </tbody>
                 </table>
               </div>
-              {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
+              {recon.errorDocumentId && (
+                <>
+                  <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>
+                  <BulkErrorReportButton documentId={recon.errorDocumentId} jobId={recon.jobId} />
+                </>
+              )}
             </div>
           )}
         </Card>

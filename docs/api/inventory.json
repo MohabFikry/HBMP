@@ -40,7 +40,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemView"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -60,7 +70,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemView"
+                }
+              }
+            }
           }
         }
       }
@@ -286,6 +303,53 @@
           },
           "coldChain": {
             "type": "boolean",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ItemView": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "unitOfMeasure": {
+            "type": "string",
+            "nullable": true
+          },
+          "isBatchTracked": {
+            "type": "boolean"
+          },
+          "requiresExpiry": {
+            "type": "boolean"
+          },
+          "storageCondition": {
+            "type": "string",
+            "nullable": true
+          },
+          "coldChain": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
             "nullable": true
           }
         },

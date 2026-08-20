@@ -45,6 +45,14 @@ builder.Services.Configure<FulfilmentConsumerOptions>(builder.Configuration.GetS
 builder.Services.AddScoped<FulfilmentIssuer>();
 builder.Services.AddHostedService<FulfilmentConsumer>();
 
+// THE FORWARD LEG OF THE PRIOR-AUTHORIZATION SAGA (23 §2, §3). `POST /api/v1/authorizations` was written in
+// phase 7 for "the OrderPendingApproval|RxSubmitted event consumer" and no such consumer existed, so a gated
+// order or prescription changed status, told the patient to wait, and reached no reviewer. Its own queue
+// again, for the same point-to-point reason as the fulfilment one.
+builder.Services.Configure<RoutingConsumerOptions>(builder.Configuration.GetSection(RoutingConsumerOptions.SectionName));
+builder.Services.AddScoped<RoutedAuthorizationIngestor>();
+builder.Services.AddHostedService<RoutingConsumer>();
+
 // The clinical review view assembles a field-scoped projection from emr-service under the caller's purpose (PUR),
 // fail-closed. document-service supplies supporting reports; both are reached with the caller's bearer token.
 builder.Services.AddHttpClient<IClinicalContextProvider, HttpClinicalContextClient>(c =>

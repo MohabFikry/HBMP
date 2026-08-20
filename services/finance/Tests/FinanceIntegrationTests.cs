@@ -77,7 +77,51 @@ public class FinanceIntegrationTests
             line.DeliveredQty.Should().Be(3);              // 2 + 1
             line.AgreedUnitPrice.Should().Be(350.00m);     // from the contract book, not the 300 observed cost
             line.LineTotal.Should().Be(1050.00m);
+            line.PriceSource.Should().Be(SettlementPriceSource.Contract);
             s.Total.Should().Be(1050.00m);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    /// <summary>
+    /// 2026-08-09 audit §2.3 — a code the contract does not price settles at the observed FLOOR, and says so.
+    ///
+    /// <para>It used to settle at the observed AVERAGE. The three deliveries below are the shape that makes
+    /// that wrong: two at the ordinary 100, and one small one mispriced at 400. The average is 200 — double
+    /// the real rate — and it is applied to every unit in the period, so one bad row at 400 turns a 500
+    /// settlement into a 1,000 one with nothing on the line saying a tariff was never involved.</para>
+    ///
+    /// <para>The floor can only under-state, which is the direction chosen deliberately: a provider queries
+    /// an underpayment and nobody queries an overpayment. The settlement is a Draft either way — what the
+    /// reviewer needs is to be able to SEE which lines have no tariff behind them, which is what
+    /// <c>PriceSource</c> is for.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unpriced_code_settles_at_the_observed_floor_and_is_marked_as_such()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
+        var provider = Guid.NewGuid();
+        var day = new DateTimeOffset(2026, 7, 10, 10, 0, 0, TimeSpan.Zero);
+        try
+        {
+            await using var db = new FinanceDbContext(Options());
+            var proj = new FinanceEventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            foreach (var unit in new[] { "100", "100", "400" })
+                await proj.ProjectAsync(Ev("OrderLineConsumed", tenant, day,
+                    ("serviceCode", "99999"), ("serviceLine", "Other"), ("deliveredQty", "1"),
+                    ("providerId", provider.ToString()), ("unitCost", unit)));
+
+            // A price book that knows every code EXCEPT this one.
+            var prices = new FakePrices(new Dictionary<string, decimal> { ["70450"] = 350.00m });
+            var gen = new SettlementGenerator(db, prices, new SettlementNoIssuer(db), TimeProvider.System);
+            var s = await gen.GenerateAsync(tenant, provider, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), "fin-1", null);
+
+            var line = s.Lines.Should().ContainSingle().Subject;
+            line.AgreedUnitPrice.Should().Be(100.00m, "the floor — the average would be 200 and the 400 is the outlier");
+            line.DeliveredQty.Should().Be(3);
+            line.LineTotal.Should().Be(300.00m);
+            line.PriceSource.Should().Be(SettlementPriceSource.ObservedFloor);
         }
         finally { await Cleanup(tenant); }
     }

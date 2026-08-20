@@ -1,8 +1,8 @@
 import { useId } from "react";
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import type { CSSProperties, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 import { Icon } from "./Icon";
-import { Select } from "./Select";
-import type { SelectOption } from "./Select";
+import { Combobox } from "./Combobox";
+import type { ComboboxOption } from "./Combobox";
 import { cx } from "../lib/cx";
 
 interface FieldBase {
@@ -11,6 +11,15 @@ interface FieldBase {
   /** Error message — rendered with icon+text+red border (never color alone). */
   error?: string;
   className?: string;
+  /**
+   * Inline style for the field wrapper — in practice a width constraint.
+   *
+   * <p>Here because screens were hand-building `<div className="mrs-field" style={{ maxWidth: 320 }}>` around
+   * a bare control to get one, and a wrapper written by hand is a wrapper half of them get wrong: the QA
+   * notes on the policy screens record a label running into a zero-width control for exactly this reason.
+   * The field owns its own box now, so the width goes on the field.</p>
+   */
+  style?: CSSProperties;
   /** Marks the label with a required indicator. The native `required` attribute (which also sets
    *  aria-required) still passes through to the control — this is only the VISIBLE half, so sighted users
    *  learn a field is mandatory before failing it, not after (QA P2-12). */
@@ -42,19 +51,17 @@ function Labelled({
   error,
   base,
   className,
+  style,
   requiredMark,
   hideLabel,
-  /** False when the control is not a labellable element — a <button>-based combobox names itself with
-   *  `aria-labelledby` pointing at this label, and an inert `for` on a button is worse than none. */
-  labellable = true,
   children,
-}: FieldBase & { base: string; labellable?: boolean; children: ReactNode }) {
+}: FieldBase & { base: string; children: ReactNode }) {
   return (
-    <div className={cx("mrs-field", className)}>
+    <div className={cx("mrs-field", className)} style={style}>
       <label
         className={cx("mrs-label", hideLabel && "sr-only")}
         id={`${base}-label`}
-        htmlFor={labellable ? base : undefined}
+        htmlFor={base}
       >
         {label}
         {requiredMark && (
@@ -78,7 +85,7 @@ function Labelled({
 }
 
 /** Text input with always-visible label, helper/error tied via aria-describedby, aria-invalid on error. */
-export function InputField({ label, help, error, className, id, hideLabel, ...rest }: InputFieldProps) {
+export function InputField({ label, help, error, className, style, id, hideLabel, ...rest }: InputFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
@@ -86,7 +93,7 @@ export function InputField({ label, help, error, className, id, hideLabel, ...re
     // an InputField it fell into `...rest` and landed on the DOM node as an unknown attribute. A prop the
     // shared base documents has to work on every field that inherits it, or the contract is a suggestion.
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={rest.required} hideLabel={hideLabel}
     >
       <input
@@ -100,8 +107,8 @@ export function InputField({ label, help, error, className, id, hideLabel, ...re
   );
 }
 
-export interface SelectFieldProps extends FieldBase {
-  options: SelectOption[];
+export interface ComboboxFieldProps extends FieldBase {
+  options: ComboboxOption[];
   /** The chosen value, or null for "nothing chosen" — which renders `placeholder`. */
   value: string | null;
   onChange: (value: string) => void;
@@ -109,53 +116,78 @@ export interface SelectFieldProps extends FieldBase {
   disabled?: boolean;
   id?: string;
   required?: boolean;
+  /** An icon belonging to the control. See `ComboboxProps.leadingIcon`. */
+  leadingIcon?: ReactNode;
+  /** Pill silhouette for filter bars; default is the field radius. See `ComboboxProps.shape`. */
+  shape?: "pill" | "field";
+  /** Carry the selected option's hint into the closed control. See `ComboboxProps.hintWhenClosed`. */
+  hintWhenClosed?: boolean;
 }
 
 /**
- * A labelled <see cref="Select"/> — the same field contract as InputField, over the design system's own
- * listbox rather than a native &lt;select&gt;.
+ * A labelled <see cref="Combobox"/> — the searchable picker, with the same field anatomy as InputField.
  *
  * ============================================================================================================
- * WHY THIS EXISTS
+ * WHY THIS EXISTS, AND WHY ITS ABSENCE WAS THE REAL FINDING
  * ============================================================================================================
- * Screens were pairing a bare `<label>` with a bare `<select>`, and the result was a control that ignored
- * every field token in the system: the OS drew it, so it sat at a different height from the inputs beside it,
- * kept square corners against the app's radius, and opened a system-blue option list. Next to a Mersal text
- * field it does not read as unstyled — it reads as unfinished. `Select` already solved that; what was missing
- * was the labelled wrapper, so each screen wrote its own and half of them forgot the class.
+ * The scrolls/dropdowns audit counted 56 pickers in the SPA and found 11 searchable. The interesting part was
+ * not the ratio but the distribution: `SelectField` — the NON-searchable control — was used 19 times, more
+ * than any other picker in the product, while `Combobox` was used 11.
+ *
+ * That is not 19 considered decisions. This file exported `InputField`, `SelectField` and `TextareaField`, so
+ * a developer who wanted a picker with a label attached had exactly one thing to reach for, and it was the
+ * one that cannot be typed into. The path of least resistance led away from the control the product should
+ * have been using, and every screen that took it was behaving reasonably.
+ *
+ * So this is the change that makes the standard stick, rather than the 30 call-site edits that follow it. A
+ * house rule that requires assembling `<label>` + `<Combobox>` by hand is a rule the next screen will forget;
+ * one that is the shortest thing to type is a rule nobody has to remember.
+ *
+ * `SelectField` — the select-only version this replaced — has been deleted rather than left beside it. It had
+ * no call sites once the conversion finished, and the tables/buttons audit already wrote down what an unused
+ * control costs: the first screen to reach for it invents its meaning and the second invents a different one.
+ * Its two shortcomings are worth recording because they are why this is a better default and not merely a
+ * different one: its trigger was a `<button>`, which HTML does not let a `<label for>` name, so clicking the
+ * label did nothing; and `Select` accepted no `aria-describedby`, so a helper line under it was on screen and
+ * absent from the accessible description.
  */
-export function SelectField({
-  label, help, error, className, id, options, value, onChange, placeholder, disabled, required, hideLabel,
-}: SelectFieldProps) {
+export function ComboboxField({
+  label, help, error, className, style, id, options, value, onChange, placeholder, disabled, required,
+  hideLabel, leadingIcon, shape, hintWhenClosed,
+}: ComboboxFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
-      requiredMark={required} labellable={false} hideLabel={hideLabel}
+      label={label} help={help} error={error} base={base} className={className} style={style}
+      requiredMark={required} hideLabel={hideLabel}
     >
-      {/* The trigger is a <button>, which HTML does not let a <label for> name — so the label carries an id
-          and the combobox points at it. Same visible pairing, and a screen reader announces the field name. */}
-      <Select
+      <Combobox
         id={base}
         options={options}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
         disabled={disabled}
-        aria-labelledby={`${base}-label`}
+        invalid={Boolean(error)}
+        aria-describedby={describedBy(base, help, error)}
+        leadingIcon={leadingIcon}
+        shape={shape}
+        hintWhenClosed={hintWhenClosed}
+        // The label already names the input through `for`/`id`. A second name via `aria-labelledby` would
+        // override it with the same text, which is noise in the a11y tree rather than belt and braces.
       />
     </Labelled>
   );
 }
 
 /** Multiline field — same a11y contract as InputField. */
-export function TextareaField({ label, help, error, className, id, hideLabel, ...rest }: TextareaFieldProps) {
+export function TextareaField({ label, help, error, className, style, id, hideLabel, ...rest }: TextareaFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={rest.required} hideLabel={hideLabel}
     >
       <textarea

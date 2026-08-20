@@ -31,4 +31,31 @@ public sealed class ApplicationRole : IdentityRole<Guid>
     /// substituted for one another (docs/CONVENTIONS.md).
     /// </summary>
     public int? Level { get; set; }
+
+    /// <summary>
+    /// 28.9 — the tenant that AUTHORED this role, or null for the built-in catalog.
+    ///
+    /// <para>
+    /// Custom roles let an organisation express a job the twenty-one built-ins do not name — "triage lead",
+    /// "pharmacy supervisor" — without the platform inventing a role for every tenant, and without pushing
+    /// administrators towards the alternative: handing somebody the nearest bigger role and hoping.
+    /// </para>
+    ///
+    /// <para>
+    /// The NAME stays globally unique, because ASP.NET Identity's RoleStore requires it and because the
+    /// token's <c>roles</c> claim is a flat vocabulary with no tenant qualifier. So this column does not buy
+    /// per-tenant namespacing; it records OWNERSHIP, which is what the admin surface needs in order to
+    /// refuse one tenant editing another's role, and to tell an administrator which roles are theirs to
+    /// change. A name already taken by another tenant comes back 409 rather than silently shared.
+    /// </para>
+    ///
+    /// <para>
+    /// A custom role grants PERMISSIONS, never a PORTAL. The SPA derives portals from the built-in role→
+    /// portal map, so a custom role adds keys to whatever workspace its holder already has; somebody holding
+    /// only custom roles has no portal and lands on the fail-closed "no portal assigned" page. That is the
+    /// intended shape — a workspace is a designed thing with screens in it, not something a scope list can
+    /// conjure.
+    /// </para>
+    /// </summary>
+    public string? OwnerTenantId { get; set; }
 }

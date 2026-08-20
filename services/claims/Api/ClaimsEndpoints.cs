@@ -34,7 +34,8 @@ public static class ClaimsEndpoints
             var rows = await deps.Queries.ListAsync(deps.Tenant, effectiveProvider, beneficiaryId, st, take ?? 50, ct);
             await AuditRead(deps, "claim_list", $"count={rows.Count}");
             return Results.Ok(rows.Select(ClaimView.From).ToList());
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<IEnumerable<ClaimView>>();
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
@@ -55,7 +56,8 @@ public static class ClaimsEndpoints
                     detail: "You are not permitted to read this claim.");
             await AuditRead(deps, "claim", claim.ClaimNo);
             return Results.Ok(ClaimView.From(claim));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<ClaimView>();
 
         // --- Pre-adjudication (10b.3) ----------------------------------------------------------------------
         v1.MapPost("/{id:guid}/adjudicate", async (Guid id, HttpRequest http, ClaimsDeps deps,

@@ -1,12 +1,16 @@
-# tools/ci — backend CI helpers (Phase 16.8, finding H7)
+# tools/ci — CI gates and helpers (Phase 16.8, finding H7)
 
-Used by `.github/workflows/backend-ci.yml`; each is runnable locally against a scratch DB.
+Used by `.github/workflows/backend-ci.yml` and, for the frontend gate noted below, `frontend-ci.yml`. Each is
+runnable locally against a scratch DB or workspace.
 
 | Script | What it does |
 |--------|--------------|
 | `apply-migrations.sh` | Provisions the `hbmp_app` NOBYPASSRLS role, then applies every service's hand-authored `services/*/Infrastructure/Migrations/*.sql` (filename order) to the target Postgres. Idempotent where the migrations are. |
 | `print-test-db-env.sh` | Emits the `*_TEST_DB` / `*_TEST_DB_OWNER` / `*_TEST_DB_APP` / `EVENTS_TEST_DB` `KEY=VALUE` lines that make the env-gated integration + RLS suites **run** instead of skip. Redirect into `$GITHUB_ENV`. |
 | `coverage-gate.sh` | Aggregates `**/coverage.cobertura.xml` and enforces a domain-coverage floor (`COVERAGE_MIN_DOMAIN`, default 55%; target is 80% — ratchet up). Overall coverage is printed, not gated. |
+| `check-service-inventory.py` | Compares the service inventory in `CLAUDE.md`'s repository layout, `docs/HANDOFF.md`'s count and `HBMP-Design/16-service-architecture.md`'s catalog against `services/` on disk — in both directions, plus every stated count. `--selftest` covers missing, phantom, stale-count and unparseable-layout cases. |
+| `check-live-bundle-clean.py` | Builds `apps/web` twice (`VITE_LIVE=1` and `0`) and reads the emitted JavaScript: no fixture marker may survive into the live bundle, the live bundle must still be a complete application, and every marker must still be present in the fixture one. Runs in **frontend-ci**, not here. `--selftest` covers the leak, empty-bundle and stale-marker cases. |
+| `check-design-guards.py` | Names the eight static guards that hold the table and button standards the 2026-08-10 audit set (`docs/AUDIT-2026-08-10-TABLES-AND-BUTTONS.md`) and fails if one has been deleted, then runs them. They already run inside the web and design-system suites, so a VIOLATION is loud — this is for the case that is not: removing a guard leaves the suite green with one fewer file. Runs in **frontend-ci**, not here. `--list` prints the manifest and the standard each holds; `--selftest` proves a missing guard is caught. |
 | `generate-openapi.sh` | Generates every service's OpenAPI/Swagger doc via the Swashbuckle CLI and fails if any spec can't be produced (catches broken Swagger config / duplicate routes). Most services connect lazily (dummy conn strings suffice); a caller-set `ConnectionStrings__<Key>` is kept for the few that migrate at startup (audit). Needs the solution built + `dotnet tool restore`. Pass `DOTNET=./dotnet.sh` to run locally. |
 
 ## Run the DB suite locally against a scratch DB

@@ -108,7 +108,12 @@ public sealed class Appointment
 
 /// <summary>A recurring availability rule for a provider+location(+doctor): every <see cref="SlotMinutes"/>
 /// between <see cref="StartTime"/> and <see cref="EndTime"/> on <see cref="DayOfWeek"/> is bookable.
-/// Materialized into concrete <see cref="AppointmentSlot"/>s (23 §6 "recurring availability → slots").</summary>
+/// Materialized into concrete <see cref="AppointmentSlot"/>s (23 §6 "recurring availability → slots").
+///
+/// <para>Since 0025 this is an ADMINISTERED record rather than a by-product of slot materialization: it has
+/// one row per practitioner per clinic per weekday (partial unique index), it can be corrected and retired,
+/// and every change is captured by the history trigger. Before that, materializing the same Tuesday twice
+/// left two live rules and slot generation honoured both.</para></summary>
 public sealed class ProviderAvailability
 {
     public Guid AvailabilityId { get; set; }
@@ -121,6 +126,26 @@ public sealed class ProviderAvailability
     public TimeOnly StartTime { get; set; }
     public TimeOnly EndTime { get; set; }
     public int SlotMinutes { get; set; }
+
+    /// <summary>
+    /// The most appointments this practitioner will take at this clinic on this weekday. NULL = uncapped,
+    /// which is what every rule predating 0025 is.
+    ///
+    /// <para>Distinct from the window length, and that is the point: a six-hour day at fifteen minutes offers
+    /// twenty-four slots, and a clinician who can safely see twenty says twenty. Enforced twice — generation
+    /// stops emitting slots past the cap so the calendar never offers what booking will refuse, and booking
+    /// re-checks the live count so an ad-hoc clinic or a slotless booking path cannot walk past it.</para>
+    /// </summary>
+    public int? MaxPerDay { get; set; }
+
+    public bool IsDeleted { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string? UpdatedBy { get; set; }
+    /// <summary>The actor's display name, denormalized at write time (0022's precedent). A history row that
+    /// resolves names at read time says "unknown" for everyone who has since left.</summary>
+    public string? UpdatedByName { get; set; }
 }
 
 /// <summary>A concrete bookable slot. Holds at most one active appointment — enforced by a partial UNIQUE

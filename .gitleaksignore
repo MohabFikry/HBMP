@@ -1,0 +1,47 @@
+# gitleaks — triaged historical findings (NFR-034).
+#
+# WHAT THIS FILE IS. gitleaks scans all 482 commits, not the working tree, so a credential that was committed
+# and later removed keeps failing the build forever. The nine fingerprints below are the dev-tier credentials
+# that the 18.B1 R2 purge took OUT of the tree; the code is clean at HEAD and a fresh checkout contains none
+# of them. Each line is one finding, triaged individually.
+#
+# WHY NOT REWRITE HISTORY. Purging these with filter-repo rewrites every SHA on a shared remote and breaks
+# every open branch, checkout and PR link, to remove dev-only values from a PRIVATE repository. That trade is
+# not worth it here. It WOULD be worth it for a production credential or anything reachable from outside a
+# developer's machine — if that ever lands, rewrite the history, do not add a line to this file.
+#
+# WHAT THIS FILE IS NOT. It is not a way to make a finding go away. A fingerprint pins one secret in one
+# commit at one line: a new leak, the same secret in a new commit, or the same commit at a different line all
+# still fail. Adding an entry means "I looked at this and it is historical", so do that before adding one.
+#
+# STILL OUTSTANDING, and not fixable by any file in this repo: these are the dev Compose passwords, and
+# infra/compose/.env still uses the same values today. History exposure plus a still-current value means the
+# real remediation is rotating them in the dev environment — see docs/AUDIT-2026-08-09-PLATFORM-WIDE.md §5a.
+# Severity is low (private repo, local-only services, no production reach), which is why this is recorded
+# rather than treated as an incident.
+
+# The MinIO access key for the PHI blob bucket, in tracked appsettings. Removed at 18.B1; both services now
+# take it from the environment and fail fast when it is absent.
+0d320a632ffae3802d28830f1947e561658df7c3:services/audit/Api/appsettings.json:mersal-config-credential-value:15
+5190b94927e9c995dce57489d429a1cbfe7be096:services/document/Api/appsettings.json:mersal-config-credential-value:7
+87a53e82f753c954fffb56e5052104d926af636d:services/document/Api/appsettings.json:mersal-config-credential-value:21
+
+# Dev Keycloak / app-role password literals (the Dev_*_20YY shape) in a provisioning script and in two
+# documents that quoted it. Keycloak itself was replaced by identity-service in Phase 17 (ADR-0015).
+ced86b4d997227c7700a112822f87dc9ffdb9026:infra/keycloak/provision-identity.sh:mersal-prose-password:16
+ced86b4d997227c7700a112822f87dc9ffdb9026:docs/AUDIT-2026-07-26.md:mersal-prose-password:38
+2a299c64e64ac005ea698a52355c9767cf1961b9:docs/HANDOFF.md:mersal-prose-password:95
+
+# Self-inflicted, and left here rather than rewritten. The commit that documented the drug-catalogue false
+# positives QUOTED one of them in full, which reintroduced the same entropy hit in a new file — the audit
+# note describing the finding became the finding. The prose no longer contains the string, but the commit
+# that did is already pushed, and rewriting published history to delete a hair-mask ingredient list is a
+# worse trade than one honest line here. It is exactly the "write about a secret and you have written a
+# secret" trap the reference-data allowlist exists for, one directory over.
+48dfc71ec2946c4ae9fab8f6637a90521d7868ee:docs/AUDIT-2026-08-09-PLATFORM-WIDE.md:generic-api-key:247
+
+# A baked `${POSTGRES_PASSWORD:-<default>}` fallback in the DR rehearsal script. The current script has no
+# default at all: it uses `: "${POSTGRES_PASSWORD:?...}"` and fails fast when the variable is unset.
+4f6eda6f59b1fbeed499ee94104f995aceacc94b:infra/dr/restore-rehearsal.sh:mersal-uri-embedded-credential:14
+4f6eda6f59b1fbeed499ee94104f995aceacc94b:infra/dr/restore-rehearsal.sh:mersal-uri-embedded-credential:16
+4f6eda6f59b1fbeed499ee94104f995aceacc94b:infra/dr/restore-rehearsal.sh:mersal-uri-embedded-credential:17

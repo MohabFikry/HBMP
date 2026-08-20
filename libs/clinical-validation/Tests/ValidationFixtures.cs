@@ -186,10 +186,15 @@ internal static class Fx
     /// for this drug", which the quantity check must report as NotChecked. That is a different fact from an
     /// unreachable catalogue, so the empty case deliberately does not use <c>NotAvailable</c>.
     /// </remarks>
+    /// <remarks>
+    /// 31.3 — the tuple's third element is the pack CONTENT, which is what a course is divided by. It is
+    /// also written into <c>PackSize</c> here because for a countable form the two are the same number, and
+    /// every row these fixtures build is a countable one.
+    /// </remarks>
     public static Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> PackFacts(
-        params (Guid DrugId, bool? isSplittable, decimal? packSize)[] rows) =>
+        params (Guid DrugId, bool? isSplittable, decimal? packContent)[] rows) =>
         Fetched.From<IReadOnlyDictionary<Guid, DrugPackFacts>>(
-            rows.ToDictionary(r => r.DrugId, r => new DrugPackFacts(r.isSplittable, r.packSize)),
+            rows.ToDictionary(r => r.DrugId, r => new DrugPackFacts(r.isSplittable, r.packContent, r.packContent)),
             Provenance);
 
     public static ValidationResult Run(ValidationRequest request, ValidationSnapshot snapshot) =>

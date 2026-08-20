@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Mersal.Money;
+namespace Mersal.Amounts;
 
 /// <summary>
 /// Phase 18.F1 — a money value type, so the class of defect X3 belongs to cannot be written.
@@ -108,4 +108,43 @@ public readonly record struct Money : IComparable<Money>
 public enum Currency
 {
     Egp = 1,
+}
+
+/// <summary>
+/// The boundary between a stored currency CODE and the typed <see cref="Currency"/> (ADR-0043).
+///
+/// <para>Amounts are persisted as <c>numeric(14,2)</c> beside their aggregate's <c>currency_code</c> text
+/// column, and arithmetic is done in <see cref="Money"/>. Something has to turn the one into the other, and
+/// that something is the right place to refuse a code nobody has taught this platform to settle in.</para>
+///
+/// <para><b>It throws rather than defaulting to EGP.</b> A default here would be the whole point of the type
+/// thrown away at its only entry: an amount stored as USD would silently become an EGP amount of the same
+/// magnitude, which is not a rounding error — it is a different sum of money, and it would be discovered by
+/// whoever was paid it.</para>
+/// </summary>
+public static class Currencies
+{
+    /// <summary>Parse an ISO-4217 alphabetic code. Case-insensitive; whitespace tolerated.</summary>
+    public static Currency Parse(string? code)
+    {
+        var trimmed = (code ?? "").Trim();
+        return trimmed.ToUpperInvariant() switch
+        {
+            "EGP" => Currency.Egp,
+            "" => throw new InvalidOperationException(
+                "no currency code — an amount without one cannot be settled, and guessing is how a payment "
+                + "ends up in the wrong currency. Set the aggregate's currency_code."),
+            _ => throw new InvalidOperationException(
+                $"currency '{trimmed}' is not one this platform settles in. Add it to the Currency enum "
+                + "deliberately (see this file's header) — a code arriving from the database is not authorisation to "
+                + "invent an exchange rate."),
+        };
+    }
+
+    /// <summary>The ISO code to store for a typed currency. The inverse of <see cref="Parse"/>.</summary>
+    public static string CodeOf(Currency currency) => currency switch
+    {
+        Currency.Egp => "EGP",
+        _ => throw new InvalidOperationException($"no ISO code recorded for {currency} — add it beside the enum member"),
+    };
 }

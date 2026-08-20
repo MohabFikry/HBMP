@@ -223,7 +223,10 @@ public sealed class AmendExecutor(PharmacyDbContext db)
         {
             PrescriptionLineId = newLineId, TenantId = original.TenantId,
             PrescriptionId = original.PrescriptionId,
-            DrugId = original.DrugId, DrugName = original.DrugName,
+            DrugId = original.DrugId, DrugName = original.DrugName, QuantityUnit = original.QuantityUnit,
+            // 31.5 — a superseding version is the SAME clinical instruction with one number
+            // changed; the dose and frequency it was written from carry across unaltered.
+            DoseAmount = original.DoseAmount, TimesPerDay = original.TimesPerDay,
             Dose = original.Dose, Route = original.Route, Frequency = original.Frequency,
             DurationDays = original.DurationDays, RefillsAllowed = original.RefillsAllowed,
             QuantityPrescribed = newQuantity,

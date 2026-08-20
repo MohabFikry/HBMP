@@ -108,9 +108,73 @@ changed.
 
 **96.1% of the catalogue is now usable for quantity calculation** (21,775 of 22,653), up from zero. The
 remaining 878 rows report `NotChecked` **naming the missing field**, which is the honest answer and the one
-invariant 8 requires.
+invariant 8 requires. *(REVISED by the 31.3 addendum below: that 96.1% counted rows whose divisor was the
+wrong number. The honest figure is 84.8%.)*
 
 **One risk accepted.** The composer's quantity settles a moment after the last keystroke, and it is part of
 the line's staleness fingerprint — so a validation run started before it lands is correctly marked stale. That
 is the right behaviour (the checks were graded against a different number) and costs a second click in the
 rare case a prescriber reaches Validate faster than the round trip.
+
+---
+
+# Addendum (31.3) — the divisor was the wrong column
+
+## Context
+
+The decision above put `pack_size` at the centre of every quantity: the composer prefilled from it, the check
+graded against it, and a `PackCounts(unit)` gate decided whether a box count could be offered at all. Measured
+against the catalogue, that was wrong for most of it.
+
+`pack_size` is the workbook's "Minor Units (total)". It counts what the catalogue counts, and the catalogue
+counts containers for anything not supplied as discrete items:
+
+- a 120 ml bottle of syrup is `minor = 1`, so a 210 ml course divided to **210 bottles**;
+- a box of five insulin pens is `minor = 5` and dosed in IU, so no box count was offered at all — the gate
+  correctly refused to divide IU by pens, and a prescriber saw "boxes cannot be counted for this product";
+- a box of 24 tablets is `minor = 24`, which is the one case where the number was right.
+
+The first is the dangerous one. It printed with the same confidence as a correct answer.
+
+## Decision
+
+**Divide by what the box HOLDS.** `masterdata.drug.pack_content` (migration 0019) records how many
+*prescribing units* are in one box, derived at load from `Major Units (per box)` × the per-container
+measurement in `Volume / Weight`, times the concentration in `Strength` where the product is measured in IU.
+`QuantityMath.Compute` takes it in place of `packSize`, and `PackUnitRules.PackCounts` is deleted — with the
+content known, "does the pack count the same thing the dose does?" is not a question anyone needs to ask.
+
+**A concentration in IU per millilitre also decides the unit.** Insulin is supplied in vials, cartridges and
+pre-filled pens and is dosed in IU in all three; taking the unit from the container put "Cartridge" beside the
+dose field of a medicine nobody has ever dosed in cartridges. A bare total — `50000 iu` on a vitamin D
+capsule — is deliberately not read as a concentration: that product *is* prescribed in capsules.
+
+**The major column is the container count, and only for the measured forms.** For items — tablets, capsules,
+sachets — the minor column is the answer and the major column is packaging trivia (24 tablets in 2 strips).
+For containers — vials, ampoules, syringes, cartridges — both columns claim to count the same thing and
+disagree on 106 rows in both directions, so a disagreement there derives nothing. For measured forms the two
+are *expected* to disagree, because the minor column is counting millilitres.
+
+## Consequences
+
+**The honest coverage figure fell, and that is the point.** 19,213 of 22,653 rows (84.8%) now have a divisor
+that is the right number, against a nominal 96.1% that included every syrup, cream and pen it was wrong for.
+The 2,610 rows that know their unit but not their contents are listed by name at load time.
+
+**The composer's Quantity field holds a box count**, and its label says so. A prescription is written in what
+the patient carries home; "2250" beside an insulin pen is a number of international units, and no pharmacy
+counts those out. Where the box's contents are unknown the field falls back to the dose total and the label
+falls back to the unit — the two states are never the same control showing an unlabelled number.
+
+**Absence still refuses to become a default.** "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration
+and never its volume. Three millilitres is the usual fill of an insulin pen; assuming it would produce a box
+count that is right most of the time, which is the failure mode invariant 8 exists for.
+
+**And the unit is persisted with the number.** Making the quantity a box count changes what
+`quantity_prescribed` MEANS, and the dispensing counter renders it as a bare figure. So
+`pharmacy.prescription_line.quantity_unit` (migration 0017) records what the number counts — "boxes", or the
+prescribing unit — snapshotted at prescribing time for the same reason `drug_name` is: what the catalogue
+says next year must not change what a prescription written today meant. Without it, "1" against a 24-tablet
+box reaches a pharmacist who has no way to tell it from one tablet. Absent on lines written before this, and
+rendered as no unit rather than a plausible one.
+

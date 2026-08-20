@@ -45,7 +45,8 @@ public static class BeneficiaryContactEndpoints
 
             return Results.Ok(beneficiary.Contacts.Where(c => !c.IsDeleted).Select(c => new ContactView(
                 c.ContactId, c.ContactType.ToString(), c.Value, c.PreferredChannel, c.IsPrimary)));
-        }).RequireAuthorization(HbmpPolicies.Scope("patient:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("patient:read"))
+        .Produces<IEnumerable<ContactView>>();
 
         app.MapPut("/api/v1/beneficiaries/{id:guid}/contacts", async (
             Guid id, UpsertContact req, PatientDbContext db, IHbmpPrincipalAccessor me,
@@ -113,7 +114,8 @@ public static class BeneficiaryContactEndpoints
             await tx.CommitAsync(ct);
             return Results.Ok(new ContactUpsertView(
                 existing.ContactId, type.ToString(), existing.Value, existing.PreferredChannel, existing.IsPrimary, before));
-        }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("patient:write"))
+        .Produces<ContactUpsertView>();
     }
 }
 

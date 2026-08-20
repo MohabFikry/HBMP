@@ -373,7 +373,8 @@ public static class CoverageDetailEndpoints
                 enrollmentId, members,
                 namesUnavailable ? ["patient-service"] : [],
                 Withheld: household.Count - scoped.Count));
-        });
+        })
+        .Produces<FamilyView>();
     }
 
     /// <summary>

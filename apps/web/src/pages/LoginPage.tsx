@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Button, Card, InlineAlert, InputField, Logo, useTheme } from "@mersal/design-system";
-import { useAuth } from "../auth/AuthProvider";
+import { Link } from "react-router-dom";
+import { Button, InlineAlert, InputField, Logo, useTheme } from "@mersal/design-system";
 import { silentAuthorize } from "../auth/oidcClient";
 import { SessionClient, SessionUnavailableError, type MembershipOption, type SessionState } from "../auth/sessionApi";
-import { portalForRole } from "../portals/catalog";
-import { PORTALS } from "../portals/catalog";
-import type { Role } from "../authz/permissions";
+import { LangGlyph, MoonIcon, SunIcon } from "../shell/controlGlyphs";
 import { L } from "../i18n/strings";
+import { FIXTURES } from "@dev/fixtures";
 import { LIVE } from "../config";
 
 /**
@@ -34,8 +32,9 @@ import { LIVE } from "../config";
  * and this screen follows. It does NOT infer the next step from what it knows about the user — it has no
  * business knowing, and a client that guessed would be a second authorization system with a worse view.
  *
- * The dev build (`LIVE=0`) keeps its role picker untouched: it has no issuer to talk to, and it is how the
- * frontend suite runs without a backend.
+ * The dev build (`LIVE=0`) keeps its role picker untouched — same markup, same behaviour — but it now lives
+ * in `src/dev/DevLoginForm.tsx` and is reached through `@dev/fixtures`, so a live bundle does not contain a
+ * "sign in as any role with any six digits" form at all. It is how the frontend suite runs without a backend.
  */
 
 /** Field and button glyphs. Inline SVG rather than an icon package: three shapes do not justify a
@@ -52,36 +51,6 @@ const LockIcon = () => (
     <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" strokeLinecap="round" />
   </svg>
 );
-const LangGlyph = ({ code }: { code: string }) => (
-  <svg width="22" height="17" viewBox="0 0 22 17" aria-hidden="true">
-    <text
-      x="11"
-      y="8.5"
-      textAnchor="middle"
-      dominantBaseline="central"
-      fill="currentColor"
-      fontFamily="Cairo, Inter, system-ui, sans-serif"
-      fontWeight="600"
-      /* Arabic letterforms read smaller than Latin capitals at the same size, so the single glyph is set a
-         little larger to carry the same weight on the page as "EN". */
-      fontSize={code === "EN" ? 13 : 16}
-    >
-      {code}
-    </text>
-  </svg>
-);
-const MoonIcon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2z" />
-  </svg>
-);
-const SunIcon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
-       strokeLinecap="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" />
-  </svg>
-);
 const ArrowIcon = () => (
   <svg className="login-submit-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none"
        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -92,15 +61,8 @@ const ArrowIcon = () => (
 type Step = "credentials" | "two_factor" | "membership";
 
 export function LoginPage() {
-  const { login } = useAuth();
   const { lang, setLang, theme, setTheme } = useTheme();
-  const navigate = useNavigate();
 
-  // Dev-mode state (unchanged).
-  const [role, setRole] = useState<Role>("reception");
-  const [mfa, setMfa] = useState("");
-
-  // Live-mode state.
   const [client] = useState(() => new SessionClient());
   const [step, setStep] = useState<Step>("credentials");
   const [username, setUsername] = useState("");
@@ -114,25 +76,6 @@ export function LoginPage() {
   const [error, setError] = useState<string | undefined>();
   const [fieldError, setFieldError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-
-  // ---- dev sign-in (no backend) ---------------------------------------------------------------------
-  async function onDevSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setFieldError(undefined);
-    if (!/^\d{6}$/.test(mfa)) {
-      setFieldError(L.mfaError[lang]);
-      return;
-    }
-    setBusy(true);
-    try {
-      await login(role, mfa);
-      navigate(`/${portalForRole(role).base}`);
-    } catch {
-      setFieldError(L.mfaError[lang]);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   /**
    * Turn a server status into what the screen does next.
@@ -417,54 +360,7 @@ export function LoginPage() {
     );
   }
 
-  // ---- the dev (no-backend) build, untouched: a role picker, on the old single-column shell -------------
-  return (
-    <main id="main" className="login-wrap">
-      <Card style={{ padding: "var(--sp8)", width: "min(440px, 92vw)" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--sp5)" }}>
-          <Logo variant="lockup" height={72} />
-        </div>
-        <>
-          <>
-            <h1 style={{ fontSize: "var(--fs-title-2)", textAlign: "center" }}>{L.loginTitle[lang]}</h1>
-            <p className="muted" style={{ textAlign: "center", marginTop: "var(--sp2)" }}>
-              {L.loginSub[lang]}
-            </p>
-            <form onSubmit={onDevSubmit} style={{ display: "grid", gap: "var(--sp4)", marginTop: "var(--sp5)" }}>
-              <div className="mrs-field">
-                <label className="mrs-label" htmlFor="role">
-                  {L.chooseRole[lang]}
-                </label>
-                <select
-                  id="role"
-                  className="mrs-control"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as Role)}
-                >
-                  {PORTALS.map((p) => (
-                    <option key={p.role} value={p.role}>
-                      {p.eyebrow[lang]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <InputField
-                label={L.mfaLabel[lang]}
-                help={L.mfaHelp[lang]}
-                error={fieldError}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                value={mfa}
-                onChange={(e) => setMfa(e.target.value.replace(/\D/g, ""))}
-              />
-              <Button type="submit" variant="primary" loading={busy}>
-                {L.signIn[lang]}
-              </Button>
-            </form>
-          </>
-        </>
-      </Card>
-    </main>
-  );
+  // The no-backend build: the role picker, which is a separate module so that it is ABSENT from a live
+  // bundle rather than merely unreachable past the branch above. See src/dev/fixtures.ts.
+  return <FIXTURES.LoginForm />;
 }

@@ -66,8 +66,9 @@ public static class ProgramEndpoints
 
             var enabled = req.Enabled ?? false;
             await svc.SetFeatureAsync(AdminContracts.Actor(gate.Principal!), scope.Tenant!, featureKey, enabled, req.Reason, ct);
-            return Results.Ok(new { tenant = scope.Tenant, feature = featureKey, enabled });
-        });
+            return Results.Ok(new FeatureFlagView(scope.Tenant, featureKey, enabled));
+        })
+        .Produces<FeatureFlagView>();
 
         write.MapPut("/{tenantId}/limits/{limitKey}", async (
             string tenantId, string limitKey, ProgramChangeRequest req,

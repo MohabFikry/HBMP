@@ -688,7 +688,7 @@ function DecisionModal({
       closeLabel={t(A.close)}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>{t(A.cancel)}</Button>
+          <Button variant={decision === "Reject" ? "secondary" : "ghost"} onClick={onClose}>{t(A.cancel)}</Button>
           <Button
             variant={decision === "Reject" ? "danger" : "primary"}
             leadingIcon={<Icon name={decision === "Reject" ? "cross" : "check2"} />}
@@ -864,7 +864,9 @@ function NotesModal({
             onChange={(e) => setBody(e.currentTarget.value)}
           />
           <div>
-            <Button variant="primary" leadingIcon={<Icon name="plus" />} loading={busy} onClick={() => void send()}>
+            {/* No glyph. `plus` means add-a-thing, and this sends a reply on an existing application — the other
+                two Send buttons in the product carry none either. */}
+            <Button variant="primary" loading={busy} onClick={() => void send()}>
               {t(A.send)}
             </Button>
           </div>

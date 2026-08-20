@@ -22,7 +22,17 @@ interaction/allergy alerts and raises referrals; a **pharmacist** searches dispe
 4. **Draft → Submitted**, then **route** (`RxRoutingPolicy`, config `Pharmacy:Routing`): an expensive/gated drug
    keeps it **Submitted** awaiting an approvals decision (dispensable only once **Approved**, phase 7); otherwise
    it **auto-approves** to **Approved**. `dispensable` in the response reflects this.
-5. **Outbox** — `RxCreated`, `RxSubmitted` (+ `RxApproved` when auto-approved) to `pharmacy.events`, in the same
+5. **The decision comes back** (ADR-0041). `ApprovalDecisionConsumer` binds **`pharmacy.approval-decisions`**,
+   pharmacy's own mirror of `approvals.events`: approve → `Submitted → Approved`, which is what
+   `IsDispensable` admits; reject → `Rejected`, terminal; partially approve → approved with the drugs the
+   reviewer did not allow cancelled as `not-in-approved-scope`, attributed to the reviewer. The approval
+   re-uses `RxApproved` with `auto: false` rather than a second event name.
+
+   Until 2026-08-09 **nothing consumed `approvals.events`** and the only path that ever set `Approved` was
+   the auto-route at creation — so a script that WAS sent for approval could never be dispensed, whatever the
+   reviewer decided. `RxSubmitted` likewise reached no reviewer until `ApprovalRoutingFeed` mirrored it to
+   approvals, where the consumer filters on `requiresApproval` because this event fires for every script.
+6. **Outbox** — `RxCreated`, `RxSubmitted` (+ `RxApproved` when auto-approved) to `pharmacy.events`, in the same
    transaction as the state change; consumers dedupe on event id.
 
 `RxCreated`, `RxSubmitted`, `RxCancelled` and `RxLinesDispensed` carry **`encounterId`** (ADR-0031) so emr can

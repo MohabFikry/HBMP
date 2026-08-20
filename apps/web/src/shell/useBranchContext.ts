@@ -24,6 +24,21 @@ const BRANCH_SCOPED = new Set(["reception", "appointment_coordinator", "nurse", 
  */
 const BRANCH_SET_SCOPED = new Set(["clinics_manager"]);
 
+/**
+ * Does this role reach a SET of clinics at once?
+ *
+ * Exported so a screen can ask without re-listing the roles. The Clinic Management screens need it for one
+ * thing only: a write that could apply to any of six clinics has to name the one it means, so the roster form
+ * shows a branch picker to a manager and does not to a coordinator, whose branch is decided by the header.
+ *
+ * <b>This is a REACH question, never an authority one.</b> Both roles hold exactly the same permission set —
+ * that is the invariant this whole portal rests on (design 42 §1) — and the server decides what either may
+ * actually touch. Nothing here grants anything; it decides whether a control appears.
+ */
+export function isSetScopedRole(role: string | undefined): boolean {
+  return !!role && BRANCH_SET_SCOPED.has(role);
+}
+
 interface BranchContextValue {
   memberScoped: boolean;
   /**

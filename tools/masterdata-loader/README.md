@@ -59,8 +59,8 @@ Five sheets; the loader reads **`Drug List`** and validates against `masterdata.
 | **T** | **`Related ICDs`** | **100%** | **`drug_indication.icd_code`** — comma-separated |
 | U | `ICD Count` | 100% | checksum for T; not stored |
 | V | `ICD Basis` | 100% | `drug_indication.source` |
-| Y | `Volume / Weight` | 33.3% | `drug.strength` (fallback) |
-| Z | `Strength` | 60.4% | `drug.strength` |
+| Y | `Volume / Weight` | 33.3% | `drug.strength` (fallback) **and `drug.pack_content`** (see below) |
+| Z | `Strength` | 60.4% | `drug.strength` **and `drug.pack_content`** (see below) |
 | AA | `Dosage Form` | 98.7% | `drug.form` |
 | F,G,W,X,AB–AF | class, category, pack size, barcode, origin, price date | — | not loaded |
 | **AG** | **`UNHCR`** | **0%** | **header only, no data** — a UNHCR formulary must be authored as a `benefit_list` (phase 27), not loaded from here |
@@ -107,14 +107,72 @@ products that previously loaded with no unit at all. `pack_unit` was widened to 
 migration: it stores the source's free-text `Dosage Form`, and `varchar(16)` could not hold
 "prefilled syringe".
 
-Observed coverage after the change (release `phase-29-packfacts`):
+#### `pack_size` is not the divisor — `pack_content` is (31.3)
+
+`pack_size` = X counts whatever the catalogue counts, and for anything not supplied as discrete items that is
+**containers**. A 120 ml bottle of syrup is `X = 1`. So dividing a course by it answered a question nobody
+asked: a 210 ml course came out as **210 bottles**, and a box of five insulin pens dosed in IU could not be
+divided at all.
+
+`pack_content` (migration `0019`) is how many **prescribing units** one box holds, and it is derived from the
+two measurement columns the loader used to read past:
+
+| unit | content |
+|---|---|
+| items — Tablet, Capsule, Sachet, Suppository, Patch… | X (24 tablets in a box, whatever the strips) |
+| containers — Vial, Ampoule, Syringe, Cartridge | W, and **nothing** when W ≠ X (106 rows contradict each other in both directions) |
+| `ML` | W × `Volume / Weight` in ml |
+| `Gram` | W × `Volume / Weight` in gm |
+| `IU` | W × ml × the `iu/ml` concentration from `Strength`, falling back to the trade name |
+| `Puff`, `Drop`, `Spray` | nothing — no actuation count is recorded anywhere in the workbook |
+
+Two rules are worth stating because they are not obvious from the table:
+
+**W is the container count and X is not.** "actrapid hm 100 i.u./ml 10 ml vial" carries `W = 1, X = 10` — one
+vial, ten millilitres. Multiplying the per-container volume by X would give that box 100 ml. For the measured
+units their disagreement is therefore *expected* rather than evidence of an error, and only the container
+units demand agreement.
+
+**A concentration in IU per millilitre also decides the unit.** Insulin arrives in vials, cartridges and
+pre-filled pens and is dosed in IU in all three, so `prescribing_unit` becomes `IU` whatever the form says. A
+bare total — `50000 iu` on a vitamin D capsule — is deliberately *not* read as a concentration: that product
+is prescribed in capsules.
+
+Two further sources, both stated rather than inferred:
+
+**A name that counts its own containers.** `5*3ml penfills` is five cartridges of three millilitres, written
+by whoever catalogued it. Seventy names use the notation; on 23 it agrees with W, and on 43 more it agrees
+with X while W does not. Where a stated count and a derived column disagree, the stated one wins — otherwise
+"insulatard hm 100i.u./ml 5*3ml penfills" (`W = 1`) held 300 IU instead of 1500.
+
+**`data/pack-measurement-overrides.csv` — measurements the sheet does not carry.** One line per product, each
+with a `basis` column saying why. "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and never how
+many millilitres a pen holds; three millilitres is the standard fill of every marketed insulin pen and
+cartridge, and writing THAT into the rules would be a guess that spreads itself to the next product that is
+not 3 ml. A named list cannot spread: a new insulin in a workbook refresh matches nothing, derives no content,
+and appears in the missing-content report.
+
+Precedence is **per input, not per outcome**: the volume is taken from column Y, then the name, then the file;
+the concentration from Z, then the name, then the file. Asking instead whether the sheet produced *a* content
+would skip the rows that need it most — "insulin h bio nph 100i.u.vial" drops the `/ml`, so the sheet answers
+"one vial", which is a coherent answer to the wrong question. Entries that matched nothing are printed at the
+end of a load, because a curated list nobody prunes decays into a list of things that used to be true.
+
+Everything still underivable is listed by name in `reports/pack-content-missing-<release>.txt`, one
+`Volume / Weight` cell away from a box count.
+
+Observed coverage (release `R2019-2022-EG`, after 31.3):
 
 ```
-prescribing_unit     21,815 / 22,653  (96.3%)
+prescribing_unit     21,823 / 22,653  (96.3%)
 pack_size            22,607 / 22,653  (99.8%)
+pack_content         19,213 / 22,653  (84.8%)  <- the divisor
 is_pack_splittable   22,647 / 22,653  (100.0%)
-ALL THREE (usable)   21,775 / 22,653  (96.1%)
+ALL THREE (usable)   19,243 / 22,653  (84.9%)
 ```
+
+The usable figure FELL from 96.1%, and that is the correction: the old number counted every syrup, cream and
+pen whose divisor was the wrong column.
 
 #### Display casing is applied at load, over the whole table
 

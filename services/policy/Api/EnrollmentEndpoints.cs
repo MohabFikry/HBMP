@@ -133,7 +133,8 @@ public static class EnrollmentEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(new RenewalView(renewed.PolicyId, renewed.PolicyNo, previous.PolicyId, carried, unmapped));
-        });
+        })
+        .Produces<RenewalView>();
     }
 
     // ---- Plans under a policy (19.2b) --------------------------------------------------------------------
@@ -190,7 +191,8 @@ public static class EnrollmentEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/policy-plans/{plan.PolicyPlanId}", PolicyPlanView.From(plan));
-        });
+        })
+        .Produces<PolicyPlanView>();
 
         v1.MapGet("/policies/{id:guid}/plans", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -203,7 +205,8 @@ public static class EnrollmentEndpoints
                 .Select(g => new { PolicyPlanId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.PolicyPlanId, x => x.Count, ct);
             return Results.Ok(plans.Select(pp => PolicyPlanView.From(pp, counts.GetValueOrDefault(pp.PolicyPlanId))));
-        });
+        })
+        .Produces<IEnumerable<PolicyPlanView>>();
     }
 
     // ---- Member groups -----------------------------------------------------------------------------------
@@ -230,7 +233,8 @@ public static class EnrollmentEndpoints
 
             await audit.EmitAsync(Draft("member_group", group.GroupId, AuditAction.Create, gate), ct);
             return Results.Created($"/api/v1/member-groups/{group.GroupId}", MemberGroupView.From(group));
-        });
+        })
+        .Produces<MemberGroupView>();
 
         v1.MapGet("/policies/{id:guid}/groups", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -238,7 +242,8 @@ public static class EnrollmentEndpoints
             var rows = await db.MemberGroups.AsNoTracking()
                 .Where(g => g.PolicyId == id && !g.IsDeleted).OrderBy(g => g.GroupCode).ToListAsync(ct);
             return Results.Ok(rows.Select(MemberGroupView.From));
-        });
+        })
+        .Produces<IEnumerable<MemberGroupView>>();
     }
 
     // ---- Enrolment ---------------------------------------------------------------------------------------
@@ -282,7 +287,8 @@ public static class EnrollmentEndpoints
                 ? Results.Ok(EnrollmentView.From(outcome.Enrollment, outcome.CoverageCount))
                 : Results.Created($"/api/v1/enrollments/{outcome.Enrollment.EnrollmentId}",
                     EnrollmentView.From(outcome.Enrollment, outcome.CoverageCount));
-        });
+        })
+        .Produces<EnrollmentView>();
 
         v1.MapGet("/enrollments/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -291,7 +297,8 @@ public static class EnrollmentEndpoints
             if (e is null) return NotFound();
             var coverages = await db.Coverages.AsNoTracking().CountAsync(c => c.EnrollmentId == id, ct);
             return Results.Ok(EnrollmentView.From(e, coverages));
-        });
+        })
+        .Produces<EnrollmentView>();
 
         v1.MapGet("/enrollments/{id:guid}/events", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -299,7 +306,8 @@ public static class EnrollmentEndpoints
             var rows = await db.EnrollmentEvents.AsNoTracking()
                 .Where(e => e.EnrollmentId == id).OrderByDescending(e => e.OccurredAt).ToListAsync(ct);
             return Results.Ok(rows.Select(EnrollmentEventView.From));
-        });
+        })
+        .Produces<IEnumerable<EnrollmentEventView>>();
     }
 
     // ---- Lifecycle: every one of these is an EVENT ---------------------------------------------------------
@@ -318,7 +326,8 @@ public static class EnrollmentEndpoints
 
             var result = await membership.TerminateAsync(id, req.EffectiveDate, req.Reason, maySupervise, Actor(gate), ct);
             return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!)) : Problem(result.Error!);
-        });
+        })
+        .Produces<EnrollmentView>();
 
         v1.MapPost("/enrollments/{id:guid}/reinstate", async (Guid id, ReinstateEnrollment req,
             MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
@@ -326,7 +335,8 @@ public static class EnrollmentEndpoints
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
             var result = await membership.ReinstateAsync(id, req.EffectiveDate, req.Reason, Actor(gate), ct);
             return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!)) : Problem(result.Error!);
-        });
+        })
+        .Produces<EnrollmentView>();
 
         v1.MapPost("/enrollments/{id:guid}/change-group", async (Guid id, ChangeGroup req,
             MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
@@ -334,7 +344,8 @@ public static class EnrollmentEndpoints
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
             var result = await membership.ChangeGroupAsync(id, req.GroupId, req.EffectiveDate, req.Reason, Actor(gate), ct);
             return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!.Enrollment)) : Problem(result.Error!);
-        });
+        })
+        .Produces<EnrollmentView>();
 
         // 19.6 — the DRY RUN behind the change-plan dialog's carry-forward preview.
         //
@@ -365,7 +376,8 @@ public static class EnrollmentEndpoints
                 [.. p.DroppedCategories.Select(gid => new DroppedCategoryView(
                     gid, CarriedLimitView.Code(codes, gid),
                     p.CurrentLimits.GetValueOrDefault(gid), p.Consumed.GetValueOrDefault(gid)))]));
-        });
+        })
+        .Produces<IEnumerable<CarryPreviewRow>>();
 
         // 19.2b — the plan change. Coverage REGENERATES from the new plan version, and consumption is carried
         // across per ADR-0020 (a setting, not a hard-coded rule, because the decision is not yet signed off).
@@ -384,7 +396,8 @@ public static class EnrollmentEndpoints
                 // category is reported by name and consumption only. The preview is where the before-figures live.
                 [.. outcome.DroppedCategories.Select(gid => new DroppedCategoryView(
                     gid, CarriedLimitView.Code(codes, gid), null, 0m))]));
-        });
+        })
+        .Produces<IEnumerable<CarriedLimitView>>();
     }
 
     /// <summary>Translate a domain failure into the RFC 7807 shape the API already speaks. One place, so the

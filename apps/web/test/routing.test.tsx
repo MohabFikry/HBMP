@@ -98,8 +98,10 @@ describe("Login + MFA (US-070)", () => {
     renderApp("/login");
     await screen.findByRole("heading", { name: "Sign in" });
 
-    // Select the pharmacy role.
-    await userEvent.selectOptions(screen.getByLabelText("Role (demo sign-in)"), "pharmacy");
+    // Select the pharmacy role. A design-system Combobox, so the list is opened and an option clicked, and
+    // the option carries the portal's LABEL ("Pharmacy") rather than its role code.
+    await userEvent.click(screen.getByLabelText("Role (demo sign-in)"));
+    await userEvent.click(await screen.findByRole("option", { name: "Pharmacy" }));
 
     // Submit with no code → blocked with an error.
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));

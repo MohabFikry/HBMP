@@ -7,7 +7,7 @@ import {
   InlineAlert,
   InputField,
   Modal,
-  SelectField,
+  ComboboxField,
   StatusChip,
   Tabs,
   useTableQuery,
@@ -43,7 +43,9 @@ import { TransactionActionsDialog } from "./TransactionActionsDialog";   // 30.6
 import type { TransactionAction } from "./TransactionActionsDialog";
 import type { AmendReasonOption } from "./AmendLineDialog";
 import { PrescribingWorkspace } from "./prescribing/PrescribingWorkspace";
+import type { PrescriptionClone } from "./prescribing/PrescribingWorkspace";
 import { InvestigationWorkspace } from "./investigations/InvestigationWorkspace";
+import type { OrderClone } from "./investigations/InvestigationWorkspace";
 import { EncounterTimelineButton } from "./VisitTimeline";
 import { useFormat } from "../i18n/useFormat";
 
@@ -108,6 +110,9 @@ const S = {
   colActions: { en: "Actions", ar: "الإجراءات" },
   amend: { en: "Amend", ar: "تعديل" },
   withdraw: { en: "Withdraw", ar: "سحب" },
+  // 31.4 — write this one again. The commonest thing a returning patient needs, and it used to mean finding
+  // every medicine or code in the catalogue a second time.
+  clone: { en: "Copy into the composer", ar: "نسخ إلى محرر الطلب" },
   lockedTerminal: { en: "Already closed — cannot be changed", ar: "مغلق بالفعل — لا يمكن تغييره" },
   lockedDispensed: { en: "Dispensed", ar: "تم صرفه" },
   lockedDelivered: { en: "Delivered", ar: "تم تنفيذه" },
@@ -641,7 +646,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
             <Button
               variant="ghost"
               size="sm"
-              leadingIcon={<Icon name="user" width={16} height={16} aria-hidden="true" />}
+              leadingIcon={<Icon name="user" aria-hidden="true" />}
               onClick={() => openProfile(encounter.patientId)}
             >
               {t(S.patientFile)}
@@ -777,7 +782,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                   variant="primary"
                   loading={busy === "final"}
                   disabled={!hasContent || !hasPrimary || unsent.length > 0}
-                  leadingIcon={<Icon name="lock" width={16} height={16} aria-hidden="true" />}
+                  leadingIcon={<Icon name="lock" aria-hidden="true" />}
                   onClick={() => setConfirming(true)}
                 >
                   {t(S.finalize)}
@@ -794,7 +799,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                   variant="secondary"
                   loading={busy === "draft"}
                   disabled={!hasContent}
-                  leadingIcon={<Icon name="doc" width={16} height={16} aria-hidden="true" />}
+                  leadingIcon={<Icon name="doc" aria-hidden="true" />}
                   onClick={() => void saveDraft()}
                 >
                   {t(S.saveDraft)}
@@ -1076,13 +1081,17 @@ function DiagnosisPicker({
       return;
     }
     setSearching(true);
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      api.searchIcd(q).then(
+      // The signal, not just the `live` flag. `live` stops a superseded answer from being RENDERED; the
+      // signal stops it from being FETCHED. On a 250ms debounce a considered search leaves several requests
+      // running against the catalogue that nobody will ever look at.
+      api.searchIcd(q, controller.signal).then(
         (rows) => { if (live) { setResults(rows); setSearching(false); } },
         () => { if (live) { setResults([]); setSearching(false); } },
       );
     }, 250);
-    return () => { live = false; clearTimeout(timer); };
+    return () => { live = false; clearTimeout(timer); controller.abort(); };
   }, [api, open, query]);
 
   const stagedPrimary = staged.some((r) => r.rank === "Primary");
@@ -1133,6 +1142,14 @@ function DiagnosisPicker({
       open={open}
       onOpenChange={setOpen}
       title={t(S.codePicker)}
+      /*
+       * WIDE. Every row here is a code beside a title read by scanning — "I11.0 Hypertensive heart disease
+       * with (congestive) heart failure" — and at the default 520px those titles wrapped to two and three
+       * lines, so a list of six results filled the modal and the staged rows below it had to be scrolled to.
+       * A staged row is worse still: code, title, rank picker and remove control on ONE line, with the
+       * picker holding a fixed 9rem, which left the title about a hundred pixels.
+       */
+      wide
       trigger={
         // Ghost, matching "Visit timeline" and "Patient file" in the context bar directly above it. It was
         // `secondary` — a bordered, filled control — so the workspace showed three actions of the same weight
@@ -1142,7 +1159,7 @@ function DiagnosisPicker({
         <Button
           variant="ghost"
           size="sm"
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         >
           {t(S.addCode)}
         </Button>
@@ -1216,7 +1233,7 @@ function DiagnosisPicker({
                 <li key={r.code}>
                   <span className="dx-code tnum">{r.code}</span>
                   <span className="dx-staged-title">{r.title}</span>
-                  <SelectField
+                  <ComboboxField
                     label={t(S.rank)}
                     hideLabel
                     value={r.rank}
@@ -1421,13 +1438,13 @@ function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; o
           // Icon-only in a tight rail header, so the name has to come from aria-label.
           aria-label={t(S.recordVitals)}
           title={t(S.recordVitals)}
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         />
       }
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
+          <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
         </>
       }
     >
@@ -1491,6 +1508,8 @@ function PrescriptionsTab({
   const [viewing, setViewing] = useState<RxRow | null>(null);
   // 30.6 — which transaction is being amended or withdrawn, from the ROW. One at a time.
   const [acting, setActing] = useState<{ rx: RxRow; action: TransactionAction } | null>(null);
+  /** 31.4 — a prescription the doctor asked to copy. Consumed by the composer, then cleared. */
+  const [cloning, setCloning] = useState<PrescriptionClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
 
   useEffect(() => {
@@ -1551,8 +1570,35 @@ function PrescriptionsTab({
     {
       key: "actions",
       header: t(S.colActions),
+      stickyEnd: true,
       cell: (r) => (
         <span className="row-actions">
+          {/*
+            31.4 — COPY, beside the two acts that change the record and looking like neither.
+
+            It writes nothing: it fills the composer above with the same medicines, as a new draft the doctor
+            still has to check and submit. That is why it is a ghost and not a danger, and why its label says
+            where the items are going rather than just "Copy".
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.clone)} — ${r.rxNo}`}
+            onClick={() => setCloning({
+              reference: r.rxNo,
+              items: r.lines.map((l) => ({
+                drugId: l.drugId ?? "",
+                label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
+                quantity: l.quantityPrescribed,
+                quantityUnit: l.quantityUnit ?? null,
+                doseAmount: l.doseAmount ?? null,
+                timesPerDay: l.timesPerDay ?? null,
+                durationDays: l.durationDays ?? null,
+              })).filter((i) => i.drugId !== ""),
+            })}
+          >
+            <Icon name="copy" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1594,6 +1640,37 @@ function PrescriptionsTab({
 
   return (
     <div className="stack">
+      {/*
+        31.4 — TWO CARDS, AND THE ACT COMES FIRST.
+
+        These were one card: the history table, a rule, then the composer beneath it — which reads as a
+        record with an appendix, and put the thing the doctor opened the tab to do below five rows of what
+        they had already done. On a laptop that is below the fold.
+
+        They are not one thing. What has been prescribed is a RECORD; what is being prescribed is an ACT.
+
+        Composed INLINE rather than in a dialog. A prescription line carries five fields plus a per-line
+        status and an expanding findings panel; a modal narrow enough to sit over the encounter collapsed
+        all of it into a single stacked column, which is the layout the design's own option row is meant
+        to avoid.
+      */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <div className="rx-compose">
+          <h3 className="section-h rx-compose-h">{t(S.prescribe)}</h3>
+          <PrescribingWorkspace
+            encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            clone={cloning}
+            onCloneApplied={() => setCloning(null)}
+            // Re-read the list below the composer. Without this the prescription a doctor just wrote does
+            // not appear until the screen is reloaded — and "it is not in the list" is how a successful
+            // submit reads as a failed one.
+            onDone={rx.reload}
+          />
+        </div>
+      </Card>
+
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <h3 className="section-h">{t(S.rxFor)}</h3>
         {rxFor.length === 0 ? (
@@ -1602,25 +1679,6 @@ function PrescriptionsTab({
           <DataTableView query={rxQuery} columns={rxCols} rowKey={(r) => r.id} caption={t(S.rxFor)}
             noMatchesLabel={t(S.noMatchesWhen)} />
         )}
-
-        {/*
-          Composed INLINE rather than in a dialog. A prescription line carries five fields plus a per-line
-          status and an expanding findings panel; a modal narrow enough to sit over the encounter collapsed
-          all of it into a single stacked column, which is the layout the design's own option row is meant
-          to avoid.
-        */}
-        <div className="rx-compose">
-          <h4 className="section-h rx-compose-h">{t(S.prescribe)}</h4>
-          <PrescribingWorkspace
-            encounterId={encounter.id}
-            beneficiaryId={encounter.patientId}
-            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
-            // Re-read the list directly above the composer. Without this the prescription a doctor just
-            // wrote does not appear until the screen is reloaded — and "it is not in the list" is how a
-            // successful submit reads as a failed one.
-            onDone={rx.reload}
-          />
-        </div>
       </Card>
       {/* Same reason as `onDone` above: a withdrawn drug that stays in the list reads as a failed withdraw. */}
       <PrescriptionDetailModal
@@ -1639,6 +1697,7 @@ function PrescriptionsTab({
             id: l.id,
             label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
             quantity: l.quantityPrescribed,
+            quantityUnit: l.quantityUnit ?? null,
             // Dispensed is the lock that matters here: a medicine the patient already has cannot be
             // un-given, and the amount is what the pharmacy metered against.
             locked: l.quantityDispensed > 0 ? t(S.lockedDispensed)
@@ -1694,6 +1753,8 @@ function InvestigationsTab({
   const [viewingOrder, setViewingOrder] = useState<OrderRow | null>(null);
   // 30.6 — which order is being amended or withdrawn, from the ROW.
   const [acting, setActing] = useState<{ order: OrderRow; action: TransactionAction } | null>(null);
+  /** 31.4 — an order the doctor asked to copy. Consumed by the composer, then cleared. */
+  const [cloning, setCloning] = useState<OrderClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
 
   useEffect(() => {
@@ -1735,7 +1796,7 @@ function InvestigationsTab({
       key: "open",
       header: t(S.colOpen),
       cell: (r) => (
-        <Button
+        <Button size="sm"
           variant="ghost"
           aria-label={`${t(S.openOrder)} — ${r.orderNo}`}
           onClick={() => setViewingOrder(r)}
@@ -1751,7 +1812,7 @@ function InvestigationsTab({
       key: "history",
       header: t(S.colHistory),
       cell: (r) => (
-        <Button
+        <Button size="sm"
           variant="ghost"
           aria-label={`${t(S.viewHistory)} — ${r.primaryCode}`}
           onClick={() => setHistoryFor({ code: r.primaryCode, label: r.primaryCode })}
@@ -1765,8 +1826,25 @@ function InvestigationsTab({
     {
       key: "actions",
       header: t(S.colActions),
+      stickyEnd: true,
       cell: (r) => (
         <span className="row-actions">
+          {/* 31.4 — copy into the composer above. Writes nothing; see the prescriptions tab. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.clone)} — ${r.orderNo}`}
+            onClick={() => setCloning({
+              reference: r.orderNo,
+              items: (r.lines ?? []).map((l) => ({
+                code: l.code,
+                description: l.description,
+                quantity: l.quantityOrdered,
+              })),
+            })}
+          >
+            <Icon name="copy" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1804,6 +1882,23 @@ function InvestigationsTab({
 
   return (
     <div className="stack">
+      {/* 31.4 — the composer in its own card and FIRST. Same reasoning as the prescriptions tab, and stated
+          there: a record and an act are not one block, and the act is what the tab is for. */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <div className="rx-compose">
+          <h3 className="section-h rx-compose-h">{t(composeHeading)}</h3>
+          <InvestigationWorkspace
+            encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
+            orderType={orderType}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            clone={cloning}
+            onCloneApplied={() => setCloning(null)}
+            onDone={orders.reload}
+          />
+        </div>
+      </Card>
+
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <h3 className="section-h">{t(heading)}</h3>
         {mineFor.length === 0 ? (
@@ -1812,17 +1907,6 @@ function InvestigationsTab({
           <DataTableView query={orderQuery} columns={orderCols} rowKey={(r) => r.id} caption={t(heading)}
             noMatchesLabel={t(S.noMatchesWhen)} />
         )}
-
-        <div className="rx-compose">
-          <h4 className="section-h rx-compose-h">{t(composeHeading)}</h4>
-          <InvestigationWorkspace
-            encounterId={encounter.id}
-            beneficiaryId={encounter.patientId}
-            orderType={orderType}
-            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
-            onDone={orders.reload}
-          />
-        </div>
       </Card>
 
       {/*

@@ -63,6 +63,11 @@ public static class SubmissionEndpoints
 
             switch (r.Outcome)
             {
+                case SubmitOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different submission. Answering it with the "
+                              + "earlier claim would report an invoice as received that was never received.");
                 case SubmitOutcome.Duplicate:
                     await AuditDenied(deps, body.ProviderId, "DUPLICATE_CLAIM");
                     return Results.Problem(statusCode: 409, title: "duplicate-claim", type: "urn:hbmp:duplicate-claim",
@@ -80,7 +85,8 @@ public static class SubmissionEndpoints
                     await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claims/submissions/{r.Submission!.SubmissionId}", SubmissionView.From(r.Submission));
             }
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:submit"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:submit"))
+        .Produces<SubmissionView>();
 
         // --- attach a document reference -------------------------------------------------------------------
         v1.MapPost("/{id:guid}/documents", async (
@@ -130,7 +136,8 @@ public static class SubmissionEndpoints
                 FieldClasses = ["financials"],
             }, ct);
             return Results.Ok(SubmissionView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<SubmissionView>();
     }
 
     private static IReadOnlyList<SubmissionLineInput>? ParseLines(IReadOnlyList<SubmissionLineBody> lines)

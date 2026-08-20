@@ -226,11 +226,18 @@ public static class OrdersEndpoints
                         tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason,
                         beneficiaryId = order.BeneficiaryId, encounterId = order.EncounterId,
                         orderedByUserId = order.CreatedBy,
+                        // WHO IS ASKING and WHAT FOR — the two facts an authorization cannot be created
+                        // without, added when this event became the routing feed's input
+                        // (ApprovalRoutingFeed). `serviceCodes` is not decoration: a partial approval must be
+                        // a strict subset of the requested codes, so an authorization ingested without them
+                        // can be approved or rejected outright and never narrowed, which is the decision the
+                        // approval team most often wants to make.
+                        providerId = order.OrderingProviderId == Guid.Empty ? (Guid?)null : order.OrderingProviderId,
+                        serviceCodes = order.Lines.Select(l => l.Code).Distinct(StringComparer.Ordinal).ToArray(),
                     }, ct);
             else
                 await outbox.EnqueueAsync("OrderActivated", "orders.events",
                     new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -238,25 +245,51 @@ public static class OrdersEndpoints
                 ActorUserId = actor, DecisionOutcome = order.Status.ToString(), DecisionReasonCode = route.Reason,
                 AfterState = $"{{\"orderNo\":\"{order.OrderNo}\",\"status\":\"{order.Status}\"}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/investigation-orders/{order.OrderId}", OrderResponse.From(order));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<OrderResponse>();
 
         // ---- Read (treating clinician) ----
-        v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, OrdersDbContext db, OrdersGate gate, CancellationToken ct) =>
+        //
+        // AUDITED. This is the single-order PHI read and it recorded nothing, while the DENIAL beside it —
+        // `gate.CheckAsync` — has always been audited by the engine. So a refused look was on the chain and a
+        // successful one was not, which is the wrong way round: the disclosure is the event a later enquiry
+        // is about. The order's own lines name what was investigated, so this is clinical content, not a
+        // reference lookup.
+        v1.MapGet("/{id:guid}", async (
+            Guid id, HttpRequest http, OrdersDbContext db, OrdersGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == id, ct);
             if (order is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(OrdersPolicies.Read, id.ToString(), order.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "investigation_order", EntityId = order.OrderId.ToString(), Action = AuditAction.Read,
+                ActorUserId = me.Principal?.Subject, TenantId = order.TenantId,
+                DecisionOutcome = "Allow", DecisionReasonCode = "order-detail", FieldClasses = ["phi"],
+            }, ct);
+
             return Results.Ok(OrderResponse.From(order));
-        });
+        })
+        .Produces<OrderResponse>();
 
         // ---- My orders (ordering clinician's worklist, US-032) ----
         // The orders I created, newest first, optionally filtered by status (e.g. Completed = the results inbox).
         // Scoped to the caller by CreatedBy == subject — no cross-clinician leakage, no treating-gate needed
         // (you always have a relationship with an order you authored).
-        v1.MapGet("/mine", async (string? status, OrdersDbContext db, IHbmpPrincipalAccessor me, BranchScopeState branch, CancellationToken ct) =>
+        //
+        // AUDITED too, one event per order disclosed. "You always have a relationship with an order you
+        // authored" answers the AUTHORIZATION question and not the audit one: a clinician's own worklist is
+        // still a set of named patients' investigations on a screen, and "who has seen this order?" must
+        // include the person who ordered it — they are the likeliest reader, not an exempt one.
+        v1.MapGet("/mine", async (
+            string? status, OrdersDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me,
+            BranchScopeState branch, CancellationToken ct) =>
         {
             var sub = me.Principal?.Subject;
             if (string.IsNullOrWhiteSpace(sub)) return Results.Ok(Array.Empty<OrderResponse>());
@@ -267,8 +300,18 @@ public static class OrdersEndpoints
             // set-scoped caller sees every branch they hold a grant to, and never more.
             q = q.ApplyBranchScope(o => o.OrderingBranchId, (me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal)), branch.Context);
             var rows = await q.OrderByDescending(o => o.RequestedAt).Take(100).ToListAsync(ct);
+
+            foreach (var o in rows)
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "investigation_order", EntityId = o.OrderId.ToString(), Action = AuditAction.Read,
+                    ActorUserId = sub, TenantId = o.TenantId,
+                    DecisionOutcome = "Allow", DecisionReasonCode = $"my-orders:{rows.Count}", FieldClasses = ["phi"],
+                }, ct);
+
             return Results.Ok(rows.Select(OrderResponse.From));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<OrderResponse>>();
 
         // ---- Cancel (not yet fully consumed) ----
         v1.MapPost("/{id:guid}/cancel", async (
@@ -308,6 +351,7 @@ public static class OrdersEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(OrderResponse.From(order));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<OrderResponse>();
     }
 }

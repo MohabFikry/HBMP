@@ -80,7 +80,27 @@ CREATE INDEX IF NOT EXISTS ix_bsg_history_grant
 -- ROW PARITY is the acceptance criterion: no principal gains or loses a branch by migration alone. Revoked
 -- assignments are copied as soft-deleted rather than skipped, so the grant table is a faithful record and a
 -- later reconciliation can compare the two tables row for row instead of explaining absences.
--- Idempotent: guarded by NOT EXISTS on the source assignment_id, which is reused as the grant_id.
+--
+-- IDEMPOTENT ON TWO KEYS, AND IT USED TO BE ONE.
+--
+-- The obvious guard is `NOT EXISTS (grant_id = assignment_id)`: an assignment already copied is not copied
+-- again. That is correct and it is not sufficient, because the grant table has a SECOND uniqueness rule —
+-- `ux_bsg_home_per_subject`, one live home per principal — keyed on (tenant_id, subject_user_id) rather than
+-- on the id. The two keys disagree the moment a home assignment is RE-ISSUED: the app revokes the old row
+-- and writes a new one with a fresh assignment_id, the id guard sees an uncopied assignment, and the insert
+-- collides with the home grant copied from its predecessor.
+--
+-- What that cost: `tools/ci/apply-migrations.sh` runs under `set -e` and re-applies every file on every
+-- pass, so from the first re-issued home onward the whole script aborted HERE — and every service after
+-- admin alphabetically silently stopped receiving migrations. The symptom was orders- and pharmacy-service
+-- integration tests failing on missing tables, several migrations away from the actual cause, on a database
+-- that looked migrated.
+--
+-- So the second guard matches the INDEX's predicate rather than the row's identity. A re-issued home is
+-- skipped, keeping the grant copied from its predecessor: same principal, same reach, which is what row
+-- parity actually asserts. The grant_id then no longer equals the current assignment_id for that row — a
+-- divergence the expand phase can carry, since 21.5 contracts this table to membership-keyed grants anyway
+-- and the reconciliation compares reach, not surrogate keys.
 
 INSERT INTO admin.branch_scope_grant (
     grant_id, tenant_id, subject_user_id, branch_id, is_home,
@@ -99,7 +119,20 @@ SELECT
     now()
 FROM admin.user_branch_assignment a
 WHERE NOT EXISTS (
-    SELECT 1 FROM admin.branch_scope_grant g WHERE g.grant_id = a.assignment_id);
+    SELECT 1 FROM admin.branch_scope_grant g WHERE g.grant_id = a.assignment_id)
+  -- The home guard. Its condition is the index predicate written out: a row is only capable of colliding
+  -- when it would itself be a LIVE HOME with a subject, so a revoked or additional assignment is never
+  -- suppressed by it — the parity test asserts all four shapes still copy.
+  AND NOT (
+        a.assignment_type = 'Home'
+    AND a.status <> 'Revoked'
+    AND a.subject_user_id IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM admin.branch_scope_grant g
+         WHERE g.tenant_id       = a.tenant_id
+           AND g.subject_user_id = a.subject_user_id
+           AND g.is_home
+           AND NOT g.is_deleted));
 
 INSERT INTO admin.branch_scope_grant_history (
     grant_id, tenant_id, membership_id, subject_user_id, branch_id, is_home,

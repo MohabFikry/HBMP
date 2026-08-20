@@ -17,7 +17,7 @@ public class ChronicAmendmentTests
     /// <summary>The prompt's script: 90 days, monthly, 3 units/day ⇒ 270 units over three windows of 90.</summary>
     private static AllocationRequest NinetyDays(int days = 90, int frequencyMonths = 1) =>
         new(DosePerAdministration: 1, TimesPerDay: 3, DurationDays: days,
-            FrequencyMonths: frequencyMonths, IsPackSplittable: true, PackSize: null);
+            FrequencyMonths: frequencyMonths, IsPackSplittable: true, PackContent: null);
 
     [Fact]
     public void The_original_script_is_270_over_three_windows_of_90()
@@ -188,7 +188,7 @@ public class ChronicAmendmentTests
         // Carried through from phase 29: "absence of data is never a clean result". An amendment must not be
         // the path that quietly invents an is_pack_splittable nobody recorded.
         var result = ChronicAmendment.Reallocate(
-            new AllocationRequest(1, 3, 60, 1, IsPackSplittable: null, PackSize: null), 0, 0);
+            new AllocationRequest(1, 3, 60, 1, IsPackSplittable: null, PackContent: null), 0, 0);
 
         result.Outcome.Should().Be(AmendmentOutcome.NotChecked);
         result.MissingField.Should().Be("is_pack_splittable");

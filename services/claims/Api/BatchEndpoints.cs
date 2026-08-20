@@ -38,7 +38,8 @@ public static class BatchEndpoints
             await Audit(deps, AuditAction.Create, r.Batch.BatchId.ToString(), "BatchCreated", null, r.Batch.Status.ToString());
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/claim-batches/{r.Batch.BatchId}", BatchView.From(r.Batch));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"))
+        .Produces<BatchView>();
 
         // --- membership ------------------------------------------------------------------------------------
         v1.MapPost("/{id:guid}/claims", async (Guid id, AddClaimBody body, ClaimsDeps deps, BatchService batches, CancellationToken ct) =>
@@ -49,7 +50,8 @@ public static class BatchEndpoints
             if (r.Outcome != BatchOutcome.Ok) return Map(r);
             await Audit(deps, AuditAction.Update, id.ToString(), "BatchClaimAdded", null, body.ClaimId.ToString());
             return Results.Ok(BatchView.From(r.Batch!));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"))
+        .Produces<BatchView>();
 
         v1.MapDelete("/{id:guid}/claims/{claimId:guid}", async (Guid id, Guid claimId, string? reason,
             ClaimsDeps deps, BatchService batches, CancellationToken ct) =>
@@ -62,7 +64,8 @@ public static class BatchEndpoints
             var severity = r.Batch!.Status == BatchStatus.UnderReview ? AuditSeverity.Notice : AuditSeverity.Info;
             await Audit(deps, AuditAction.Update, id.ToString(), "BatchClaimRemoved", claimId.ToString(), reason, severity);
             return Results.Ok(BatchView.From(r.Batch));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"))
+        .Produces<BatchView>();
 
         // --- lifecycle -------------------------------------------------------------------------------------
         v1.MapPost("/{id:guid}/submit-for-review", (Guid id, ClaimsDeps deps, BatchService b, CancellationToken ct) =>
@@ -93,7 +96,8 @@ public static class BatchEndpoints
             if (Enum.TryParse<BatchStatus>(status, true, out var st)) q = q.Where(b => b.Status == st);
             var rows = await q.OrderByDescending(b => b.CreatedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(BatchView.From).ToList());
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<IEnumerable<BatchView>>();
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
@@ -109,7 +113,8 @@ public static class BatchEndpoints
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && b.PayeeProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied");
             return Results.Ok(BatchView.From(b));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<BatchView>();
     }
 
     private static async Task<IResult> TransitionEndpoint(Guid id, BatchStatus to, string? reason,

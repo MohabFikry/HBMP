@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   Beneficiary360,
   CaseListItem,
@@ -18,6 +18,13 @@ const S = {
   casesTitle: { en: "My Cases", ar: "حالاتي" },
   casesEmpty: { en: "You have no assigned cases.", ar: "لا توجد حالات مُسندة إليك." },
   caseNo: { en: "Case", ar: "الحالة" },
+  search: { en: "Search", ar: "بحث" },
+  casesSearchHint: { en: "Case number, member token or category", ar: "رقم الحالة أو رمز العضو أو الفئة" },
+  escSearchHint: { en: "Case number or reason", ar: "رقم الحالة أو السبب" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filters.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
   beneficiary: { en: "Beneficiary", ar: "المستفيد" },
   category: { en: "Category", ar: "التصنيف" },
   priority: { en: "Priority", ar: "الأولوية" },
@@ -64,21 +71,53 @@ export function MyCases() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const cols: Column<CaseListItem>[] = [
-    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span> },
-    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
-    { key: "category", header: t(S.category), cell: (r) => <span>{r.category}</span> },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span>, sortable: true, sortValue: (r) => r.caseNo },
+    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span>, sortable: true, sortValue: (r) => r.beneficiary.token },
+    { key: "category", header: t(S.category), cell: (r) => <span>{r.category}</span>, sortable: true, sortValue: (r) => r.category },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "action",
       header: t(S.action),
       cell: (r) => (
-        <Button size="sm" variant={selected === r.id ? "primary" : "secondary"} onClick={() => setSelected(r.id)}>
+        <Button size="sm" variant="secondary" onClick={() => setSelected(r.id)}>
           {t(S.open)}
         </Button>
       ),
     },
   ];
+
+  /*
+    A caseworker's own load, which only grows. Priority and status are the two axes it is worked along —
+    "what is urgent" and "what is still open" — and both vocabularies are the domain's, so they are declared
+    rather than derived.
+
+    Read outside AsyncSection's render prop: a hook in there would be conditional on the load finishing.
+  */
+  const filters: TableFilterSpec<CaseListItem>[] = useMemo(() => [
+    {
+      key: "priority",
+      label: t(S.priority),
+      options: [
+        { value: "emergency", label: "emergency" },
+        { value: "urgent", label: "urgent" },
+        { value: "routine", label: "routine" },
+      ],
+      match: (r, value) => r.priority === value,
+    },
+  ], [t]);
+
+  const query = useTableQuery<CaseListItem>({
+    rows: cases.data ?? [],
+    columns: cols,
+    // The case number off a note, or the member token — the two things a caseworker arrives holding.
+    searchText: (r) => [r.caseNo, r.beneficiary.token, r.category].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.casesSearchHint),
+    filters,
+    pageSize: 25,
+    persistKey: "my-cases",
+  });
 
   return (
     <>
@@ -86,17 +125,19 @@ export function MyCases() {
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <AsyncSection state={cases} isEmpty={(d) => d.length === 0} emptyLabel={S.casesEmpty}>
-            {(rows) => (
+            {() => (
               // 18.D3 (U6): interactive rows with no onSelect — a keyboard user could focus a case and
               // press Enter to no effect. Enter/Space now opens the 360 panel, same as the mouse.
-              <DataTable
+              <DataTableView
+                query={query}
                 columns={cols}
-                rows={rows}
                 rowKey={(r) => r.id}
                 caption={t(S.casesTitle)}
                 interactive
                 selectedKey={selected ?? undefined}
                 onSelect={(r) => setSelected(r.id)}
+                emptyLabel={t(S.casesEmpty)}
+                noMatchesLabel={t(S.noMatches)}
               />
             )}
           </AsyncSection>
@@ -199,8 +240,8 @@ function CaseTasks({ caseId, t }: { caseId: string; t: (l: Localized) => string 
   const api = useApi();
   const tasks = useAsync<CoordinationTask[]>(() => api.caseTasks(caseId), [caseId]);
   const cols: Column<CoordinationTask>[] = [
-    { key: "title", header: t(S.tasksTitle), cell: (r) => t(r.title) },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "title", header: t(S.tasksTitle), cell: (r) => t(r.title), sortable: true, sortValue: (r) => t(r.title) },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -219,18 +260,41 @@ export function Escalations() {
   const t = useLoc();
   const state = useAsync<Escalation[]>(() => api.escalations(), []);
   const cols: Column<Escalation>[] = [
-    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span> },
-    { key: "raisedTo", header: t(S.raisedTo), cell: (r) => t(r.raisedToRole) },
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{fmt.dateTime(r.raisedAt)}</span> },
+    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span>, sortable: true, sortValue: (r) => r.caseNo },
+    { key: "raisedTo", header: t(S.raisedTo), cell: (r) => t(r.raisedToRole), sortable: true, sortValue: (r) => t(r.raisedToRole) },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{fmt.dateTime(r.raisedAt)}</span>, sortable: true, sortValue: (r) => r.raisedAt },
   ];
+
+  /** An escalation register: append-only in practice, and read newest-first for what is still outstanding. */
+  const query = useTableQuery<Escalation>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.caseNo, r.reason, t(r.raisedToRole)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.escSearchHint),
+    pageSize: 25,
+    initialSortKey: "raisedAt",
+    initialSortDir: "descending",
+    persistKey: "escalations",
+  });
+
   return (
     <>
       <PageHeader title={t(S.escTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.escEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.escTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.escTitle)}
+              emptyLabel={t(S.escEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

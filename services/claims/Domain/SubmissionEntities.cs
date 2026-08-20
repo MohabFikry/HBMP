@@ -24,6 +24,11 @@ public sealed class ClaimSubmission
     /// <summary>Idempotency key (header) — a retried submission with the same key is a no-op returning the first result.</summary>
     public string IdempotencyKey { get; set; } = default!;
 
+    /// <summary>SHA-256 of the canonical request this key produced (migration 0009). Without it a key reused
+    /// across two invoices returned the first claim, telling the provider their second invoice had been
+    /// received when nothing had been. NULL on pre-0009 rows: treated as a match.</summary>
+    public string? RequestHash { get; set; }
+
     public List<ClaimSubmissionLine> Lines { get; set; } = [];
 }
 

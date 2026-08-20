@@ -91,6 +91,15 @@ builder.Services.AddHostedService<ReportAccessExpirySweeper>();
 // Lab / imaging / procedure orders lapse the same way prescriptions do — see OrderExpirySweeper.
 builder.Services.AddHostedService<OrderExpirySweeper>();
 
+// THE RETURN LEG OF THE PRIOR-AUTHORIZATION SAGA (23 §2). `PendingApproval → Approved → Active` has been in
+// OrderWorkflow since phase 4 and nothing executed it: no service consumed `approvals.events`, so a gated
+// order stayed PendingApproval whatever the reviewer decided, and a rejected one was indistinguishable from
+// one still in the queue. Its own queue, because the transport is point-to-point and pharmacy needs the same
+// decisions.
+builder.Services.Configure<ApprovalDecisionConsumerOptions>(builder.Configuration.GetSection(ApprovalDecisionConsumerOptions.SectionName));
+builder.Services.AddScoped<OrderApprovalApplier>();
+builder.Services.AddHostedService<ApprovalDecisionConsumer>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

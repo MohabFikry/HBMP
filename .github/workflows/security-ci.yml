@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
   security-events: write # upload SARIF to code scanning
+  # Required for the SARIF upload on a PRIVATE repository: codeql-action reads the workflow run it is
+  # reporting against, and without this it fails with "Resource not accessible by integration" — after a
+  # clean scan. Absent it, the SCA gate reported failure while Trivy had exited 0.
+  actions: read
 
 jobs:
   secret-scan:
@@ -21,30 +25,114 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # The gitleaks BINARY, not gitleaks-action.
+      #
+      # The action branches on event type and takes a different path for pull_request, which needs a
+      # GITHUB_TOKEN and `pull-requests` permission to call the API. It had neither, so on PRs it failed
+      # before scanning anything — and it failed in a way indistinguishable from finding a secret. The gate
+      # that is supposed to stop a credential BEFORE it lands was the one event type it never ran on.
+      #
+      # Running the binary removes the branch: same command, same coverage, on pushes and pull requests
+      # alike, with no token and no added permission. It also scans the full history rather than only the
+      # PR's own commits, which is strictly more than the action was doing on its good path. `fetch-depth: 0`
+      # above is what makes that possible. Pinned by version so a scanner upgrade is a visible diff.
       - name: gitleaks (secret hygiene — 100% secrets outside code, NFR-034)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_CONFIG: .gitleaks.toml
+        id: gate_secret_scan
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.24.3 \
+            detect --source=/repo --config=/repo/.gitleaks.toml --redact --no-banner \
+                   --report-format=sarif --report-path=/repo/gitleaks.sarif
+      - name: Upload gitleaks SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: gitleaks.sarif }
+
+      # Heartbeat, so check-gate-freshness.py can tell "passing" from "never ran" — the same reason
+      # backend-ci and frontend-ci write one. Own file: the watchdog merges every gate-heartbeats*.json in
+      # the directory, newest wins, and an artifact carrying another workflow's gates would carry them stale.
+      # ADVISORY (`|| true`, always()): a missed heartbeat makes the watchdog alarm tomorrow, so losing this
+      # step raises the alarm rather than silencing it.
+      - name: Record gate heartbeat
+        if: always()
+        run: |
+          [ "${{ steps.gate_secret_scan.outcome }}" = "skipped" ] && exit 0
+          python3 tools/ci/check-gate-freshness.py --record secret-scan \
+            --state-dir .ci-state --state-file gate-heartbeats.secret-scan.json >/dev/null || true
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats-secret-scan
+          path: .ci-state
+          retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
   sca-sast-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # SCA + SAST (IaC/config/filesystem) — fail on Critical/High
+      #
+      # The tag is `v`-prefixed. It was written `@0.24.0`, which does not exist — every tag this action has
+      # ever published is `v0.24.0`-shaped — so the job died in "Set up job", before a single step ran, on
+      # every push since it was added. GitHub resolves actions during job setup, which is why the failure
+      # never named Trivy and read as infrastructure flake. A gate that has never once executed is not a
+      # gate, which is the case check-gate-freshness.py was written for; this one predates its coverage.
+      # The Trivy IMAGE, not trivy-action, for the same reason gitleaks runs as a binary above.
+      #
+      # Fixing the non-existent `@0.24.0` tag got the job as far as running, where it failed again inside
+      # the action's own `setup-trivy` installer — it missed its cache and then could not fetch the binary.
+      # That is a second moving part between this repository and the scan, and neither of its two failures
+      # said anything about the code being scanned. The official image is the scanner, pinned, with nothing
+      # to install.
+      #
+      # `--scanners vuln,secret,misconfig`: the misconfig scanner is the one that matters here and is not on
+      # by default for `fs`. It is what caught the SPA container running as root.
       - name: Trivy filesystem (SCA + config/SAST)
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: CRITICAL,HIGH
-          exit-code: "1" # block release (NFR-035/037)
-          ignore-unfixed: true
-          format: sarif
-          output: trivy-fs.sarif
+        id: gate_sca_sast
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo aquasec/trivy:0.65.0 \
+            fs /repo --scanners vuln,secret,misconfig \
+                     --severity CRITICAL,HIGH --ignore-unfixed \
+                     --exit-code 1 --no-progress \
+                     --format sarif --output /repo/trivy-fs.sarif
+      # continue-on-error, like the gitleaks upload above: publishing findings to code scanning is reporting,
+      # and reporting must not decide the gate. This job already failed once with Trivy exiting 0 and the
+      # upload erroring, which says "the SCA gate failed" about a clean scan — the same class of lie as a
+      # failed read reported as a finding.
       - name: Upload Trivy SARIF
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-fs.sarif }
+
+      # See the heartbeat note in secret-scan above. This job is the reason both are now in REQUIRED_GATES:
+      # it never executed once, and nothing said so.
+      - name: Record gate heartbeat
+        if: always()
+        run: |
+          [ "${{ steps.gate_sca_sast.outcome }}" = "skipped" ] && exit 0
+          python3 tools/ci/check-gate-freshness.py --record sca-sast-image \
+            --state-dir .ci-state --state-file gate-heartbeats.sca.json >/dev/null || true
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats-sca
+          path: .ci-state
+          retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
   codeql-dotnet:
     runs-on: ubuntu-latest

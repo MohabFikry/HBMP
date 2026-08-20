@@ -41,7 +41,8 @@ public static class BulkEndpoints
 
         templates.MapGet("", () => Results.Ok(BulkTemplates.All.Select(t => new BulkTemplateView(
             t.JobType.ToString(), t.PurposeEn, t.PurposeAr,
-            [.. t.Columns.Select(c => new BulkColumnView(c.Name, c.Kind.ToString(), c.Required, c.DescriptionEn, c.DescriptionAr))]))));
+            [.. t.Columns.Select(c => new BulkColumnView(c.Name, c.Kind.ToString(), c.Required, c.DescriptionEn, c.DescriptionAr))]))))
+        .Produces<IEnumerable<BulkTemplateView>>();
 
         // The downloadable file. Handing an operator the exact headers is the cheapest defence there is against
         // the column mismatch that otherwise fails the whole job.
@@ -88,7 +89,8 @@ public static class BulkEndpoints
             // as an error: the job RECORD exists, it is the answer to "what happened to my file", and it is
             // exactly what an operator needs to look at.
             return Results.Created($"/api/v1/bulk-jobs/{job.JobId}", BulkJobView.From(job));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+        .Produces<BulkJobView>();
     }
 
     // ---- Validate / commit / roll back -------------------------------------------------------------------
@@ -107,7 +109,8 @@ public static class BulkEndpoints
             return report.Refusal is null
                 ? Results.Ok(BulkValidationView.From(report))
                 : ProblemResults.Conflict("NOT_VALIDATABLE", report.Refusal);
-        });
+        })
+        .Produces<BulkValidationView>();
 
         write.MapPost("/{id:guid}/commit", async (
             Guid id, BulkJobEngine engine, PolicyGate gate, IPayerDirectory payers, IBranchDirectory branches,
@@ -121,7 +124,8 @@ public static class BulkEndpoints
             return report.Refusal is null
                 ? Results.Ok(BulkCommitView.From(report))
                 : ProblemResults.Conflict("NOT_COMMITTABLE", report.Refusal);
-        });
+        })
+        .Produces<BulkCommitView>();
 
         write.MapPost("/{id:guid}/rollback", async (
             Guid id, RollBackBulkJob req, BulkJobEngine engine, PolicyGate gate,
@@ -141,7 +145,8 @@ public static class BulkEndpoints
             return report.Refusal is null
                 ? Results.Ok(BulkRollbackView.From(report))
                 : ProblemResults.Conflict("NOT_ROLLBACKABLE", report.Refusal);
-        });
+        })
+        .Produces<BulkRollbackView>();
     }
 
     // ---- Reads -------------------------------------------------------------------------------------------
@@ -168,7 +173,8 @@ public static class BulkEndpoints
             if (await gate.CheckAsync(PolicyPolicies.Read, ct) is { } denied) return denied;
             var job = await db.BulkJobs.AsNoTracking().FirstOrDefaultAsync(j => j.JobId == id, ct);
             return job is null ? NotFound() : Results.Ok(BulkJobView.From(job));
-        });
+        })
+        .Produces<BulkJobView>();
 
         read.MapGet("/{id:guid}/reconciliation", async (Guid id, BulkJobEngine engine, PolicyGate gate, CancellationToken ct) =>
         {
@@ -196,7 +202,8 @@ public static class BulkEndpoints
                 items = rows.Select(r => new BulkRowView(
                     r.RowNumber, r.Status.ToString(), r.ErrorCode, r.ErrorDetail, r.ErrorDetailAr, r.TargetRef, r.AppliedAt)),
             });
-        });
+        })
+        .Produces<IEnumerable<BulkRowView>>();
     }
 
     // ---- Scope resolution --------------------------------------------------------------------------------
@@ -279,13 +286,13 @@ public sealed record BulkRowView(
 /// is about to move everybody onto the wrong plan.</summary>
 public sealed record BulkValidationView(
     BulkJobView Job, int TotalErrors, IReadOnlyList<BulkRowError> Errors,
-    IReadOnlyList<BulkRowPreview> WouldChange, bool Committable)
+    IReadOnlyList<BulkRowPreview> WouldChange, int TotalWouldChange, bool Committable)
 {
     public static BulkValidationView From(BulkValidationReport r)
     {
         ArgumentNullException.ThrowIfNull(r);
         return new BulkValidationView(BulkJobView.From(r.Job), r.TotalErrors, r.Errors, r.Preview,
-            BulkJobTransitions.MayCommit(r.Job.Status) && r.Job.ValidRows > 0);
+            r.TotalPreview, BulkJobTransitions.MayCommit(r.Job.Status) && r.Job.ValidRows > 0);
     }
 }
 

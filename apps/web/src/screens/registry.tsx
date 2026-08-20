@@ -82,8 +82,7 @@ const ClaimsInsights = lazy(() => import("./ClaimsPortal").then((m) => ({ defaul
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 // Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
 // super-admin (/platform) portal bases which share section paths.
-const AdminUsers = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminUsers })));
-const AdminPolicies = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminPolicies })));
+const AccessCatalogue = lazy(() => import("./AccessCatalogue").then((m) => ({ default: m.AccessCatalogue })));
 const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminTenants })));
 const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
 const ApprovalEngineAdmin = lazy(() => import("./ApprovalEngineAdmin").then((m) => ({ default: m.ApprovalEngineAdmin })));
@@ -111,7 +110,7 @@ const PatientProfile = lazy(() => import("./PatientProfile").then((m) => ({ defa
 const PolicyAnalytics = lazy(() => import("./PolicyAnalytics").then((m) => ({ default: m.PolicyAnalytics })));
 // User & access model (Phase 21.6, design 40) — the membership roster and its detail tabs share one chunk;
 // programme enablement is a separate chunk because only platform administration ever opens it.
-const MembershipRoster = lazy(() => import("./AccessAdmin").then((m) => ({ default: m.MembershipRoster })));
+const UsersAndAccess = lazy(() => import("./AccessAdmin").then((m) => ({ default: m.UsersAndAccess })));
 const ProgramAdmin = lazy(() => import("./ProgramAdmin").then((m) => ({ default: m.ProgramAdmin })));
 
 // 25.7 — Branch Management (design 42 §6). ONE portal, two roles: every path below is mounted once and
@@ -262,15 +261,21 @@ export const SCREENS: Record<string, () => ReactNode> = {
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
 // trailing section rather than enumerating both bases.
 const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
-  users: () => <AdminUsers />,
-  policies: () => <AdminPolicies />,
+  // 28.8 — `users` is gone from the catalog (merged into `access`), but the ROUTE stays mapped: a bookmark
+  // to /admin/users predates the merge, and answering it with a 404 would teach an administrator that the
+  // people surface disappeared. It resolves to the merged screen, which is where they were going.
+  users: () => <UsersAndAccess />,
+  // 28.9 — the SoD table this used to be is now one tab of the catalogue, beside the permissions it refuses
+  // combinations of and the roles built out of them.
+  policies: () => <AccessCatalogue />,
   tenants: () => <AdminTenants />,
   audit: () => <AdminGovernance />,
   "master-data": () => <AdminMasterData />,
   config: () => <AdminConfig />,
-  // 21.6 — the membership roster. Mounted under BOTH admin bases: an org admin administers their own
-  // tenant's memberships, and the server pins the tenant either way (asking for another is 403 + audited).
-  access: () => <MembershipRoster />,
+  // 28.16 — accounts and their memberships, in ONE table. Mounted under BOTH admin bases: an org admin
+  // administers their own tenant's memberships, and the server pins the tenant either way (asking for
+  // another is 403 + audited).
+  access: () => <UsersAndAccess />,
   // Platform administration only. The catalog omits it from the org-admin portal, but that is cosmetic —
   // the write endpoints require the platform-admin role and refuse regardless of who reaches the route.
   programs: () => <ProgramAdmin />,

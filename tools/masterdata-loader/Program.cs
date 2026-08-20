@@ -52,11 +52,18 @@ List<Mersal.MasterData.Domain.AtcClass> atc;
 List<Mersal.MasterData.Domain.Drug> drugs;
 List<Mersal.MasterData.Domain.DrugIndication> indications = [];
 LoadReport? indicationReport = null;
+var packOverrides = PackMeasurementOverrides.None;
 
 if (useDrugList)
 {
     Console.WriteLine($"drug source: {drugListPath} (workbook — includes indications)");
-    var load = Loaders.LoadDrugList(drugListPath, release, icd.Select(i => i.Code));
+    // 31.3 — measurements the workbook omits, read from a file a pharmacist can open. Subordinate to the
+    // sheet: they fill silences and never contradict it. Absent file ⇒ empty set ⇒ nothing changes.
+    packOverrides = PackMeasurementOverrides.Load(PackMeasurementOverrides.DefaultPath);
+    Console.WriteLine($"pack-measurement overrides: {packOverrides.Count} product(s) "
+                    + $"from {PackMeasurementOverrides.DefaultPath}");
+
+    var load = Loaders.LoadDrugList(drugListPath, release, icd.Select(i => i.Code), packOverrides);
     (drugReport, atcReport, indicationReport, atc, drugs, indications) =
         (load.DrugReport, load.AtcReport, load.IndicationReport, load.Atc, load.Drugs, load.Indications);
 }
@@ -174,19 +181,63 @@ Console.WriteLine($"\nreport written: {reportPath}");
 {
     var withUnit = drugs.Count(d => !string.IsNullOrWhiteSpace(d.PrescribingUnit));
     var withPack = drugs.Count(d => d.PackSize is > 0);
+    var withContent = drugs.Count(d => d.PackContent is > 0);
     var withSplit = drugs.Count(d => d.IsPackSplittable is not null);
     var complete = drugs.Count(d => !d.UnitDataIncomplete);
     var total = drugs.Count;
     string Pct(int n) => total == 0 ? "n/a" : $"{100.0 * n / total:F1}%";
 
     Console.WriteLine();
-    Console.WriteLine("=== 29.6 pack-data coverage (design 45 §6) ===");
+    Console.WriteLine("=== 29.6 / 31.3 pack-data coverage (design 45 §6) ===");
     Console.WriteLine($"  prescribing_unit    {withUnit,7:N0} / {total:N0}  ({Pct(withUnit)})");
     Console.WriteLine($"  pack_size           {withPack,7:N0} / {total:N0}  ({Pct(withPack)})");
+    Console.WriteLine($"  pack_content        {withContent,7:N0} / {total:N0}  ({Pct(withContent)})  ← the divisor");
     Console.WriteLine($"  is_pack_splittable  {withSplit,7:N0} / {total:N0}  ({Pct(withSplit)})");
     Console.WriteLine($"  ALL THREE (usable)  {complete,7:N0} / {total:N0}  ({Pct(complete)})");
     Console.WriteLine($"  unit_data_incomplete{total - complete,7:N0} — these report NotChecked NAMING the missing field,");
     Console.WriteLine( "                               never a guessed quantity (invariant 8).");
+
+    /*
+     * 31.3 — THE ROWS ONE CELL SHORT OF A BOX COUNT, listed rather than counted.
+     *
+     * A product whose unit and splittability are known but whose CONTENT is not is a row where the workbook
+     * has everything except the volume: "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and
+     * omits how many millilitres a pen holds, so the box's contents in IU are unknowable and the composer
+     * says so instead of dividing. These are worth naming because each is fixable by filling one cell, and
+     * a percentage does not tell anybody which cell.
+     */
+    var oneCellShort = drugs
+        .Where(d => !string.IsNullOrWhiteSpace(d.PrescribingUnit) && d.IsPackSplittable is not null
+                    && d.PackContent is null)
+        .OrderBy(d => d.Name, StringComparer.Ordinal)
+        .ToList();
+
+    /*
+     * 31.3 — AN OVERRIDE THAT MATCHED NOTHING.
+     *
+     * The measurement file is keyed on the workbook's own row ids, so an entry that no row matched means the
+     * catalogue moved on and the file did not — or that the sheet has since gained the column, in which case
+     * the sheet won and the line is now dead weight. Either way it is reported: a curated list nobody prunes
+     * decays into a list of things that used to be true, and silence is how that happens.
+     */
+    var strays = packOverrides.Unused();
+    if (strays.Count > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"  !! {strays.Count} pack-measurement override(s) matched no workbook row:");
+        foreach (var stray in strays) Console.WriteLine($"       {stray.SourceRowId,-8} {stray.TradeName}");
+    }
+
+    if (oneCellShort.Count > 0)
+    {
+        var contentPath = Path.Combine(reportDir, $"pack-content-missing-{release}.txt");
+        await File.WriteAllLinesAsync(contentPath, oneCellShort.Select(d =>
+            $"{d.SourceRowId,-8} {d.Name}  [unit={d.PrescribingUnit}, form={d.PackUnit}, strength={d.Strength}]"));
+        Console.WriteLine();
+        Console.WriteLine($"  {oneCellShort.Count:N0} products know their unit but not their box's contents —");
+        Console.WriteLine( "  a 'Volume / Weight' away from a box count. Listed in:");
+        Console.WriteLine($"    {contentPath}");
+    }
 }
 
 // --- 29.2: CPT routing reconciliation (design 45 §2) ---------------------------------------------------

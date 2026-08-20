@@ -43,7 +43,8 @@ public static class PractitionerEndpoints
         // --- Reference specialties (org data) ----------------------------------------------------
         read.MapGet("/specialties", async (ProviderDbContext db, CancellationToken ct) =>
             Results.Ok((await db.Specialties.AsNoTracking().Where(s => !s.IsDeleted).OrderBy(s => s.NameEn).ToListAsync(ct))
-                .Select(s => new { s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode })));
+                .Select(s => new SpecialtyView(s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode))))
+        .Produces<IEnumerable<SpecialtyView>>();
 
         // --- Create a practitioner ---------------------------------------------------------------
         // D3 (ADR-0029): a branch coordinator MAY create a practitioner. Central-only creation makes every new
@@ -97,6 +98,46 @@ public static class PractitionerEndpoints
             }
             await audit.EmitAsync(Draft(p, AuditAction.Create, me, tenant, "created"), ct);
             return Results.Created($"/api/v1/practitioners/{p.PractitionerId}", await ViewAsync(db, p.PractitionerId, canSeeLicense: true, ct));
+        })
+        .Produces<PractitionerView>();
+
+        // --- A practitioner's change history -----------------------------------------------------
+        //
+        // 0014 — the operational timeline. Every licence change has been AUDITED since 25.2, and the audit
+        // trail sits behind `audit:read`: Security, Compliance and the DPO. Correctly — it is hash-chained
+        // evidence whose own reads are audited. But it left the coordinator who administers a licence with no
+        // way to ask who last renewed it, about a record on their own clinic's roster.
+        //
+        // So this reads the history twin the trigger writes, at the SAME authority that maintains the
+        // licence, and under the same branch reach. `audit:read` is not widened, and must not be: handing
+        // clinic staff the compliance record to answer an operational question is precisely the
+        // minimum-necessary failure this platform's zoning exists to prevent.
+        //
+        // On the WRITE group, not the read one, and that is deliberate. The snapshot contains the licence
+        // number, which `ToView` masks for anyone without a licence-maintaining scope (reception holds
+        // `practitioner:read` for the booking picker). A history endpoint on the read group would hand the
+        // front desk, through the back door, the exact field the projection was built to withhold.
+        write.MapGet("/practitioners/{id:guid}/history", async (
+            Guid id, ProviderDbContext db, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var p = await db.Practitioners.AsNoTracking().Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant, ct);
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
+
+            var rows = await db.PractitionerHistory.AsNoTracking()
+                .Where(h => h.PractitionerId == id && h.TenantId == tenant)
+                .OrderBy(h => h.HistoryId)
+                .Take(200)
+                .ToListAsync(ct);
+
+            return Results.Ok(new
+            {
+                practitionerId = id,
+                entries = rows.ConvertAll(PractitionerHistoryView.From),
+            });
         });
 
         // --- Maintain a practitioner's licence ---------------------------------------------------
@@ -134,6 +175,11 @@ public static class PractitionerEndpoints
             p.LicenseNo = req.LicenseNo;
             p.LicenseExpiry = req.LicenseExpiry;
             p.UpdatedAt = clock.GetUtcNow();
+            // 0014 — the actor, so the history twin the trigger writes names a person rather than only a
+            // time. Stamped here rather than by the trigger because the database does not know who is
+            // holding the token.
+            p.UpdatedBy = me.Principal?.Subject;
+            p.UpdatedByName = me.Principal?.DisplayName;
 
             // 25.3 — a licence that moves EARLIER strands appointments beyond the new date, and the sweeper
             // will not catch it: the sweeper matches thresholds on exact days, so a correction back-dating an
@@ -248,9 +294,9 @@ public static class PractitionerEndpoints
             else
                 target.IsPrimary = true;
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "primary-specialty-set", req.SpecialtyCode), ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.PractitionerId, req.SpecialtyCode, IsPrimary = true });
         });
 
@@ -378,7 +424,8 @@ public static class PractitionerEndpoints
                 rows = [.. rows.Where(p => PractitionerLicence.IsValidAt(p.LicenseExpiry, on))];
 
             return Results.Ok(rows.Select(p => ToView(p, canSeeLicense, on)));
-        });
+        })
+        .Produces<IEnumerable<PractitionerView>>();
 
         // --- Licence alerts worklist (the coordinator's screen) ----------------------------------
         //

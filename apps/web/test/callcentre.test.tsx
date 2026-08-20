@@ -46,9 +46,9 @@ async function openReservePanel(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /**
- * Branch and clinic are the design-system Select, not a native <select>: a native one draws its option list in
- * the OS, so it cannot wear the Mersal surface at all. That makes it a combobox + listbox rather than something
- * `selectOptions` can drive, and these helpers are what the agent actually does.
+ * Every picker on this screen is a design-system Combobox, not a native <select>: a native one draws its
+ * option list in the OS, so it cannot wear the Mersal surface at all. That makes it a combobox + listbox
+ * rather than something `selectOptions` can drive, and these helpers are what the agent actually does.
  */
 async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
   await user.click(await screen.findByRole("combobox", { name }));
@@ -97,13 +97,13 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
       { providerId: "p2", locationId: "l2", branchId: "br-nasr", branchName: "Nasr City", label: "Mersal Nasr · Nasr Clinic", openSlots: 5 },
     ]),
     slots: vi.fn().mockResolvedValue([{ slotId: "slot-1", start: "2026-07-22T11:00:00Z" }]),
-    book: vi.fn().mockResolvedValue("ok"),
-    reschedule: vi.fn().mockResolvedValue("ok"),
-    cancel: vi.fn().mockResolvedValue("ok"),
+    book: vi.fn().mockResolvedValue({ kind: "ok" }),
+    reschedule: vi.fn().mockResolvedValue({ kind: "ok" }),
+    cancel: vi.fn().mockResolvedValue({ kind: "ok" }),
     // Returns a RESULT now. It used to resolve `undefined` for every call, which is what let the missing
     // `summary` argument survive: the server had required one since 20.3b and refused every close with 422,
     // and no test could see it because the fake always succeeded.
-    close: vi.fn().mockResolvedValue("ok"),
+    close: vi.fn().mockResolvedValue({ kind: "ok" }),
     history: vi.fn().mockResolvedValue([]),
     ...over,
   };
@@ -218,7 +218,7 @@ describe("Call Centre workspace: opening a member's file", () => {
 describe("15.5 — Call Centre workspace: act", () => {
   it("shows a clear recoverable state when a slot was just taken (409)", async () => {
     const user = userEvent.setup();
-    renderNode(<CallCentreWorkspace api={fakeApi({ book: vi.fn().mockResolvedValue("conflict") })} />);
+    renderNode(<CallCentreWorkspace api={fakeApi({ book: vi.fn().mockResolvedValue({ kind: "conflict" }) })} />);
     await startAndOpenMember(user);
 
     await pickClinicAndTime(user);
@@ -256,7 +256,7 @@ describe("15.5 — Call Centre workspace: act", () => {
 
   it("surfaces a recoverable state when the new slot was just taken (409)", async () => {
     const user = userEvent.setup();
-    renderNode(<CallCentreWorkspace api={fakeApi({ reschedule: vi.fn().mockResolvedValue("conflict") })} />);
+    renderNode(<CallCentreWorkspace api={fakeApi({ reschedule: vi.fn().mockResolvedValue({ kind: "conflict" }) })} />);
     await startAndOpenMember(user);
 
     await pickClinicAndTime(user);
@@ -465,7 +465,7 @@ describe("wrap-up: the call is only closed when the server says so", () => {
 
   it("keeps the call OPEN and says why when the server refuses the close", async () => {
     const user = userEvent.setup();
-    const api = fakeApi({ close: vi.fn().mockResolvedValue("summary-required") });
+    const api = fakeApi({ close: vi.fn().mockResolvedValue({ kind: "summary-required" }) });
     renderNode(<CallCentreWorkspace api={api} />);
     await startAndSearch(user);
 
@@ -505,7 +505,7 @@ describe("search hits and stale writes", () => {
     await startAndOpenMember(user);
 
     await user.click(screen.getByRole("button", { name: /^cancel appointment — /i }));
-    await user.selectOptions(screen.getByRole("combobox", { name: /cancellation reason/i }), "PatientRequest");
+    await choose(user, /cancellation reason/i, /^patient request$/i);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^cancel appointment$/i }));
 
     await waitFor(() => expect(api.cancel).toHaveBeenCalled());

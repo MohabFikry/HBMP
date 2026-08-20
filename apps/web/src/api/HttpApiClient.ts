@@ -96,6 +96,8 @@ import {
   type Soap,
   type DiagnosisRank,
   zIdentityUser,
+  zRoleCatalogEntry,
+  zScopeCatalogEntry,
   zRoleScopeGrant,
   zReportAccessRequestRow,
   zBeneficiaryDocument,
@@ -121,6 +123,7 @@ import {
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
   MasterDataEdit,
+  SystemConfigEdit,
   SetDocumentValidity,
   SaveApprovalRule,
   SetAutoDecision,
@@ -187,7 +190,43 @@ const toAllergyRecord = (a: any) => ({
  * an English currency prefix. A pre-formatted string also cannot be summed, sorted numerically, or
  * re-localised when the user switches language mid-session.
  */
-const money = (n: unknown) => { const v = Number(n ?? 0); return Number.isFinite(v) ? v : 0; };
+const money = (n: unknown, field: string): number => {
+  if (typeof n === "number" && Number.isFinite(n)) return n;
+  // A decimal serialised as text is tolerated when it parses — that is a serialisation choice, not a missing
+  // field, and only the second is what this refuses. `""`, `null` and `undefined` are not amounts.
+  if (typeof n === "string" && n.trim() !== "") {
+    const v = Number(n);
+    if (Number.isFinite(v)) return v;
+  }
+  throw new ApiError("schema", `${field}: expected an amount, got ${JSON.stringify(n)}`);
+};
+
+/**
+ * ============================================================================================================
+ * THE ADAPTER RESHAPES. IT DOES NOT INVENT.
+ * ============================================================================================================
+ * `money()` above used to read `Number(n ?? 0)` and fall back to `0` on anything unparseable, and required
+ * identifiers were written `id: r?.orderId ?? ""`. Both defaults are applied BEFORE `parseOr`, so the zod
+ * contract then validates a well-formed object and passes. Contract drift — a field the server renamed or
+ * stopped sending — became plausible wrong data instead of a loud failure, which is the one outcome the
+ * schema layer exists to prevent.
+ *
+ * What the two defaults actually assert is worth saying plainly. `?? 0` on an amount asserts that this
+ * provider is owed nothing; it appears on the finance settlement and utilization screens. `?? ""` on an id
+ * asserts an entity whose identifier is the empty string: it becomes a React key, a route parameter, and the
+ * body of the next write. `POST /orders//consume` is the shape of that mistake.
+ *
+ * These two refuse instead, and name the field. NOT a blanket rule against `??` in this file — most of the
+ * defaults here are legitimate adaptation (an absent label, an optional filter, a status the contract gives a
+ * default for) or a min-necessary null the screens deliberately render as "withheld". The rule is narrower
+ * and about consequence: where the substituted value would be BELIEVED, substitute nothing.
+ */
+const required = <T>(value: T | null | undefined, field: string): T => {
+  if (value === null || value === undefined || value === "") {
+    throw new ApiError("schema", `${field}: the service returned no value for a required identifier`);
+  }
+  return value;
+};
 /** Map a service case status (Open/Active/OnHold/Resolved/Closed) to the contract's snake_case enum. */
 const caseStatus = (s: unknown) =>
   ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[
@@ -287,7 +326,7 @@ function basisQuery(param: string, basis?: Record<string, number>): string {
 /** One practitioner row → the contract shape. Shared by the list and the create path. */
 function toPractitioner(p: any) {
   return parseOr(zPractitioner, {
-    id: p?.practitionerId ?? "",
+    id: required(p?.practitionerId, "practitioner.practitionerId"),
     practitionerType: String(p?.practitionerType ?? ""),
     name: { en: String(p?.fullNameEn ?? ""), ar: String(p?.fullNameAr ?? p?.fullNameEn ?? "") },
     primarySpecialty: p?.primarySpecialty ?? undefined,
@@ -513,8 +552,8 @@ export class HttpApiClient implements ApiClient {
   // `/reception/search`; there is deliberately no full-demographic "get by id" for reception (Reception≠EMR).
   // We adapt the card into the search-hit + result-card contract, caching the card so the check step needs no
   // second call (and never fabricates DOB/gender the card intentionally omits).
-  async searchEligibility(query: string) {
-    const r = (await getRaw(`/reception/search?q=${encodeURIComponent(query)}`)) as any;
+  async searchEligibility(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/reception/search?q=${encodeURIComponent(query)}`, signal)) as any;
     const cards: any[] = r?.results ?? [];
     receptionCards.clear();
     for (const c of cards) receptionCards.set(String(c.identity?.beneficiaryId), c);
@@ -556,7 +595,7 @@ export class HttpApiClient implements ApiClient {
         ? {
             planName: { en: "Benefit coverage", ar: "التغطية التأمينية" },
             band: neutral(categories.join(" · ")),
-            annualCapRemaining: cap ? money(cap.remaining) : undefined,
+            annualCapRemaining: cap ? money(cap.remaining, "coverage.annualCapRemaining") : undefined,
           }
         : null,
       visitGate: active
@@ -869,7 +908,7 @@ export class HttpApiClient implements ApiClient {
     // POST /encounters is where the CheckedIn + assigned-doctor rules are enforced, so starting a visit goes
     // through it rather than through a UI-only shortcut.
     const r = (await postRaw("/encounters", { beneficiaryId, appointmentId }, crypto.randomUUID())) as any;
-    return { encounterId: String(r?.encounterId ?? "") };
+    return { encounterId: String(required(r?.encounterId, "startEncounter.encounterId")) };
   }
 
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book
@@ -917,7 +956,7 @@ export class HttpApiClient implements ApiClient {
       crypto.randomUUID(),
     )) as any;
     return parseOr(zBookingResult, {
-      id: r?.appointmentId ?? "",
+      id: required(r?.appointmentId, "booking.appointmentId"),
       status: apptStatusChip(r?.status ?? "Booked"),
       scheduledStart: r?.scheduledStart ?? new Date().toISOString(),
     });
@@ -951,7 +990,7 @@ export class HttpApiClient implements ApiClient {
     return (r ?? []).map((e: any) =>
       parseOr(zPatientListItem, {
         id: e.encounterId,
-        beneficiaryId: String(e.beneficiaryId ?? ""),
+        beneficiaryId: String(required(e.beneficiaryId, "encounter.beneficiaryId")),
         // The name when emr has one — this is the TREATING clinician's own worklist, and they read the full
         // record behind every row. The masked token stays as the fallback for a walk-in that was never
         // booked, where no name was ever captured; blank would read as data loss.
@@ -999,7 +1038,7 @@ export class HttpApiClient implements ApiClient {
 
     return parseOr(zEncounter, {
       id: e.encounterId ?? encounterId,
-      patientId: e.beneficiaryId ?? "",
+      patientId: required(e.beneficiaryId, "encounter.beneficiaryId"),
       patientName: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
       openedAt: e.startedAt ?? new Date().toISOString(),
       signed: Boolean(note.isSigned),
@@ -1088,12 +1127,12 @@ export class HttpApiClient implements ApiClient {
       `/encounters/${encodeURIComponent(encounterId)}/diagnoses/${encodeURIComponent(diagnosisId)}`,
     );
   }
-  async searchIcd(query: string) {
+  async searchIcd(query: string, signal?: AbortSignal) {
     const q = query.trim();
     // An empty query means "show me nothing yet", not "show me the ICD-10 catalogue". masterdata would
     // happily return the first page of tens of thousands of codes, which is a list nobody picks from.
     if (q.length < 2) return [];
-    const r = (await getRaw(`/search?domain=icd&q=${encodeURIComponent(q)}`)) as any[];
+    const r = (await getRaw(`/search?domain=icd&q=${encodeURIComponent(q)}`, signal)) as any[];
     return (Array.isArray(r) ? r : []).map((x: any) =>
       parseOr(zIcdRef, { code: String(x?.code ?? ""), title: String(x?.title ?? "") }),
     );
@@ -1134,7 +1173,7 @@ export class HttpApiClient implements ApiClient {
   async requestValidityExtension(req: ValidityExtensionRequest) {
     const r = (await postRaw(`/authorizations/validity-extensions`, req, crypto.randomUUID())) as any;
     return parseOr(zValidityExtensionResult, {
-      authorizationId: r?.authorizationId ?? "",
+      authorizationId: required(r?.authorizationId, "validityExtension.authorizationId"),
       authNo: String(r?.authNo ?? ""),
       status: String(r?.status ?? ""),
     });
@@ -1180,7 +1219,7 @@ export class HttpApiClient implements ApiClient {
    * not the stored `category` — which is the CPT taxonomy and would put a chest x-ray and a blood count in
    * the same bucket.
    */
-  async searchCpt(query: string, sections: readonly CptSection[]) {
+  async searchCpt(query: string, sections: readonly CptSection[], signal?: AbortSignal) {
     const q = query.trim();
     if (q.length < 2) return [];
     // A comma-separated list, because the Labs tab is two sections. The ORDER of the 20 rows is decided
@@ -1188,6 +1227,7 @@ export class HttpApiClient implements ApiClient {
     // here would throw that away, since a page of 20 is already the top 20 of a much longer ranked list.
     const r = (await getRaw(
       `/cpt-codes?section=${encodeURIComponent(sections.join(","))}&q=${encodeURIComponent(q)}&pageSize=20`,
+      signal,
     )) as any;
     return ((r?.items ?? []) as any[]).map((c: any) =>
       parseOr(zCptRef, { code: String(c.code ?? ""), description: String(c.description ?? "") }),
@@ -1264,7 +1304,7 @@ export class HttpApiClient implements ApiClient {
       requestedServiceCodeSystem: "CPT",
     }, idem)) as any;
     return parseOr(zReferralCreated, {
-      referralId: String(r?.referralId ?? ""),
+      referralId: String(required(r?.referralId, "referral.referralId")),
       referralNo: String(r?.referralNo ?? ""),
       status: String(r?.status ?? ""),
       requestedServiceCode: r?.requestedServiceCode ?? null,
@@ -1360,7 +1400,7 @@ export class HttpApiClient implements ApiClient {
       })),
     }, idem)) as any;
     return parseOr(zInvestigationOrderResult, {
-      orderId: r?.orderId ?? "",
+      orderId: required(r?.orderId, "order.orderId"),
       orderNo: String(r?.orderNo ?? ""),
       status: String(r?.status ?? ""),
       requiresApproval: String(r?.status ?? "").toLowerCase() === "pendingapproval",
@@ -1524,6 +1564,16 @@ export class HttpApiClient implements ApiClient {
           frequency: l.frequency ?? null,
           quantityPrescribed: Number(l.quantityPrescribed ?? 0),
           quantityDispensed: Number(l.quantityDispensed ?? 0),
+          // 31.3 — read strictly. An absent unit renders as no unit; it is never filled in with a plausible
+          // one, because "1" meaning one box and "1" meaning one tablet are the same character.
+          quantityUnit: typeof l.quantityUnit === "string" && l.quantityUnit.length > 0
+            ? l.quantityUnit
+            : null,
+          // 31.5 — read strictly. A line written before the numbers were kept carries none, and 0 or 1 in
+          // their place would be a dose and a frequency nobody wrote.
+          doseAmount: typeof l.doseAmount === "number" ? l.doseAmount : null,
+          timesPerDay: typeof l.timesPerDay === "number" ? l.timesPerDay : null,
+          durationDays: typeof l.durationDays === "number" ? l.durationDays : null,
           refillsAllowed: Math.trunc(Number(l.refillsAllowed ?? 0)),
           status: rxStatus(l.status),
         })),
@@ -1896,6 +1946,11 @@ export class HttpApiClient implements ApiClient {
             : drugCoded(l.drugId),
           quantity: Math.max(1, Math.round(Number(l.quantityPrescribed ?? 1))),
           dispensed: Math.round(Number(l.quantityDispensed ?? 0)),
+          // 31.3 — read strictly. An absent unit shows as no unit; the one thing this screen must never do
+          // is put a plausible word next to a number that means something else.
+          quantityUnit: typeof l.quantityUnit === "string" && l.quantityUnit.length > 0
+            ? l.quantityUnit
+            : null,
           // The dose ALONE now. Route, frequency and duration travel as their own fields so the counter can
           // lay them out as the distinct facts they are; joining them into one string here left the screen
           // unable to say "duration not recorded" without parsing its own display text back apart.
@@ -1943,8 +1998,8 @@ export class HttpApiClient implements ApiClient {
   // Formulary substitutions (Phase 6.3, US-052) — master data is reference-only (auth, no scope). Search drugs
   // by name, then list a drug's policy-approved alternatives (same ATC-5 substance). Bilingual name from AR
   // where master data has it, else the EN name echoed (no machine translation).
-  async searchDrugs(query: string) {
-    const r = (await getRaw(`/drugs?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+  async searchDrugs(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/drugs?q=${encodeURIComponent(query)}&pageSize=20`, signal)) as any;
     return ((r?.items ?? []) as any[]).map((d: any) =>
       parseOr(zDrugRef, {
         drugId: d.drugId,
@@ -1961,8 +2016,8 @@ export class HttpApiClient implements ApiClient {
   // One field over trade name AND active ingredient: a prescriber searches by whichever name they know.
   // The uuid is carried from here all the way to submission — `prescribe()` above sent `req.drug.code`,
   // the ATC STRING, where the API expects a Guid, so that path could never work against real data.
-  async searchPrescribableDrugs(query: string) {
-    const r = (await getRaw(`/drugs/search?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+  async searchPrescribableDrugs(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/drugs/search?q=${encodeURIComponent(query)}&pageSize=20`, signal)) as any;
     return ((r?.items ?? []) as any[]).map((d: any) =>
       parseOr(zPrescribableDrug, {
         drugId: d.drugId,
@@ -2007,6 +2062,12 @@ export class HttpApiClient implements ApiClient {
         prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
           ? d.prescribingUnit
           : null,
+        // 31.3 — the SERVER's short form, never one reconstructed here. "Tablet" → "tabs" is a fact about
+        // the vocabulary the drug table owns, and a second copy of it beside a dose field is a second
+        // answer to what a medicine is counted in.
+        prescribingUnitShort: typeof d.prescribingUnitShort === "string" && d.prescribingUnitShort.length > 0
+          ? d.prescribingUnitShort
+          : null,
         packSize: typeof d.packSize === "number" ? d.packSize : null,
         isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
       }),
@@ -2026,7 +2087,7 @@ export class HttpApiClient implements ApiClient {
       diagnosisIcdCodes: req.diagnosisIcdCodes,
     })) as any;
     return parseOr(zValidationResult, {
-      validationId: r?.validationId ?? "",
+      validationId: required(r?.validationId, "validation.validationId"),
       ranAt: String(r?.ranAt ?? ""),
       engineVersion: String(r?.engineVersion ?? ""),
       overallState: r?.overallState ?? "NotChecked",
@@ -2082,6 +2143,12 @@ export class HttpApiClient implements ApiClient {
         prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
           ? d.prescribingUnit
           : null,
+        // 31.3 — the SERVER's short form, never one reconstructed here. "Tablet" → "tabs" is a fact about
+        // the vocabulary the drug table owns, and a second copy of it beside a dose field is a second
+        // answer to what a medicine is counted in.
+        prescribingUnitShort: typeof d.prescribingUnitShort === "string" && d.prescribingUnitShort.length > 0
+          ? d.prescribingUnitShort
+          : null,
         packSize: typeof d.packSize === "number" ? d.packSize : null,
         isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
       });
@@ -2107,7 +2174,7 @@ export class HttpApiClient implements ApiClient {
       packs: r?.packs ?? null,
       // Read strictly: an absent box count is NOT zero and NOT one, it is "this cannot be counted in boxes".
       boxes: typeof r?.boxes === "number" ? r.boxes : null,
-      packSize: r?.packSize ?? null,
+      packContent: r?.packContent ?? null,
       prescribingUnit: r?.prescribingUnit ?? null,
       isPackSplittable: r?.isPackSplittable ?? null,
     });
@@ -2122,7 +2189,10 @@ export class HttpApiClient implements ApiClient {
     // fetch them to hand back — a second reader of the catalogue is a second thing that can disagree with it.
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    /** 31.5 — what one box HOLDS, renamed from `packSize`: the pack size counts CONTAINERS for every
+     *  measured product and is the wrong divisor for all of them (31.3). Normally omitted — the server
+     *  resolves it from `drugId`. */
+    packContent?: number | null;
   }) {
     const r = (await postRaw(`/prescriptions/chronic-preview`, req)) as any;
     return parseOr(zChronicPreview, {
@@ -2175,7 +2245,7 @@ export class HttpApiClient implements ApiClient {
         : {}),
     }, idem)) as any;
     return parseOr(zPrescriptionSubmitResult, {
-      prescriptionId: r?.prescriptionId ?? "",
+      prescriptionId: required(r?.prescriptionId, "prescription.prescriptionId"),
       rxNo: String(r?.rxNo ?? ""),
       status: String(r?.status ?? ""),
     });
@@ -2301,7 +2371,7 @@ export class HttpApiClient implements ApiClient {
     const codes: string[] = a?.serviceCodes ?? [];
     return parseOr(zApprovalReview, {
       id: a?.authorizationId ?? approvalId,
-      patient: { id: a?.beneficiaryId ?? "", token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
+      patient: { id: required(a?.beneficiaryId, "approval.beneficiaryId"), token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
       service: { system: "CPT", code: codes[0] ?? "—", label: neutral(codes[0] ?? "") },
       clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
       supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
@@ -2525,8 +2595,8 @@ export class HttpApiClient implements ApiClient {
         status: coverageChip(b.coverage?.status),
         planName: neutral(b.coverage?.policyName ?? "—"),
         coverageCategory: neutral(b.coverage?.coverageCategory ?? "—"),
-        annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit) : undefined,
-        remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit) : undefined,
+        annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit, "coverage.annualLimit") : undefined,
+        remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit, "coverage.remainingLimit") : undefined,
       },
       carePlan: {
         status: neutral(b.carePlan?.status ?? "None"),
@@ -2578,7 +2648,7 @@ export class HttpApiClient implements ApiClient {
     return items.map((e: any) =>
       parseOr(zEscalation, {
         id: e.escalationId ?? e.id,
-        caseId: e.caseId ?? "",
+        caseId: required(e.caseId, "caseEvent.caseId"),
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
@@ -2603,11 +2673,11 @@ export class HttpApiClient implements ApiClient {
         providerRef: x.providerRef ?? undefined,
         authorizedQty: x.authorizedQty ?? 0,
         deliveredQty: x.deliveredQty ?? 0,
-        spend: money(x.spend),
+        spend: money(x.spend, "utilization.rows[].spend"),
       })),
       totalAuthorized: r?.totalAuthorized ?? 0,
       totalDelivered: r?.totalDelivered ?? 0,
-      totalSpend: money(r?.totalSpend),
+      totalSpend: money(r?.totalSpend, "utilization.totalSpend"),
     });
   }
   async settlements() {
@@ -2621,15 +2691,15 @@ export class HttpApiClient implements ApiClient {
         periodStart: s.periodStart ?? "",
         periodEnd: s.periodEnd ?? "",
         currency: s.currency ?? "EGP",
-        total: money(s.total),
+        total: money(s.total, "settlement.total"),
         status: "ok",
         state: String(s.state ?? s.status ?? "draft").toLowerCase(),
         lines: (s.lines ?? []).map((l: any) => ({
           serviceCode: l.serviceCode,
           serviceLine: neutral(l.serviceLine),
           deliveredQty: l.deliveredQty ?? 0,
-          agreedUnitPrice: money(l.agreedUnitPrice),
-          lineTotal: money(l.lineTotal),
+          agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
+          lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
         })),
       }),
     );
@@ -2643,10 +2713,10 @@ export class HttpApiClient implements ApiClient {
       buckets: buckets.map((b: any) => ({
         key: neutral(b.key),
         deliveredQty: b.deliveredQty ?? 0,
-        spend: money(b.spend),
+        spend: money(b.spend, "financialSummary.buckets[].spend"),
         sharePercent: Math.round((Number(b.spend ?? 0) / total) * 100),
       })),
-      totalSpend: money(r?.totalSpend ?? total),
+      totalSpend: money(r?.totalSpend ?? total, "financialSummary.totalSpend"),
     });
   }
   async exportReport(req: ExportRequest) {
@@ -2768,12 +2838,108 @@ export class HttpApiClient implements ApiClient {
         id: String(u.id),
         username: String(u.username ?? ""),
         displayName: String(u.displayName ?? u.username ?? ""),
+        // NOT masked, unlike the tenant beside it. The address is the sign-in credential and the destination
+        // of every reset link, so an administrator who cannot read it cannot tell whether the button they
+        // are about to press will reach the person — which is the whole question that button asks.
+        email: u.email ?? null,
+        // Absent normalised to null, never "": the table branches on "is there a title", and a blank string
+        // would render an empty cell where the honest answer is "none recorded".
+        position: u.position ? String(u.position) : null,
         tenantId: u.tenantId ? `•••${String(u.tenantId).replace(/-/g, "").slice(-4)}` : undefined,
         isActive: u.isActive !== false,
         twoFactorEnabled: u.twoFactorEnabled === true,
         roles: Array.isArray(u.roles) ? u.roles.map(String) : [],
       }),
     );
+  }
+
+  // ---- 28.8/28.9 — administering people ------------------------------------------------------------------
+  //
+  // Thin by design. Each of these is one call to an endpoint that has enforced its own rules since 17.4 —
+  // the SoD engine, the MFA gate, the audit write, the membership mirror. Anything clever here would be a
+  // second opinion about a decision the server has already made correctly.
+
+  async createIdentityUser(input: {
+    username: string; displayName: string; email: string; tenantId?: string; roles: string[]; lang?: "en" | "ar";
+    position?: string;
+  }) {
+    const r = (await postAbsolute(`${GATEWAY_BASE}/identity/admin/users`, input)) as any;
+    return { id: String(r?.id ?? ""), resetLinkSent: r?.resetLinkSent === true };
+  }
+
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}`, input);
+  }
+
+  async myProfile() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/me/profile`)) as any;
+    return {
+      displayName: String(r?.displayName ?? ""),
+      // Normalised to null rather than left as undefined: the app bar branches on "is there a title", and
+      // two falsy shapes for one absence is how that branch eventually gets written wrong.
+      position: r?.position ? String(r.position) : null,
+    };
+  }
+
+  async setIdentityUserRoles(id: string, roles: string[]) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/roles`, { roles });
+  }
+
+  async deactivateIdentityUser(id: string) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/deactivate`, {});
+  }
+
+  async reactivateIdentityUser(id: string) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/reactivate`, {});
+  }
+
+  async sendPasswordResetLink(id: string, lang?: "en" | "ar") {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/reset-password`, { lang });
+  }
+
+  async changeMyPassword(currentPassword: string, newPassword: string) {
+    // `/identity/me`, not `/identity/admin`: changing your own password needs no administrative scope, and
+    // putting it behind one would mean the people most likely to need it could not.
+    await postAbsolute(`${GATEWAY_BASE}/identity/me/password`, { currentPassword, newPassword });
+  }
+
+  async scopeCatalog() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/scopes`)) as any[];
+    return (Array.isArray(r) ? r : []).map((s: any) =>
+      parseOr(zScopeCatalogEntry, {
+        name: String(s.name ?? ""),
+        domain: String(s.domain ?? ""),
+        description: s.description ?? null,
+        serviceOnly: s.serviceOnly === true,
+        deprecated: s.deprecated === true,
+        replacedBy: s.replacedBy ?? null,
+        isPlatformAdminKey: s.isPlatformAdminKey === true,
+        heldBy: Array.isArray(s.heldBy) ? s.heldBy.map(String) : [],
+      }),
+    );
+  }
+
+  async roleCatalog() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/roles`)) as any[];
+    return (Array.isArray(r) ? r : []).map((x: any) =>
+      parseOr(zRoleCatalogEntry, {
+        name: String(x.name ?? ""),
+        description: x.description ?? null,
+        sensitivityTier: String(x.sensitivityTier ?? "T1"),
+        level: typeof x.level === "number" ? x.level : null,
+        custom: x.custom === true,
+        builtIn: x.builtIn === true,
+        scopes: Array.isArray(x.scopes) ? x.scopes.map(String) : [],
+      }),
+    );
+  }
+
+  async createRole(input: { name: string; scopes: string[]; description?: string; sensitivityTier?: string }) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/roles`, input);
+  }
+
+  async setRoleScopes(role: string, scopes: string[]) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/roles/${encodeURIComponent(role)}/scopes`, { scopes });
   }
 
   /** 18.C2 (W5) — the live role→scope matrix, read from the issuer's own catalog rather than inferred. */
@@ -2881,7 +3047,7 @@ export class HttpApiClient implements ApiClient {
   async createProvider(input: CreateProviderInput, idempotencyKey?: string) {
     const r = (await postRaw(`/providers`, { providerCode: input.code, legalName: input.legalName, providerType: input.providerType }, idempotencyKey)) as any;
     return parseOr(zProviderSummary, {
-      id: r?.providerId ?? "",
+      id: required(r?.providerId, "provider.providerId"),
       code: String(r?.providerCode ?? input.code),
       legalName: String(r?.legalName ?? input.legalName),
       providerType: String(r?.providerTypeLabel ?? r?.providerType ?? input.providerType),
@@ -2948,7 +3114,7 @@ export class HttpApiClient implements ApiClient {
     const r = (await getRaw(`/branches`)) as any[];
     return (Array.isArray(r) ? r : []).map((b: any) =>
       parseOr(zBranchSummary, {
-        id: b?.branchId ?? "",
+        id: required(b?.branchId, "branch.branchId"),
         code: String(b?.branchCode ?? ""),
         name: { en: String(b?.nameEn ?? b?.branchCode ?? ""), ar: String(b?.nameAr ?? b?.nameEn ?? "") },
         city: b?.city ?? undefined,
@@ -3075,7 +3241,7 @@ export class HttpApiClient implements ApiClient {
     const r = (await getRaw(`/booking/doctor-availability${qs}`)) as any[];
     return (Array.isArray(r) ? r : []).map((d: any) =>
       parseOr(zDoctorAvailability, {
-        doctorId: d?.doctorId ?? "",
+        doctorId: required(d?.doctorId, "doctorAvailability.doctorId"),
         branchId: d?.branchId ?? undefined,
         openSlots: Number(d?.openSlots ?? 0),
         nextSlotStart: String(d?.nextSlotStart ?? ""),
@@ -3159,7 +3325,7 @@ export class HttpApiClient implements ApiClient {
     };
     const r = (await postRaw(`/beneficiaries`, body, idem)) as any;
     return parseOr(zRegisterResult, {
-      id: r?.beneficiaryId ?? "",
+      id: required(r?.beneficiaryId, "beneficiary.beneficiaryId"),
       memberNo: r?.memberNo ?? undefined,
       status: beneficiaryStatusChip(r?.status ?? "Pending"),
     });
@@ -3363,7 +3529,7 @@ export class HttpApiClient implements ApiClient {
       retired: edit.retired,
     })) as any;
     return {
-      id: String(r?.versionId ?? ""),
+      id: String(required(r?.versionId, "masterDataVersion.versionId")),
       code: String(r?.code ?? edit.code),
       versionNo: Number(r?.versionNo ?? 0),
     };
@@ -3382,7 +3548,7 @@ export class HttpApiClient implements ApiClient {
       attributes = JSON.parse(String(r?.attributesJson ?? "{}"));
     } catch { attributes = {}; }
     return parseOr(zMasterDataAsOf, {
-      id: r?.versionId ?? "",
+      id: required(r?.versionId, "masterDataVersion.versionId"),
       versionNo: Number(r?.versionNo ?? 0),
       attributes,
       effectiveFrom: r?.effectiveFrom ?? new Date().toISOString(),
@@ -3440,7 +3606,7 @@ export class HttpApiClient implements ApiClient {
    */
   async saveApprovalRule(req: SaveApprovalRule) {
     const r = (await postRaw(`/approval-rules/`, req)) as any;
-    return { id: String(r?.ruleId ?? ""), versionNo: Number(r?.versionNo ?? 1) };
+    return { id: String(required(r?.ruleId, "approvalRule.ruleId")), versionNo: Number(r?.versionNo ?? 1) };
   }
 
   /** The tenant's auto-decision kill switch. A tenant that never touched it reads `enabled: false`. */
@@ -3479,6 +3645,32 @@ export class HttpApiClient implements ApiClient {
         versionNo: Number(c.versionNo ?? 0),
       }),
     );
+  }
+
+  /**
+   * Set one configuration value. The server validates the value AGAINST the declared type and answers 422
+   * with the reason (`not-an-integer`, `not-a-duration`) when it does not parse, which the editor renders
+   * beside the field rather than as a toast.
+   */
+  async adminSystemConfigSet(edit: SystemConfigEdit) {
+    const r = (await putRaw(`/admin/system-config`, {
+      key: edit.key,
+      valueType: edit.type,
+      value: edit.value,
+      tenant: edit.tenantId ?? null,
+    })) as any;
+    return parseOr(zSystemConfigEntry, {
+      id: r?.configId ?? r?.id,
+      // The response carries no tenant — the server pinned it from the token, so the value we sent (or the
+      // caller's own tenant when we sent none) is the only honest thing to report back.
+      tenantId: edit.tenantId ?? "",
+      key: String(r?.key ?? edit.key),
+      type: String(r?.valueType ?? r?.type ?? edit.type),
+      // The CANONICAL value, not the one typed: the server normalises `TRUE` to `true` and `1.50` to `1.5`,
+      // and echoing the input back would show the administrator a value the platform is not using.
+      value: String(r?.value ?? edit.value),
+      versionNo: Number(r?.versionNo ?? 0),
+    });
   }
 
   // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------
@@ -3524,6 +3716,14 @@ export class HttpApiClient implements ApiClient {
     await postAbsolute(
       `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/overrides`,
       input,
+    );
+  }
+
+  async removeMembershipOverride(membershipId: string, scopeKey: string) {
+    // The key is a path SEGMENT and it contains colons (`orders:read`), so the encode is load-bearing rather
+    // than defensive — an unencoded key is a different URL from the one the route matches.
+    await deleteAbsolute(
+      `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/overrides/${encodeURIComponent(scopeKey)}`,
     );
   }
 
@@ -3587,7 +3787,7 @@ export class HttpApiClient implements ApiClient {
     return (Array.isArray(r) ? r : []).map((g: any) =>
       parseOr(zBranchScopeGrant, {
         grantId: String(g.assignmentId ?? g.grantId ?? g.id),
-        branchId: String(g.branchId ?? ""),
+        branchId: String(required(g.branchId, "branchScopeGrant.branchId")),
         isHome: g.isHome === true || g.assignmentType === "Home",
         validFrom: String(g.validFrom ?? "").slice(0, 10),
         validUntil: g.validTo || g.validUntil ? String(g.validTo ?? g.validUntil).slice(0, 10) : null,
@@ -3657,7 +3857,7 @@ function membershipRowOf(m: any) {
     userId: String(m?.userId),
     username: String(m?.username ?? ""),
     displayName: String(m?.displayName ?? m?.username ?? ""),
-    tenantId: String(m?.tenantId ?? ""),
+    tenantId: String(required(m?.tenantId, "membership.tenantId")),
     status: membershipStatusChip(status),
     roles: (Array.isArray(m?.roles) ? m.roles : []).map((r: any) => ({
       name: String(r.name ?? ""),
@@ -3710,6 +3910,11 @@ function rxLines(lines: PrescriptionDraftLine[]) {
       route: "Oral",
       frequency: "Daily",
       quantityPrescribed: l.quantity,
+      // 31.3 — what that number counts, snapshotted with it. The composer knows because it is what the
+      // Quantity field is labelled with; the counter cannot know, and renders the figure alone.
+      // `|| null`, not `?? null`: the draft carries "" for "nothing computed", and an empty string stored
+      // against a quantity is a unit that exists and says nothing. Absent is the honest wire value.
+      quantityUnit: l.quantityUnit || null,
       refillsAllowed: 0,
       durationDays: l.durationDays,
       clientLineId: l.lineId,

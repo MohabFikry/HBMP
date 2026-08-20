@@ -89,6 +89,22 @@ describe.each([
     expect(ratio, `--on-accent on --accent is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA);
   });
 
+  /**
+   * 2026-08-09 audit — the accent on its OWN TINT.
+   *
+   * `--accent` carries "5.2:1" beside it, and that is true against white. It is 4.44:1 on `--accent-tint`,
+   * which is the background every hover and every selected row paints underneath it. The active nav item was
+   * caught and fixed when the browser contrast job first ran; its hover twin, the ghost button and the icon
+   * button were not, because that job samples 12 of 112 routes and never paints a hover state at all.
+   *
+   * Checked here rather than left to the browser for exactly that reason: a pairing that only exists under
+   * the pointer is one no screenshot pass will ever composite.
+   */
+  it("--accent-press on --accent-tint (the hover/selected pairing)", () => {
+    const ratio = contrast(t["accent-press"], t["accent-tint"]);
+    expect(ratio, `--accent-press on --accent-tint is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA);
+  });
+
   it.each(["ok", "info", "part", "warn", "bad", "neu"])("--st-%s-fg on its own bg", (status) => {
     const fg = t[`st-${status}-fg`];
     const bg = t[`st-${status}-bg`];
@@ -96,6 +112,104 @@ describe.each([
     expect(bg, `--st-${status}-bg missing`).toBeDefined();
     const ratio = contrast(fg, bg);
     expect(ratio, `--st-${status}-fg on --st-${status}-bg is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA);
+  });
+});
+
+/**
+ * EVERY rule that paints text on `--accent-tint`, swept out of the stylesheet.
+ *
+ * The hand-listed pair above says the pairing the fix chose is safe. This says nobody has since added a
+ * fourth hover rule with a different colour in it — which is precisely how the three came to exist: the
+ * active nav item was fixed when the browser job first ran, and the hover twin two lines above it was not,
+ * because that job samples 12 routes and never paints a hover state at all.
+ *
+ * Structural rather than a list, because a list of known-bad pairs is a list somebody has to remember to add
+ * to. This reads the CSS.
+ */
+describe("the floating back-to-top button carries its own contrast", () => {
+  /**
+   * A control with nothing around it has no container to borrow structure from, and this one shipped as
+   * `--surface-1` with a `--border` hairline: #ffffff behind a #d7e3e3 line, which is 1.19:1 against the page
+   * and 1.00:1 against a white section card — invisible, exactly as reported. WCAG 1.4.11 wants 3:1 for the
+   * boundary of a UI component against what is behind it, and a floating button is the case that rule is for.
+   *
+   * Pinned per theme, against every surface it can float over, so "make it subtle" cannot quietly return it
+   * to a white circle on a white card.
+   */
+  const UI_COMPONENT = 3; // WCAG 1.4.11 non-text contrast
+
+  describe.each([
+    ["light", 'html[data-theme="light"]'],
+    ["dark", 'html[data-theme="dark"]'],
+  ])("%s theme", (_name, selector) => {
+    const t = theme(selector);
+
+    it.each(["surface-0", "surface-1", "surface-2"])("the accent fill stands off --%s", (surface) => {
+      const ratio = contrast(t.accent, t[surface]);
+      expect(
+        ratio,
+        `the button (--accent ${t.accent}) on --${surface} (${t[surface]}) is ${ratio.toFixed(2)}:1, ` +
+          `below the ${UI_COMPONENT}:1 a UI component needs to be discernible`,
+      ).toBeGreaterThanOrEqual(UI_COMPONENT);
+    });
+
+    it("the chevron is legible on the fill", () => {
+      // --on-accent exists precisely because white fails on the dark theme's lightened teal (1.79:1).
+      const ratio = contrast(t["on-accent"], t.accent);
+      expect(
+        ratio,
+        `--on-accent (${t["on-accent"]}) on --accent (${t.accent}) is ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(AA);
+    });
+
+    it("the hover fill stays discernible too", () => {
+      const ratio = contrast(t["accent-press"], t["surface-0"]);
+      expect(ratio, `--accent-press on the page is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(UI_COMPONENT);
+    });
+  });
+
+  it("is actually painted in the accent, not a surface", () => {
+    // The arithmetic above is about tokens; this is what ties it to the button. A rule that goes back to
+    // `background: var(--surface-1)` would sail past every ratio here while being the original bug.
+    const css = readFileSync(resolve(__dirname, "../src/styles/app.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = /\.scrolltop\s*\{([^}]*)\}/.exec(css);
+    expect(rule, ".scrolltop rule should exist").not.toBeNull();
+    expect(rule![1], "the floating button is accent-filled").toMatch(/background:\s*var\(--accent\)/);
+    expect(rule![1], "and its glyph uses the theme-derived on-accent").toMatch(/color:\s*var\(--on-accent\)/);
+  });
+});
+
+describe("text painted on --accent-tint", () => {
+  const CSS = resolve(__dirname, "../../design-system/src/styles/components.css");
+
+  /** Selector → the colour token it sets, for every rule whose background is the accent tint. */
+  function tintedRules(): Array<{ selector: string; color: string }> {
+    const src = readFileSync(CSS, "utf8");
+    const out: Array<{ selector: string; color: string }> = [];
+    for (const [, selector, body] of src.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/background:\s*var\(--accent-tint\)/.test(body)) continue;
+      const color = /(?:^|[\s;])color:\s*var\(--([a-z0-9-]+)\)/.exec(body);
+      // No colour of its own ⇒ it inherits, and the inherited body text is checked by the sweep above.
+      if (color) out.push({ selector: selector.trim().split("\n").pop()!.trim(), color: color[1] });
+    }
+    return out;
+  }
+
+  it("finds the rules — an empty sweep would make the assertions below vacuous", () => {
+    expect(tintedRules().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each([
+    ["light", 'html[data-theme="light"]'],
+    ["dark", 'html[data-theme="dark"]'],
+  ])("is AA in the %s theme", (_name, selector) => {
+    const t = theme(selector);
+    const failures = tintedRules()
+      .map((r) => ({ ...r, ratio: contrast(t[r.color], t["accent-tint"]) }))
+      .filter((r) => r.ratio < AA)
+      .map((r) => `${r.selector} uses --${r.color} → ${r.ratio.toFixed(2)}:1`);
+
+    expect(failures, `on --accent-tint (${t["accent-tint"]}):\n  ${failures.join("\n  ")}`).toEqual([]);
   });
 });
 

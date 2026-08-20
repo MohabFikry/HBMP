@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, Select, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, Icon, InlineAlert, Tabs, useTheme } from "@mersal/design-system";
 import type { IconName, TabItem } from "@mersal/design-system";
 import type {
   CallHistoryRow,
@@ -19,6 +19,7 @@ import { permissionsForRole, hasPermission, type Permission, type Role } from ".
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile } from "./_shared";
 import { SectionView } from "./ProfileSectionViews";
+import { ScrollToTop } from "../shell/ScrollToTop";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -221,6 +222,10 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
       <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => !p || p.sections.length === 0}>
         {(profile) => <ProfileBody profile={profile!} onRetry={state.reload} />}
       </AsyncSection>
+      {/* What replaced the sticky tab bar. Mounted here rather than in `AppShell` because this is the screen
+          whose affordance it is standing in for — every other screen keeps the scrolling it already had. It
+          is written to be shell-level, so promoting it later is moving this one line. */}
+      <ScrollToTop />
     </>
   );
 }
@@ -903,13 +908,16 @@ function CallHistoryView({ data, beneficiaryId }: { data: CallHistorySection; be
     <div className="call-history">
       <div className="call-history-toolbar">
         {/*
-          The design-system Select, not a native <select>. A native one cannot style its own option list —
+          The design-system Combobox, not a native <select>. A native one cannot style its own option list —
           the popup is drawn by the OS — so it arrived system-blue and square-cornered inside a rounded
           Mersal card, with a default border no other control on the profile has. Same reason the branch
-          switcher in the app bar was converted; the keyboard contract (arrows, Home/End, typeahead, Escape)
-          is unchanged.
+          switcher in the app bar was converted.
+
+          A bare Combobox rather than a ComboboxField: this is a toolbar filter sitting beside a Copy-all
+          button, not a field in a form, so it carries its name in `aria-label` and no visible label — the
+          same treatment the toolbar search has.
         */}
-        <Select
+        <Combobox
           aria-label={t(STR.filterByDirection)}
           value={direction}
           onChange={(v) => setDirection(v as typeof direction)}

@@ -92,6 +92,7 @@ public class UiGatingIsCosmeticTests(IdentityHostFixture host) : IClassFixture<I
                 ("create a user", () => client.PostAsJsonAsync("/identity/admin/users", new
                 {
                     username = "smuggled", displayName = "S", password = Password,
+                    email = "smuggled@example.org",
                     tenantId = TestFlow.TenantA, roles = new[] { "super_admin" },
                 })),
             };

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { NetworkTierView, PolicyApi, TierAssignmentView, TierResolutionView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -12,6 +13,7 @@ import { writeErrorMessage } from "../api/writeError";
 import { useAuth } from "../auth/AuthProvider";
 import { mayAdministerTiers } from "../authz/permissions";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { ConfirmAction } from "./ConfirmAction";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -56,6 +58,9 @@ const S = {
   window: { en: "In force", ar: "سارٍ" },
   noAssignments: { en: "No assignments on this tier.", ar: "لا توجد إسنادات على هذه الشريحة." },
   revoke: { en: "Revoke", ar: "سحب" },
+  search: { en: "Search", ar: "بحث" },
+  assignmentSearchHint: { en: "Scope or reference", ar: "النطاق أو المرجع" },
+  noMatches: { en: "No assignments match your search.", ar: "لا توجد إسنادات مطابقة لبحثك." },
   resolve: { en: "Resolve tier at a date", ar: "تحديد الشريحة في تاريخ" },
   providerId: { en: "Provider", ar: "مقدم الخدمة" },
   locationId: { en: "Location (optional)", ar: "الموقع (اختياري)" },
@@ -66,6 +71,19 @@ const S = {
   selectTier: { en: "Select a tier to see its assignments.", ar: "اختر شريحة لعرض إسناداتها." },
   created: { en: "Tier created.", ar: "تم إنشاء الشريحة." },
   revoked: { en: "Assignment revoked.", ar: "تم سحب الإسناد." },
+  // ── Confirming a revoke ───────────────────────────────────────────────────────────────────────────────
+  // This fired straight from the click, on a `ghost` button — the transparent variant every Cancel in the app
+  // wears. Which tier a provider sits in decides the rate their claims are priced at, so the row it removes is
+  // not a display preference.
+  revokeTitle: { en: "Revoke this assignment?", ar: "سحب هذا الإسناد؟" },
+  revokeBody: {
+    en: "{0} will stop being assigned to this tier. Services on or after today price against whatever tier resolves instead.",
+    ar: "سيتوقف إسناد {0} إلى هذه الشريحة. تُسعَّر الخدمات من اليوم فصاعدًا وفق الشريحة البديلة.",
+  },
+  revokeReversible: {
+    en: "The assignment can be re-created, but claims already priced are not repriced.",
+    ar: "يمكن إعادة إنشاء الإسناد، لكن المطالبات المُسعَّرة سابقًا لا يُعاد تسعيرها.",
+  },
 } satisfies Record<string, Localized>;
 
 export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
@@ -77,6 +95,8 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [tiers, setTiers] = useState<NetworkTierView[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<TierAssignmentView[]>([]);
+  /** The assignment awaiting confirmation — see `revokeTitle`. */
+  const [revoking, setRevoking] = useState<TierAssignmentView | null>(null);
   const [error, setError] = useState<Localized | null>(null);
   const [announce, setAnnounce] = useState("");
   const [createKey, rotateCreateKey] = useIdempotencyKey();
@@ -109,6 +129,46 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
     return () => { live = false; };
   }, [api, selected]);
 
+  /*
+    Hoisted out of the JSX because `useTableQuery` sorts by `column.sortValue` and therefore needs the same
+    array the table renders — one definition, not two that can drift apart.
+  */
+  const assignmentCols: Column<TierAssignmentView>[] = useMemo(() => [
+            { key: "scope", header: t(S.scope), cell: (r) => r.scope, sortable: true, sortValue: (r) => r.scope },
+            { key: "ref", header: t(S.scopeRef), cell: (r) => r.scopeRef.slice(0, 8) },
+            {
+              key: "window",
+              header: t(S.window),
+              cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
+            },
+            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+            {
+              key: "act",
+              header: "",
+              cell: (r) =>
+                mayWrite && r.status === "Active" ? (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setRevoking(r)}
+                  >
+                    {t(S.revoke)}
+                  </Button>
+                ) : null,
+            },
+  ], [t, fmt, mayWrite]);
+
+  /** A tier accumulates assignments as the network grows; searched by the reference a contract cites. */
+  const assignmentQuery = useTableQuery<TierAssignmentView>({
+    rows: assignments,
+    columns: assignmentCols,
+    searchText: (r) => [r.scope, r.scopeRef, r.status].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.assignmentSearchHint),
+    pageSize: 25,
+    persistKey: "tier-assignments",
+  });
+
   return (
     <div className="pol-screen">
       <PageHeader title={t(S.title)} />
@@ -127,14 +187,13 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={tiers === null && !error}
           emptyLabel={t(S.noTiers)}
           columns={[
-            { key: "code", header: t(S.code), cell: (r) => r.tierCode },
-            { key: "name", header: t(S.name), cell: (r) => r.nameEn },
-            { key: "rank", header: t(S.rank), cell: (r) => r.rank },
+            { key: "code", header: t(S.code), cell: (r) => r.tierCode, sortable: true, sortValue: (r) => r.tierCode },
+            { key: "name", header: t(S.name), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+            { key: "rank", header: t(S.rank), cell: (r) => r.rank, sortable: true, sortValue: (r) => r.rank },
             {
               key: "oon",
               header: t(S.oon),
-              cell: (r) => <StatusChip kind={r.isOutOfNetwork ? "warn" : "ok"} label={r.isOutOfNetwork ? t(S.oon) : "—"} />,
-            },
+              cell: (r) => <StatusChip kind={r.isOutOfNetwork ? "warn" : "ok"} label={r.isOutOfNetwork ? t(S.oon) : "—"} />, sortable: true, sortValue: (r) => Number(r.isOutOfNetwork) },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />
@@ -142,7 +201,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
       {mayWrite && (
         <Card data-testid="tier-create">
-          <h3>{t(S.newTier)}</h3>
+          <h2 className="panel-h">{t(S.newTier)}</h2>
           <InlineAlert tone="info">{t(S.codeHint)}</InlineAlert>
           <InputField label={t(S.code)} value={tierCode} onChange={(e) => setTierCode(e.target.value)} />
           <InputField label={t(S.nameEn)} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
@@ -152,7 +211,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
             <input type="checkbox" checked={isOon} onChange={(e) => setIsOon(e.target.checked)} />
             {t(S.oon)}
           </label>
-          <Button
+          <Button leadingIcon={<Icon name="plus" />}
             variant="primary"
             onClick={async () => {
               try {
@@ -178,46 +237,44 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
       {selected && (
         <Card>
-          <h3>{t(S.assignments)}</h3>
-          <DataTable
-            caption={t(S.assignments)}
-            rows={assignments}
+          <h2 className="panel-h">{t(S.assignments)}</h2>
+          <DataTableView
+            query={assignmentQuery}
             rowKey={(r) => r.assignmentId}
+            caption={t(S.assignments)}
             emptyLabel={t(S.noAssignments)}
-            columns={[
-              { key: "scope", header: t(S.scope), cell: (r) => r.scope },
-              { key: "ref", header: t(S.scopeRef), cell: (r) => r.scopeRef.slice(0, 8) },
-              {
-                key: "window",
-                header: t(S.window),
-                cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
-              },
-              { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
-              {
-                key: "act",
-                header: "",
-                cell: (r) =>
-                  mayWrite && r.status === "Active" ? (
-                    <Button
-                      variant="ghost"
-                      onClick={async () => {
-                        try {
-                          await api.revokeAssignment(r.assignmentId);
-                          setAnnounce(t(S.revoked));
-                          setAssignments(await api.tierAssignments(selected));
-                        } catch (e) {
-                          setError(readErrorMessage(e));
-                        }
-                      }}
-                    >
-                      {t(S.revoke)}
-                    </Button>
-                  ) : null,
-              },
-            ]}
+            noMatchesLabel={t(S.noMatches)}
+            columns={assignmentCols}
           />
         </Card>
       )}
+
+      <ConfirmAction
+        open={revoking !== null}
+        onOpenChange={(o) => !o && setRevoking(null)}
+        destructive
+        title={S.revokeTitle}
+        description={S.revokeReversible}
+        // The reference the row shows, so the dialog names the same thing the operator clicked beside.
+        body={{
+          en: S.revokeBody.en.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
+          ar: S.revokeBody.ar.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
+        }}
+        confirmLabel={S.revoke}
+        onConfirm={async () => {
+          if (!revoking || !selected) return;
+          try {
+            await api.revokeAssignment(revoking.assignmentId);
+            setAnnounce(t(S.revoked));
+            setAssignments(await api.tierAssignments(selected));
+          } catch (e) {
+            setError(readErrorMessage(e));
+          } finally {
+            setRevoking(null);
+          }
+        }}
+      />
+
 
       <ResolveAtDate api={api} />
     </div>
@@ -234,7 +291,7 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
 
   return (
     <Card data-testid="tier-resolve">
-      <h3>{t(S.resolve)}</h3>
+      <h2 className="panel-h">{t(S.resolve)}</h2>
       <InputField label={t(S.providerId)} value={providerId} onChange={(e) => setProviderId(e.target.value)} />
       <InputField label={t(S.locationId)} value={locationId} onChange={(e) => setLocationId(e.target.value)} />
       <InputField type="date" label={t(S.serviceDate)} value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} />
@@ -254,7 +311,12 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
       </Button>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {result && (
-        <dl className="pol-kpis" aria-live="polite">
+        // Not `KpiList`, and deliberately: a status chip and a vocabulary term ("DefaultOutOfNetwork") are
+        // not figures, and the KPI treatment sets its value at 34px tabular numerals because a KPI is a
+        // number. `.pol-facts` is the same rule this always used, renamed to say what it holds.
+        // `aria-live` stays on the list: the resolver replaces this block in place when Run is pressed, and
+        // without it the only feedback is text quietly changing somewhere down the page.
+        <dl className="pol-facts" aria-live="polite">
           <div>
             <dt>{t(S.resolvedTo)}</dt>
             <dd>

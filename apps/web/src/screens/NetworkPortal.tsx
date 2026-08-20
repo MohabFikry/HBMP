@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiCard, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { CreateProviderInput, Localized, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -38,6 +38,12 @@ const S = {
   noContracts: { en: "No contracts recorded.", ar: "لا توجد عقود مسجلة." },
   legalName: { en: "Legal name", ar: "الاسم القانوني" },
   code: { en: "Provider code", ar: "رمز مقدم الخدمة" },
+  search: { en: "Search", ar: "بحث" },
+  dirSearchHint: { en: "Provider name or code", ar: "اسم مقدم الخدمة أو رمزه" },
+  noMatches: {
+    en: "No providers match. Change the search or clear the filters.",
+    ar: "لا يوجد مقدمو خدمة مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
   type: { en: "Type (Hospital/Clinic/Lab/Pharmacy/Imaging)", ar: "النوع" },
   create: { en: "Onboard provider", ar: "إضافة مقدم خدمة" },
   created: { en: "Provider created (Draft) — proceed to credentialing.", ar: "تم إنشاء مقدم الخدمة (مسودة)." },
@@ -49,11 +55,11 @@ const VALID_TYPES = ["Hospital", "Clinic", "Lab", "Pharmacy", "Imaging"] as cons
 
 function directoryColumns(t: (l: Localized) => string): Column<ProviderSummary>[] {
   return [
-    { key: "provider", header: t(S.provider), cell: (r) => r.legalName },
-    { key: "code", header: t(S.codeH), cell: (r) => <span className="tnum">{r.code}</span> },
-    { key: "type", header: t(S.typeH), cell: (r) => r.providerType },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "onboarding", header: t(S.onboarding), cell: (r) => <StatusChip kind="neu" label={r.onboardingState} /> },
+    { key: "provider", header: t(S.provider), cell: (r) => r.legalName, sortable: true, sortValue: (r) => r.legalName },
+    { key: "code", header: t(S.codeH), cell: (r) => <span className="tnum">{r.code}</span>, sortable: true, sortValue: (r) => r.code },
+    { key: "type", header: t(S.typeH), cell: (r) => r.providerType, sortable: true, sortValue: (r) => r.providerType },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "onboarding", header: t(S.onboarding), cell: (r) => <StatusChip kind="neu" label={r.onboardingState} />, sortable: true, sortValue: (r) => r.onboardingState },
   ];
 }
 
@@ -63,12 +69,68 @@ export function NetworkDirectory() {
   const t = useLoc();
   const state = useAsync<ProviderSummary[]>(() => api.providerList(), []);
   const cols = directoryColumns(t);
+
+  /*
+    This is the WHOLE network in one response, and it was rendered as one unbroken list: no search, no
+    filter, no pager. Finding a provider meant scrolling past every other one.
+
+    Both filter groups are derived from the rows rather than declared, for the reason the clinician panel
+    gives about branches: the vocabulary is the network's, not the client's. A hardcoded type list would show
+    a chip for Imaging in a network with no imaging centre, and miss whatever is added next.
+  */
+  const rows = useMemo(() => state.data ?? [], [state.data]);
+  const filters: TableFilterSpec<ProviderSummary>[] = useMemo(() => {
+    const groups: TableFilterSpec<ProviderSummary>[] = [];
+    const types = [...new Set(rows.map((r) => r.providerType))].sort((a, b) => a.localeCompare(b));
+    if (types.length > 1) {
+      groups.push({
+        key: "type",
+        label: t(S.typeH),
+        options: types.map((x) => ({ value: x, label: x })),
+        match: (r, value) => r.providerType === value,
+      });
+    }
+    const states = [...new Set(rows.map((r) => r.onboardingState))].sort((a, b) => a.localeCompare(b));
+    if (states.length > 1) {
+      groups.push({
+        key: "onboarding",
+        label: t(S.onboarding),
+        options: states.map((x) => ({ value: x, label: x })),
+        match: (r, value) => r.onboardingState === value,
+      });
+    }
+    return groups;
+  }, [rows, t]);
+
+  const query = useTableQuery<ProviderSummary>({
+    rows,
+    columns: cols,
+    // The provider code is what a claim or a contract cites, so it has to be searchable even though the
+    // name is what an operator would think of first.
+    searchText: (r) => [r.legalName, r.code, r.providerType].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.dirSearchHint),
+    filters,
+    pageSize: 25,
+    initialSortKey: "provider",
+    persistKey: "network-directory",
+  });
+
   return (
     <>
       <PageHeader title={t(S.dirTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.dirEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.dirTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.dirTitle)}
+              emptyLabel={t(S.dirEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>
@@ -152,11 +214,11 @@ function ContractsPanel({ providerId, t, api }: { providerId: string; t: (l: Loc
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const state = useAsync<ProviderContract[]>(() => api.providerContracts(providerId), [providerId]);
   const cols: Column<ProviderContract>[] = [
-    { key: "no", header: t(S.contractNo), cell: (r) => <span className="tnum">{r.contractNo}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
+    { key: "no", header: t(S.contractNo), cell: (r) => <span className="tnum">{r.contractNo}</span>, sortable: true, sortValue: (r) => r.contractNo },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span>, sortable: true, sortValue: (r) => r.effectiveFrom },
     { key: "to", header: t(S.to), cell: (r) => <span className="tnum">{r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}</span> },
-    { key: "lines", header: t(S.lines), cell: (r) => r.serviceLines, numeric: true },
+    { key: "lines", header: t(S.lines), cell: (r) => r.serviceLines, numeric: true, sortable: true, sortValue: (r) => r.serviceLines },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -175,9 +237,9 @@ export function NetworkLocations() {
 function LocationsPanel({ providerId, t, api }: { providerId: string; t: (l: Localized) => string; api: ReturnType<typeof useApi> }) {
   const state = useAsync<ProviderLocation[]>(() => api.providerLocations(providerId), [providerId]);
   const cols: Column<ProviderLocation>[] = [
-    { key: "name", header: t(S.name), cell: (r) => r.name },
-    { key: "gov", header: t(S.governorate), cell: (r) => r.governorate ?? "—" },
-    { key: "addr", header: t(S.address), cell: (r) => r.address ?? "—" },
+    { key: "name", header: t(S.name), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
+    { key: "gov", header: t(S.governorate), cell: (r) => r.governorate ?? "—", sortable: true, sortValue: (r) => r.governorate },
+    { key: "addr", header: t(S.address), cell: (r) => r.address ?? "—", sortable: true, sortValue: (r) => r.address },
     { key: "primary", header: t(S.primary), cell: (r) => (r.isPrimary ? <StatusChip kind="ok" label={t(S.primary)} /> : "—") },
   ];
   return (
@@ -232,7 +294,7 @@ export function NetworkOnboarding() {
                 differently from a dropped connection, because they demand opposite actions. */}
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
-            <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
+            <div><Button leadingIcon={<Icon name="plus" />} type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>
         </form>
       </Card>

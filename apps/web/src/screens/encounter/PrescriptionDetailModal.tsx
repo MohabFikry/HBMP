@@ -45,6 +45,10 @@ const S = {
   dose: { en: "Dose", ar: "الجرعة" },
   route: { en: "Route", ar: "طريق الإعطاء" },
   frequency: { en: "Frequency", ar: "التكرار" },
+  // 31.5 — the course length, which the record has always held and this dialog never showed. A prescriber
+  // reading back their own script cannot check a quantity without it.
+  duration: { en: "Duration", ar: "المدة" },
+  days: { en: "{n} day(s)", ar: "{n} يوم" },
   quantity: { en: "Quantity prescribed", ar: "الكمية الموصوفة" },
   dispensed: { en: "Dispensed to date", ar: "المصروف حتى الآن" },
   refills: { en: "Refills allowed", ar: "مرات الصرف المسموح بها" },
@@ -295,8 +299,20 @@ function RxLineCard({
           <dd>{line.frequency ?? DASH}</dd>
         </div>
         <div className="rxv-cell">
+          <dt>{t(S.duration)}</dt>
+          {/* NULL is "the prescriber recorded none", and it says so in words. A missing duration and a
+              one-day course look identical in an empty cell, and only one of them is worth a phone call. */}
+          <dd className="tnum">
+            {line.durationDays ? t(S.days).replace("{n}", String(line.durationDays)) : DASH}
+          </dd>
+        </div>
+        <div className="rxv-cell">
           <dt>{t(S.quantity)}</dt>
-          <dd className="tnum">{fmt.number(line.quantityPrescribed)}</dd>
+          {/* 31.3 — with its unit. A prescription's quantity is a box count wherever the catalogue records
+              what a box holds, and the dose total where it does not; the figure alone does not say which. */}
+          <dd className="tnum">
+            {fmt.number(line.quantityPrescribed)}{line.quantityUnit ? ` ${line.quantityUnit}` : ""}
+          </dd>
         </div>
         {/*
           Kept apart from the prescribed quantity and never subtracted from it. This dialog answers "what did

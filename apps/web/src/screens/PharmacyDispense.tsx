@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, Prescription } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -154,10 +154,10 @@ export function PharmacyDispense() {
   }
 
   const cols: Column<Prescription>[] = [
-    { key: "rxNo", header: t(S.rxNo), cell: (r) => <span className="tnum">{r.rxNo}</span> },
-    { key: "prescriber", header: t(S.prescriber), cell: (r) => t(r.prescriber.label) },
-    { key: "lines", header: t(S.lines), cell: (r) => <span className="tnum">{r.lines.length}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "rxNo", header: t(S.rxNo), cell: (r) => <span className="tnum">{r.rxNo}</span>, sortable: true, sortValue: (r) => r.rxNo },
+    { key: "prescriber", header: t(S.prescriber), cell: (r) => t(r.prescriber.label), sortable: true, sortValue: (r) => t(r.prescriber.label) },
+    { key: "lines", header: t(S.lines), cell: (r) => r.lines.length, numeric: true, sortable: true, sortValue: (r) => r.lines.length },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "open",
       header: t(S.action),
@@ -174,7 +174,7 @@ export function PharmacyDispense() {
       cell: (r) => (
         <Button
           size="sm"
-          variant={selected === r.id ? "primary" : "secondary"}
+          variant="secondary"
           onClick={() => (r.expired ? setSelected(r.id) : navigate(`/pharmacy/rx/${encodeURIComponent(r.rxNo)}`))}
         >
           {r.expired ? t(S.review) : t(S.open)}
@@ -203,7 +203,7 @@ export function PharmacyDispense() {
           <InputField label={t(S.fMember)} {...field("memberNo")} />
           <InputField label={t(S.fPassport)} {...field("passport")} />
           <div className="rx-search-actions">
-            <Button type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
+            <Button leadingIcon={<Icon name="search" />} type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
             <Button type="button" variant="ghost" onClick={clear}>{t(S.clear)}</Button>
           </div>
         </form>
@@ -223,7 +223,19 @@ export function PharmacyDispense() {
         {results === null || results.length === 0 ? (
           <p className="muted" style={{ margin: "var(--sp3)" }}>{t(S.startHere)}</p>
         ) : (
-          <DataTable columns={cols} rows={results} rowKey={(r) => r.id} caption={t(S.title)} />
+          <DataTable
+            columns={cols}
+            rows={results}
+            rowKey={(r) => r.id}
+            caption={t(S.title)}
+            /* The selected row was conveyed ONLY by turning its Open button from secondary to primary —
+               a hue with no aria state and no second cue, on a screen where the panel below depends on
+               which row is current. `interactive` + `selectedKey` is what DataTable ships for this: a 4px
+               accent bar, a row tint and `aria-selected` inside a role="grid". */
+            interactive
+            selectedKey={selected}
+            onSelect={(r) => setSelected(r.id)}
+          />
         )}
       </Card>
 

@@ -1,3 +1,5 @@
+using Mersal.Amounts;
+
 namespace Mersal.Pharmacy.Domain;
 
 /// <summary>Config-driven prescription routing (US-033): a prescription containing an expensive/gated drug stays
@@ -27,10 +29,25 @@ public static class RxRoutingPolicy
 
         if (opts.HighCostThreshold > 0)
         {
-            var estimate = rx.Lines.Sum(l =>
-                (opts.UnitCosts.TryGetValue(l.DrugId, out var c) ? c : 0m) * l.QuantityPrescribed);
-            if (estimate >= opts.HighCostThreshold)
-                return new RxRoutingDecision(true, $"high-cost:{estimate}>={opts.HighCostThreshold}");
+            /*
+             * THE ESTIMATE IS MONEY, SO IT IS ADDED UP AS MONEY (ADR-0043).
+             *
+             * This decides whether a prescription needs a human to approve it, by comparing a sum against a
+             * threshold. As bare decimals the sum was unrounded — a per-line product carrying four or five
+             * decimal places, accumulated across the lines — and then compared to a threshold somebody typed
+             * as `5000`. A prescription landing within a fraction of a piastre of the line could fall either
+             * way depending on how many lines it happened to have. Money rounds each product once, at the
+             * platform's settlement scale, so the estimate is the number a person would arrive at.
+             */
+            var currency = Currency.Egp;   // pharmacy prices in the platform currency; see ADR-0043
+            var estimate = rx.Lines.Aggregate(
+                Money.Zero(currency),
+                (running, l) => running
+                    + new Money(opts.UnitCosts.TryGetValue(l.DrugId, out var c) ? c : 0m, currency)
+                      * l.QuantityPrescribed);
+            var threshold = new Money(opts.HighCostThreshold, currency);
+            if (estimate >= threshold)
+                return new RxRoutingDecision(true, $"high-cost:{estimate.Amount}>={threshold.Amount}");
         }
 
         return new RxRoutingDecision(false, "auto-approve");

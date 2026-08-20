@@ -19,7 +19,11 @@ This project ships 20 custom domain skills in `HBMP-Design/claude-code-skills/` 
 ## Tech stack (baseline)
 **Open-source, on-prem-first, cloud-ready, $0 licensing.** Mersal is a charity: everything self-hostable on one server → k3s → any cloud, same containers. Authoritative details + Azure→OSS mapping + security parity: `HBMP-Design/0C-OPEN-SOURCE-STACK.md`.
 - **Backend:** .NET 8 (C#) microservices (MIT, Linux). One service per bounded context.
-- **Frontend:** React + TypeScript (Vite), Radix UI primitives + custom Mersal theme, `i18next` (Arabic RTL + English). Design system per `HBMP-Design/0B-DESIGN-SYSTEM-UI.md`.
+- **Frontend:** React + TypeScript (Vite), Radix UI primitives + custom Mersal theme, Arabic RTL + English.
+  **i18n:** the portals use a typed `Localized` (`{ en, ar }`) scheme, NOT `i18next` — a string missing a
+  translation is a compile error rather than a silent English fallback in front of an Arabic reader. The
+  design-system gallery does use `i18next`. Reasoning and what it costs: `docs/adr/0042-the-spa-does-not-use-i18next.md`.
+  Design system per `HBMP-Design/0B-DESIGN-SYSTEM-UI.md`.
 - **Data:** PostgreSQL (schema-per-service), Row-Level Security; at-rest via LUKS + pgcrypto; HA via Patroni; PITR via pgBackRest. EF Core or Dapper.
 - **API:** REST, versioned `/api/v1`, OpenAPI 3.1, FHIR R4-aligned where practical.
 - **Async:** RabbitMQ (commands/queues) + NATS JetStream or Redpanda (domain events); CloudEvents; **transactional outbox**.
@@ -35,9 +39,10 @@ This project ships 20 custom domain skills in `HBMP-Design/claude-code-skills/` 
 /docs/                      # ADRs, runbooks (see 34-technical-documentation.md)
 /infra/                     # OpenTofu + Ansible + Helm, per-env (k3s/Compose)
 /libs/                      # shared: contracts, auth, audit-client, events, testing
-/services/
+/services/            # 22, and tools/ci/check-service-inventory.py fails if this list drifts from disk
   identity/  patient/  policy/  eligibility/  emr/  orders/
   approvals/ provider/ pharmacy/ notification/ reporting/ audit/ document/ masterdata/
+  admin/  callcentre/  case/  claims/  finance/  interop/  inventory/  profile/
 /apps/
   web/                      # React portals (role-based code-split)
   design-system/            # tokens + component library

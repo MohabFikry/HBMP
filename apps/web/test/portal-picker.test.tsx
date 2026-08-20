@@ -1,0 +1,363 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { axe } from "jest-axe";
+import { AppProviders } from "../src/App";
+import { AppRouter } from "../src/routing/AppRouter";
+import { DevAuthClient } from "../src/auth/devAuthClient";
+import { DevApiClient } from "../src/api/DevApiClient";
+import { PORTALS, ZONES, portalsForRoles } from "../src/portals/catalog";
+import { firstNameOf } from "../src/portals/PortalPicker";
+import { ROLE_MAP, issuerRoleFor, rolesFromClaimRoles } from "../src/config";
+import { permissionsForRole, unionPermissions } from "../src/authz/permissions";
+import { clearMyProfile } from "../src/shell/useMyProfile";
+import { seedSession } from "./helpers";
+
+/**
+ * Phase 28.x — a session that can hold several portals, the picker that chooses between them, and the
+ * switcher that goes back.
+ *
+ * ============================================================================================================
+ * WHAT THESE PROVE
+ * ============================================================================================================
+ * The picker is the visible half of a change to the SESSION, and the session half is where the risk is. So
+ * these assert the invariants rather than the pixels:
+ *   * a single-portal caller's experience is UNCHANGED — no picker, no switcher, same landing page;
+ *   * only entitled portals are offered, and the counts are true for the person reading them;
+ *   * a portal path the caller does not hold is still refused;
+ *   * the catalogue and the issuer's role vocabulary agree, which is what stops a grant silently failing.
+ */
+
+afterEach(cleanup);
+
+function renderAt(
+  path: string,
+  role: Parameters<typeof seedSession>[0],
+  extra: Parameters<typeof seedSession>[1] = [],
+  // A latency knob, because one defect below is only observable WHILE a request is in flight: at 0ms it
+  // settles inside the first act() and the bug is invisible, which is how it shipped.
+  latencyMs = 0,
+) {
+  seedSession(role, extra);
+  return render(
+    <AppProviders authClient={new DevAuthClient()} apiClient={new DevApiClient({ latencyMs })}>
+      <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AppRouter />
+      </MemoryRouter>
+    </AppProviders>,
+  );
+}
+
+describe("the portal model", () => {
+  it("keeps a single-role session behaving exactly as it did", () => {
+    // The whole compatibility claim in one assertion: for one role, the primary is that role and the
+    // permission set is the same object the old single-role session carried.
+    for (const portal of PORTALS) {
+      expect(portalsForRoles([portal.role])).toEqual([portal]);
+      expect([...unionPermissions([portal.role])].sort()).toEqual([...permissionsForRole(portal.role)].sort());
+    }
+  });
+
+  it("gives a caller holding several roles every one of their portals", () => {
+    const mine = portalsForRoles(["doctor", "org_admin", "lab"]);
+    expect(mine.map((p) => p.base).sort()).toEqual(["admin", "clinician", "lab"]);
+  });
+
+  it("offers the CLINIC portal once to somebody holding both branch roles, as the wider one", () => {
+    // Two roles over one base. Keying on role would offer the same workspace twice under two eyebrows, both
+    // going to the same URL — and resolving to the coordinator would narrow a manager to one clinic, which
+    // is the exact narrowing ROLE_MAP orders itself to avoid.
+    const both = portalsForRoles(["branch_coordinator", "clinics_manager"]);
+    const branch = both.filter((p) => p.base === "branch");
+    expect(branch).toHaveLength(1);
+    expect(branch[0].role).toBe("clinics_manager");
+  });
+
+  it("reads every portal role the token names, not just the first", () => {
+    const claim = ["doctor", "org_admin", "lab_tech"];
+    expect(rolesFromClaimRoles(claim).sort()).toEqual(["doctor", "lab", "org_admin"]);
+  });
+
+  it("translates every catalogue role back into a name the issuer knows", () => {
+    // The failure this prevents is silent and total: the admin screen POSTs portal keys, identity-service
+    // answers 422 for every clinical role, and the tick looks as though it worked until the save.
+    const issuerNames = new Set(ROLE_MAP.map(([name]) => name));
+    for (const portal of PORTALS) {
+      expect(issuerNames.has(issuerRoleFor(portal.role))).toBe(true);
+    }
+  });
+
+  it("gives every portal a zone the picker renders and a description that is not its own title", () => {
+    const zones = new Set(ZONES.map((z) => z.key));
+    for (const portal of PORTALS) {
+      expect(zones.has(portal.zone)).toBe(true);
+      for (const lang of ["en", "ar"] as const) {
+        expect(portal.description[lang].length).toBeGreaterThan(20);
+        expect(portal.description[lang]).not.toBe(portal.title[lang]);
+      }
+    }
+  });
+
+  it("greets somebody by their name and not by their title", () => {
+    expect(firstNameOf("Dr. Karim")).toBe("Karim");
+    expect(firstNameOf("Nurse Mona")).toBe("Mona");
+    expect(firstNameOf("Reham (Reception)")).toBe("Reham");
+    expect(firstNameOf("Tarek")).toBe("Tarek");
+    // A name made of nothing but an honorific is shown intact — an empty greeting is worse than an odd one.
+    expect(firstNameOf("Dr.")).toBe("Dr.");
+    expect(firstNameOf(undefined)).toBe("");
+  });
+});
+
+describe("the picker", () => {
+  it("is not where a single-portal sign-in LANDS", async () => {
+    // The click still is not spent: `useHomePath` sends somebody to /portals only above one portal, so a
+    // reception sign-in goes straight to the desk exactly as before.
+    renderAt("/", "reception");
+    expect(await screen.findByRole("navigation")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /welcome back/i })).toBeNull();
+  });
+
+  it("still ANSWERS for a single-portal caller who asks for it", async () => {
+    // 28.13 — it used to redirect them back into their portal. That was right while the switcher was hidden
+    // from them; now the rail offers "Change portal" to everybody, and bouncing the request would make the
+    // button they just pressed look broken. One card is an honest answer: it is the whole of what they hold.
+    renderAt("/portals", "reception");
+    expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Reception/ })).toBeInTheDocument();
+  });
+
+  it("offers exactly the portals the caller holds, grouped by zone", async () => {
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    // The three held portals are present…
+    expect(screen.getByRole("button", { name: /Consultation/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Administration/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pharmacy/ })).toBeInTheDocument();
+    // …and one they do not hold is not, which is the only thing this page must never get wrong.
+    expect(screen.queryByRole("button", { name: /Laboratory/ })).toBeNull();
+
+    // Zones with nothing in them are not rendered: an empty "Fulfillment" heading tells a finance officer
+    // only that portals they cannot have exist somewhere.
+    expect(screen.getByRole("heading", { name: /Clinical & approvals/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Operations & administration/i })).toBeInTheDocument();
+  });
+
+  it("counts the sections the CALLER can open, not the catalogue total", async () => {
+    renderAt("/portals", "doctor", ["org_admin"]);
+    const card = await screen.findByRole("button", { name: /Consultation/ });
+    // A number that is true for somebody else is worse than no number — it is a promise the portal does not
+    // keep. The doctor portal's count must match what their own permissions actually unlock.
+    const doctorPortal = PORTALS.find((p) => p.role === "doctor")!;
+    const perms = unionPermissions(["doctor", "org_admin"]);
+    const openable = doctorPortal.sections.filter((s) => perms.has(s.permission)).length;
+    expect(within(card).getByText(new RegExp(`\\b${openable} sections?\\b`))).toBeInTheDocument();
+  });
+
+  it("opens the portal it was clicked on", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin"]);
+    await user.click(await screen.findByRole("button", { name: /Administration/ }));
+    // Landing INSIDE the portal — the rail is the proof, since the picker renders outside the shell.
+    expect(await screen.findByRole("navigation")).toBeInTheDocument();
+  });
+
+  it("has no serious accessibility violations", async () => {
+    const { container } = renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+    const results = await axe(container);
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious).toEqual([]);
+  });
+});
+
+describe("the in-app switcher", () => {
+  it("appears in every portal a multi-portal caller opens, identically", async () => {
+    // ONE component, so the accessible name is the same sentence in each portal with only the portal's own
+    // name substituted. Asserted across two portals because "identical in every portal" is the requirement,
+    // and a per-portal copy would pass a single-portal test.
+    for (const [path, name] of [
+      ["/clinician", "Consultation"],
+      ["/admin", "Administration"],
+    ] as const) {
+      renderAt(path, "doctor", ["org_admin"]);
+      const control = await screen.findByRole("button", { name: /Current portal:/ });
+      expect(control).toHaveAccessibleName(new RegExp(`Current portal: ${name}\\..*Change portal`));
+      cleanup();
+    }
+  });
+
+  it("is present even for somebody who holds exactly one portal", async () => {
+    // 28.13 — it used to be hidden from them, on the reasoning that a control offering one choice is not a
+    // choice. That reasoning was about the PICKER. This block is also the only thing on screen naming which
+    // workspace you are in, so hiding it left most of the platform with a rail whose heading was the
+    // product's name and nothing about their own context.
+    renderAt("/reception", "reception");
+    await screen.findByRole("navigation");
+    expect(screen.getByRole("button", { name: /Current portal:/ })).toBeInTheDocument();
+  });
+
+  it("returns to the picker", async () => {
+    const user = userEvent.setup();
+    renderAt("/clinician", "doctor", ["org_admin"]);
+    await user.click(await screen.findByRole("button", { name: /Current portal:/ }));
+    expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+  });
+});
+
+describe("routing", () => {
+  it("opens a deep link into any portal the caller holds", async () => {
+    // The bug this closes: `/admin/access` resolved against the caller's PRIMARY portal, found no matching
+    // section, and answered 404 for a screen they had been granted.
+    renderAt("/admin/access", "doctor", ["org_admin"]);
+    expect(await screen.findByRole("navigation")).toBeInTheDocument();
+    expect(screen.queryByText(/not found/i)).toBeNull();
+  });
+
+  it("still refuses a portal the caller does not hold", async () => {
+    renderAt("/finance/settlements", "doctor", ["org_admin"]);
+    // Unchanged behaviour, and the assertion that matters most here: widening the session to several
+    // portals must not widen it to ALL of them.
+    await waitFor(() => expect(screen.queryByRole("navigation")).not.toBeNull());
+    expect(screen.queryByText(/Provider Settlements/)).toBeNull();
+  });
+});
+
+/**
+ * The app-bar search — 28.12.
+ *
+ * <p>The picker used to carry its own header, a flex row inside the page column that stopped short of the
+ * window edge and scrolled away, so the one screen in the product without a proper app bar was the first one
+ * anybody saw. It now uses the system bar, and the search in it filters the CARDS — it is not the command
+ * palette, which searches the sections inside a portal and has nothing to search until one is chosen.</p>
+ */
+describe("searching the portal cards", () => {
+  it("narrows the grid to the cards that match", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    expect(screen.getByRole("button", { name: /Pharmacy/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("finds a portal by a SECTION it contains, not only by its own name", async () => {
+    // The question behind a search is usually a task rather than a portal name. "Eligibility" is how somebody
+    // looks for Reception, and the word appears nowhere in that portal's title or description.
+    const user = userEvent.setup();
+    renderAt("/portals", "reception", ["org_admin"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "eligibility");
+
+    expect(screen.getByRole("button", { name: /Reception/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("matches the other language too, so a term learned in English still finds an Arabic screen", async () => {
+    // Half this platform's vocabulary is learned in English from colleagues while the interface is read in
+    // Arabic. Making somebody switch language to find a portal is the failure this avoids.
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "الصيدلية");
+
+    expect(screen.getByRole("button", { name: /Pharmacy/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("drops a zone heading whose cards have all been filtered out", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /Operations & administration/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    // An empty heading over an empty grid says a portal exists that the filter is hiding, which is exactly
+    // the thing the zone grouping is not for.
+    expect(screen.queryByRole("heading", { name: /Operations & administration/i })).toBeNull();
+  });
+
+  it("says so when nothing matches, rather than showing an empty page", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "zzzznothing");
+
+    // Announced as well as rendered: filtering a card grid changes the page silently for anyone not looking
+    // at it, and "no matches" is the outcome most worth hearing.
+    expect(await screen.findByRole("status")).toHaveTextContent(/no portals match/i);
+    expect(screen.getByText(/clear the search/i)).toBeInTheDocument();
+  });
+
+  it("opens the last card standing on Enter, and only when one is left", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+    const box = screen.getByRole("searchbox", { name: /search portals/i });
+
+    // Two matches: Enter must NOT guess. "The first match" would make the key mean something different on
+    // every keystroke.
+    await user.type(box, "a{Enter}");
+    expect(screen.getByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+
+    await user.clear(box);
+    await user.type(box, "pharmacy{Enter}");
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /welcome back/i })).toBeNull());
+  });
+
+  it("has no serious accessibility violations with the bar and a filtered grid", async () => {
+    const user = userEvent.setup();
+    const { container } = renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    const results = await axe(container);
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious).toEqual([]);
+  });
+});
+
+/**
+ * 28.14 — the app-bar caption must not change under the reader.
+ *
+ * <p>The line under somebody's name is their POSITION, and it falls back to the portal's label when no title
+ * is recorded. The first implementation could not tell "still loading" from "no title", so it rendered the
+ * fallback during the fetch and swapped it for the real title a moment later: every page load showed the
+ * PORTAL's name where the PERSON's should be, which is precisely what moving to a position was meant to
+ * stop. It reappeared as a flicker instead of a wrong value.</p>
+ *
+ * <p>This is exactly the kind of defect that comes back silently — the fallback is correct code, in the right
+ * place, for the wrong moment — so the assertion is on the moment rather than on the final value.</p>
+ */
+describe("the person's caption in the app bar", () => {
+  it("never shows the portal label before the job title arrives", async () => {
+    // The cache is module-level and survives between tests in this file — which is the feature, and which
+    // also means the in-flight window only exists on a cold start. Cleared here so this test observes the
+    // first load rather than a cache hit; `clearMyProfile` is the same call sign-out makes.
+    clearMyProfile();
+    renderAt("/admin/access", "org_admin", [], 40);
+
+    // Asserted on the SLOT rather than on a role query, because the thing under test is what that one line
+    // contains at a moment in time — and while loading it must contain nothing rather than a portal label
+    // that is about to be replaced.
+    const caption = () => document.querySelector(".app-userbtn-role");
+    await waitFor(() => expect(caption()).not.toBeNull());
+    expect(caption()!.textContent).toBe("");
+
+    // And once it settles, the title arrives — into that same empty slot, never over a portal label.
+    expect(await screen.findByText("Operations Director")).toBeInTheDocument();
+  });
+
+  it("shows the job title, which does not change as portals do", async () => {
+    renderAt("/admin/access", "org_admin");
+    expect(await screen.findByText("Operations Director")).toBeInTheDocument();
+  });
+});

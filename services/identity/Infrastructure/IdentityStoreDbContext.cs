@@ -32,6 +32,8 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
     /// <summary>21.5 — session/device controls and sign-in history (design 40 §6).</summary>
     public DbSet<UserSession> Sessions => Set<UserSession>();
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+    /// <summary>Staff avatars (28.15). Its own table so the hot `user` row stays narrow — see 0038.</summary>
+    public DbSet<UserPhoto> UserPhotos => Set<UserPhoto>();
 
     /// <summary>21.2 — the per-membership override overlay (design 40 §2).</summary>
     public DbSet<MembershipOverride> Overrides => Set<MembershipOverride>();
@@ -54,12 +56,26 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
             e.ToTable("user");
             e.Property(u => u.TenantId).HasDefaultValue(string.Empty);
             e.Property(u => u.DisplayName).HasDefaultValue(string.Empty);
+            // Bounded because it is free text an administrator types and it renders in a fixed-width app-bar
+            // slot. Nullable rather than defaulted to "": an account whose title nobody has recorded is a
+            // different thing from one whose title is blank, and the app bar falls back for the first.
+            e.Property(u => u.Position).HasMaxLength(120);
             e.Property(u => u.IsActive).HasDefaultValue(true);
+        });
+        builder.Entity<UserPhoto>(e =>
+        {
+            e.ToTable("user_photo");
+            e.HasKey(x => x.UserId);
+            e.Property(x => x.ContentType).HasMaxLength(40);
+            e.HasOne<ApplicationUser>().WithOne().HasForeignKey<UserPhoto>(x => x.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ApplicationRole>(e =>
         {
             e.ToTable("role");
             e.Property(r => r.SensitivityTier).HasMaxLength(2).HasDefaultValue("T1");
+            // 28.9 — null for the built-in catalog, which is every role that predates custom roles (0036).
+            e.Property(r => r.OwnerTenantId).HasMaxLength(64);
         });
         builder.Entity<IdentityUserRole<Guid>>().ToTable("user_role");
         builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claim");

@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Emr.Api;
 
@@ -103,7 +104,7 @@ public static class ProfileContextEndpoint
             // Arabic UI renders, and would make emr a second place that answers "what does this code mean".
             var conditions = diagnoses.ConvertAll(d => new ProfileConditionView(
                 "ICD-10", d.IcdCode, d.IcdCode, d.ClinicalStatus.ToString(),
-                DateOnly.FromDateTime(d.RecordedAt.UtcDateTime)));
+                BusinessCalendar.DateIn(d.RecordedAt)));
 
             // The narrative is the one free-text CLINICAL-class field in this response, so it goes through the
             // SAME FieldProjector emr's clinical-context read already uses (20.2: reuse that logic, do not

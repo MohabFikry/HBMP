@@ -117,7 +117,6 @@ public static class BreakGlass
             // person deciding it, so `CreatedBy` is the decider — and telling somebody the thing they just did
             // has been done is the noise that teaches a team to ignore the channel. The retrospective-review
             // flag and the audit event are what make this decision visible to somebody else.
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -127,9 +126,11 @@ public static class BreakGlass
                 DecisionOutcome = req.Decision.ToString(), DecisionReasonCode = req.Rationale, BreakGlass = true,
                 Severity = AuditSeverity.High,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", DecisionView.From(auth, row));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:manual"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:manual"))
+        .Produces<DecisionView>();
 
         // RETROSPECTIVE-REVIEW QUEUE: break-glass cases awaiting post-hoc review (min-necessary, no clinical payload).
         v1.MapGet("/retrospective-queue", async (
@@ -142,7 +143,8 @@ public static class BreakGlass
                 .Where(a => a.RetrospectiveReviewRequired && !a.RetrospectiveReviewed)
                 .OrderByDescending(a => a.DecidedAt).Take(200).ToListAsync(ct);
             return Results.Ok(items.Select(a => WorklistItemView.From(a, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<WorklistItemView>>();
 
         // TAT / SLA AGGREGATE for the reporting read-model (phase 8). Count by status + avg/p95 TAT + breach count.
         v1.MapGet("/tat-summary", async (ApprovalsDbContext db, ApprovalsGate gate, CancellationToken ct) =>
@@ -150,6 +152,7 @@ public static class BreakGlass
             var denied = await gate.CheckAsync(ApprovalsPolicies.List, null, "reporting", ct);
             if (denied is not null) return denied;
             return Results.Ok(await TatReporting.SummaryAsync(db, ct));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<TatSummary>();
     }
 }

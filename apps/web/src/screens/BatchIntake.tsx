@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, Select, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -16,6 +16,7 @@ import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { useRegistrationReference } from "./useRegistrationReference";
 import { BulkTemplateActions } from "./BulkTemplateActions";
+import { BulkErrorReportButton } from "./BulkErrorReport";
 
 /** ONE client for the module — see the note in BeneficiaryPortal. */
 const httpPolicyApi = createHttpPolicyApi();
@@ -109,6 +110,14 @@ const S = {
   errorFile: {
     en: "The error report contains member data and is downloaded through an authorized, audited request.",
     ar: "يحتوي تقرير الأخطاء على بيانات أعضاء ويُنزَّل عبر طلب مصرّح به ومُدقَّق.",
+  },
+  changesTruncated: {
+    en: "Showing the first {shown} of {total} changes.",
+    ar: "يتم عرض أول {shown} من أصل {total} تغيير.",
+  },
+  errorsTruncated: {
+    en: "Showing the first {shown} of {total} errors. Fixing only these will not make the file pass.",
+    ar: "يتم عرض أول {shown} من أصل {total} خطأ. إصلاح هذه وحدها لن يجعل الملف يمرّ.",
   },
 } satisfies Record<string, Localized>;
 
@@ -224,19 +233,39 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
     }
   }
 
-  const errors = commit?.errors ?? validation?.errors ?? [];
+  /*
+    Held whole, so the inline list can be reported against its real size. The server caps the inline errors at
+    50 (BulkJobEngine.InlineErrorLimit) — the full list names people and lives in the stored report — and
+    returns `totalErrors` beside them. Rendering the 50 without that count reads as "these are the errors".
+  */
+  const report = commit ?? validation ?? null;
+  const errors = report?.errors ?? [];
+  const totalErrors = report?.totalErrors ?? 0;
 
+  // LOCALIZED labels, and `keywords` so the code is searchable without being read out as the answer.
+  //
+  // These three read `nameEn` unconditionally until the scrolls/dropdowns audit — an Arabic operator got an
+  // English plan list on the batch-enrolment screen, with `nameAr` sitting unused on all three schemas. It
+  // had to be fixed WITH the conversion rather than after it: the combobox filters on `label`, so a
+  // searchable list of English-only labels is a list an Arabic operator cannot search either.
   const planOptions = useMemo(
-    () => reference.plans.map((p) => ({ value: p.planId, label: p.nameEn, hint: p.planCode })),
-    [reference.plans],
+    () => reference.plans.map((p) => ({
+      value: p.planId, label: t({ en: p.nameEn, ar: p.nameAr }), hint: p.planCode, keywords: p.planCode,
+    })),
+    [reference.plans, t],
   );
   const tierOptions = useMemo(
-    () => reference.tiers.map((x) => ({ value: x.networkTierId, label: x.nameEn, hint: x.tierCode })),
-    [reference.tiers],
+    () => reference.tiers.map((x) => ({
+      value: x.networkTierId, label: t({ en: x.nameEn, ar: x.nameAr }), hint: x.tierCode, keywords: x.tierCode,
+    })),
+    [reference.tiers, t],
   );
   const branchOptions = useMemo(
-    () => reference.branches.map((b) => ({ value: b.branchId, label: b.nameEn })),
-    [reference.branches],
+    // `nameAr` is optional on a branch reference, so English is the stated fallback rather than a blank name.
+    () => reference.branches.map((b) => ({
+      value: b.branchId, label: t({ en: b.nameEn, ar: b.nameAr ?? b.nameEn }),
+    })),
+    [reference.branches, t],
   );
 
   return (
@@ -266,27 +295,18 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
           <legend>{t(S.defaults)}</legend>
           <p className="ben-section-hint">{t(S.defaultsHint)}</p>
           <div className="ben-batch-defaults">
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-plan-label" htmlFor="batch-plan">{t(S.plan)}</label>
-              <Select
-                id="batch-plan" aria-labelledby="batch-plan-label" options={planOptions}
-                value={planId} onChange={setPlanId} placeholder={t(S.choose)} disabled={reference.loading}
-              />
-            </div>
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-tier-label" htmlFor="batch-tier">{t(S.networkTier)}</label>
-              <Select
-                id="batch-tier" aria-labelledby="batch-tier-label" options={tierOptions}
-                value={tierId} onChange={setTierId} placeholder={t(S.choose)} disabled={reference.loading}
-              />
-            </div>
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-branch-label" htmlFor="batch-branch">{t(S.defaultBranch)}</label>
-              <Select
-                id="batch-branch" aria-labelledby="batch-branch-label" options={branchOptions}
-                value={branchId} onChange={setBranchId} placeholder={t(S.choose)}
-              />
-            </div>
+            <ComboboxField
+              id="batch-plan" label={t(S.plan)} options={planOptions} hintWhenClosed
+              value={planId} onChange={setPlanId} placeholder={t(S.choose)} disabled={reference.loading}
+            />
+            <ComboboxField
+              id="batch-tier" label={t(S.networkTier)} options={tierOptions} hintWhenClosed
+              value={tierId} onChange={setTierId} placeholder={t(S.choose)} disabled={reference.loading}
+            />
+            <ComboboxField
+              id="batch-branch" label={t(S.defaultBranch)} options={branchOptions}
+              value={branchId} onChange={setBranchId} placeholder={t(S.choose)}
+            />
           </div>
         </fieldset>
 
@@ -302,7 +322,7 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
         </div>
         <div>
           <Button variant="primary"
-              leadingIcon={<Icon name="download" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
+              leadingIcon={<Icon name="upload" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
             {t(S.upload)}
           </Button>
         </div>
@@ -320,14 +340,21 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
             </InlineAlert>
           )}
 
-          <dl className="pol-kpis">
-            <div><dt>{t(S.submitted)}</dt><dd>{fmt.number(job.totalRows)}</dd></div>
-            <div><dt>{t(S.valid)}</dt><dd>{fmt.number(job.validRows)}</dd></div>
-            <div><dt>{t(S.invalid)}</dt><dd>{fmt.number(job.invalidRows)}</dd></div>
-            <div><dt>{t(S.applied)}</dt><dd>{fmt.number(job.appliedRows)}</dd></div>
-            <div><dt>{t(S.failed)}</dt><dd>{fmt.number(job.failedRows)}</dd></div>
-            <div><dt>{t(S.skipped)}</dt><dd>{fmt.number(job.skippedRows)}</dd></div>
-          </dl>
+          {/* `KpiList`, not the `pol-kpis` definition list this used to be — the same migration the two
+              utilization panels made. Six row counts are exactly what the KPI treatment is for, and on the
+              screen an operator watches to decide whether to commit a file, "how many rows failed" should not
+              be set smaller than the body copy beside it. Same definition-list semantics, same classes as
+              `KpiCard`. */}
+          <KpiList
+            items={[
+              { label: t(S.submitted), value: fmt.number(job.totalRows) },
+              { label: t(S.valid), value: fmt.number(job.validRows) },
+              { label: t(S.invalid), value: fmt.number(job.invalidRows) },
+              { label: t(S.applied), value: fmt.number(job.appliedRows) },
+              { label: t(S.failed), value: fmt.number(job.failedRows) },
+              { label: t(S.skipped), value: fmt.number(job.skippedRows) },
+            ]}
+          />
 
           <div className="pol-editor-actions">
             <Button variant="secondary" onClick={doValidate} disabled={busy || job.status === "Failed"}>
@@ -354,14 +381,25 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
               {/* Said here, next to the errors, because this is the moment the operator decides whether to
                   re-upload the whole file or hand-edit it down to the failing rows. */}
               <InlineAlert tone="info">{t(S.reupload)}</InlineAlert>
+              {/* And this decides which of those two it is: hand-editing the rows on screen is only an option
+                  when the rows on screen are all of them. */}
+              {totalErrors > errors.length && (
+                <InlineAlert tone="warn">
+                  {t(S.errorsTruncated)
+                    .replace("{shown}", fmt.number(errors.length))
+                    .replace("{total}", fmt.number(totalErrors))}
+                  {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
+                </InlineAlert>
+              )}
+              <BulkErrorReportButton documentId={report?.job.errorDocumentId} jobId={report?.job.jobId ?? ""} />
               <DataTable
                 caption={t(S.detail)}
                 rows={errors}
                 rowKey={(r) => String(r.rowNumber)}
                 density="compact"
                 columns={[
-                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
-                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} /> },
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
+                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} />, sortable: true, sortValue: (r) => r.code },
                   { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
                 ]}
               />
@@ -371,13 +409,20 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
           {validation && validation.wouldChange.length > 0 && !commit && (
             <>
               <h4>{t(S.wouldChange)}</h4>
+              {validation.totalWouldChange > validation.wouldChange.length && (
+                <InlineAlert tone="info">
+                  {t(S.changesTruncated)
+                    .replace("{shown}", fmt.number(validation.wouldChange.length))
+                    .replace("{total}", fmt.number(validation.totalWouldChange))}
+                </InlineAlert>
+              )}
               <DataTable
                 caption={t(S.wouldChange)}
                 rows={validation.wouldChange}
                 rowKey={(r) => String(r.rowNumber)}
                 density="compact"
                 columns={[
-                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
                   { key: "summary", header: t(S.detail), cell: (r) => (lang === "ar" ? r.summaryAr : r.summaryEn) },
                 ]}
               />
@@ -403,7 +448,12 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
                   </tbody>
                 </table>
               </div>
-              {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
+              {recon.errorDocumentId && (
+                <>
+                  <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>
+                  <BulkErrorReportButton documentId={recon.errorDocumentId} jobId={recon.jobId} />
+                </>
+              )}
             </div>
           )}
         </Card>

@@ -24,9 +24,19 @@ public class AppointmentBranchScopeTests
     private static BranchScopeState Scoped(Guid active) => new()
     {
         Context = new BranchContext(active, new HashSet<Guid> { active }, IsBranchUnrestricted: false),
+        Mode = ScopeMode.BranchScoped,
     };
 
-    private static BranchScopeState Unrestricted() => new() { Context = BranchContext.Unrestricted };
+    /// <summary>A clinics manager: reach over a SET, and NO active branch until they filter. That second half
+    /// is the state the write guard used to fall straight through.</summary>
+    private static BranchScopeState SetScoped(Guid? filter, params Guid[] permitted) => new()
+    {
+        Context = new BranchContext(filter, new HashSet<Guid>(permitted), IsBranchUnrestricted: false),
+        Mode = ScopeMode.BranchSetScoped,
+    };
+
+    private static BranchScopeState Unrestricted() =>
+        new() { Context = BranchContext.Unrestricted, Mode = ScopeMode.MemberScoped };
 
     // ── ResolveBookingBranch: who decides the branch a booking lands in ──────────────────────────────────
 
@@ -79,6 +89,88 @@ public class AppointmentBranchScopeTests
         var (branch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(Unrestricted(), requested: null);
         denied.Should().BeNull();
         branch.Should().BeNull();
+    }
+
+    // ── The clinics manager: reach over a SET, and the hole that left ────────────────────────────────────
+
+    [Fact]
+    public void THE_ONE_THAT_MATTERS_a_clinics_manager_cannot_book_into_a_clinic_they_do_not_run()
+    {
+        var maadi = Guid.NewGuid();
+        var dokki = Guid.NewGuid();
+        var aswan = Guid.NewGuid();
+
+        // Granted Maadi and Dokki, no filter set — which is a set-scoped caller's NORMAL state, not an edge
+        // case: they start unfiltered so their worklists span every clinic they supervise.
+        var (branch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(
+            SetScoped(filter: null, maadi, dokki), requested: aswan);
+
+        // Until BranchWriteScope this returned (aswan, null): the guard asked `ActiveBranchId ==`, found null,
+        // and handed back the request body's branch without ever consulting the permitted set.
+        branch.Should().BeNull();
+        denied.Should().NotBeNull("a supervisor's reach comes from their grants, never from what they ask for");
+        StatusOf(denied!).Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public void A_clinics_manager_books_into_any_clinic_they_DO_run()
+    {
+        var maadi = Guid.NewGuid();
+        var dokki = Guid.NewGuid();
+
+        foreach (var target in new[] { maadi, dokki })
+        {
+            var (branch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(
+                SetScoped(filter: null, maadi, dokki), requested: target);
+
+            denied.Should().BeNull();
+            branch.Should().Be(target);
+        }
+    }
+
+    [Fact]
+    public void A_clinics_manager_naming_no_branch_is_asked_which_one_rather_than_defaulted()
+    {
+        var maadi = Guid.NewGuid();
+        var dokki = Guid.NewGuid();
+        var (branch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(
+            SetScoped(filter: null, maadi, dokki), requested: null);
+
+        branch.Should().BeNull();
+        // 400, not 403: the request is not forbidden, it is incomplete. A supervisor of six clinics writing
+        // with no branch could mean any of them, and picking one for them is how a booking lands somewhere
+        // nobody chose.
+        StatusOf(denied!).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [Fact]
+    public void A_clinics_managers_filter_narrows_their_writes_the_way_it_narrows_their_reads()
+    {
+        var maadi = Guid.NewGuid();
+        var dokki = Guid.NewGuid();
+
+        // Filtered to Maadi. Dokki is still in their grants, and is still refused — what is on screen and
+        // what is written have to be the same clinic.
+        var (_, denied) = AppointmentEndpointsShared.ResolveBookingBranch(
+            SetScoped(filter: maadi, maadi, dokki), requested: dokki);
+        StatusOf(denied!).Should().Be(StatusCodes.Status403Forbidden);
+
+        var (branch, allowed) = AppointmentEndpointsShared.ResolveBookingBranch(
+            SetScoped(filter: maadi, maadi, dokki), requested: null);
+        allowed.Should().BeNull();
+        branch.Should().Be(maadi);
+    }
+
+    [Fact]
+    public void A_clinics_manager_whose_reach_did_not_resolve_writes_nowhere()
+    {
+        // The sentinel case. An empty permitted set means "reach unresolved", and it must fail the way an
+        // unresolvable single branch does — matching nothing, never everything.
+        var (branch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(
+            SetScoped(filter: null), requested: Guid.NewGuid());
+
+        branch.Should().BeNull();
+        StatusOf(denied!).Should().Be(StatusCodes.Status403Forbidden);
     }
 
     // ── DenyIfOutsideBranchAsync: who may WRITE to an existing appointment ───────────────────────────────

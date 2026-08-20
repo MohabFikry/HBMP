@@ -6,6 +6,7 @@
     <ProjectReference Include="../Domain/Mersal.Audit.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Audit.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />

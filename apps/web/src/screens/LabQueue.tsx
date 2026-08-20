@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { LabOrder, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -152,14 +152,15 @@ export function LabQueue({ kind }: { kind: "lab" | "radiology" }) {
   const cols: Column<LabOrder>[] = [
     // The order's own reference. A technician reads it back to the patient and writes it on the sample; the
     // internal id is not a thing anyone downstream has seen.
-    { key: "orderNo", header: t(S.ref), cell: (r) => <span className="tnum">{r.orderNo}</span> },
+    { key: "orderNo", header: t(S.ref), cell: (r) => <span className="tnum">{r.orderNo}</span>, sortable: true, sortValue: (r) => r.orderNo },
     { key: "test", header: t(S.test), cell: (r) => <span><span className="tnum">{r.test.code}</span> · {t(r.test.label)}</span> },
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
     { key: "progress", header: t(S.progress), cell: (r) => <span className="tnum">{r.panelsDone}/{r.panelsTotal}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "action",
+      stickyEnd: true,
       header: t(S.action),
       // An expired order is IN the queue — dropping it left a technician with the patient in front of them
       // looking at an empty list and nothing to tell them. What changes is the action: consume is refused by
@@ -206,7 +207,7 @@ export function LabQueue({ kind }: { kind: "lab" | "radiology" }) {
           <InputField label={t(S.fMember)} {...field("memberNo")} />
           <InputField label={t(S.fPassport)} {...field("passport")} />
           <div className="rx-search-actions">
-            <Button type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
+            <Button leadingIcon={<Icon name="search" />} type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
             <Button type="button" variant="ghost" onClick={clear}>{t(S.clear)}</Button>
           </div>
         </form>

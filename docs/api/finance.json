@@ -65,7 +65,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UtilizationView"
+                }
+              }
+            }
           }
         }
       }
@@ -102,7 +109,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSummaryView"
+                }
+              }
+            }
           }
         }
       }
@@ -124,7 +138,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       },
@@ -151,7 +172,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SettlementView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -174,7 +205,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -197,7 +235,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -220,7 +265,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -242,7 +294,15 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
           }
         }
       }
@@ -303,6 +363,27 @@
         },
         "additionalProperties": false
       },
+      "FinancialSummaryView": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SummaryBucket"
+            },
+            "nullable": true
+          },
+          "totalSpend": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
       "GenerateSettlementRequest": {
         "type": "object",
         "properties": {
@@ -346,6 +427,167 @@
           "occurredAt": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettlementLineView": {
+        "type": "object",
+        "properties": {
+          "serviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "agreedUnitPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "lineTotal": {
+            "type": "number",
+            "format": "double"
+          },
+          "priceSource": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettlementView": {
+        "type": "object",
+        "properties": {
+          "settlementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "settlementNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "contractId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "periodStart": {
+            "type": "string",
+            "format": "date"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date"
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "total": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettlementLineView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SummaryBucket": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "spend": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationRow": {
+        "type": "object",
+        "properties": {
+          "serviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "coverageCategory": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorizedQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "spend": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationView": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UtilizationRow"
+            },
+            "nullable": true
+          },
+          "totalAuthorized": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalDelivered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalSpend": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false

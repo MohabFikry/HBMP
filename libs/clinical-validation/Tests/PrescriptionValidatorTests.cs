@@ -1037,7 +1037,7 @@ public class PrescriptionValidatorTests
                 allergies: Fx.Allergies(recordedCount: 2),
                 dosingRules: Fx.DosingRules(new DosingRuleFact(line.DrugId, MaxDailyDose: 4000, DoseUnit: "mg")),
                 benefit: Fx.Benefit(new BenefitOutcome(line.LineId, BenefitState.Allowed, "Covered.", "مغطى.")),
-                packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packSize: 20m))), diagnoses: ["E11.9"]);
+                packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packContent: 20m))), diagnoses: ["E11.9"]);
 
         result.StateFor(line.LineId).Should().Be(CheckState.Ok);
         result.UnacknowledgedBlockers(line.LineId).Should().BeEmpty();

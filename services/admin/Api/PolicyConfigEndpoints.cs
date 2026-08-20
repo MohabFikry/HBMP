@@ -29,8 +29,9 @@ public static class PolicyConfigEndpoints
             var policy = await svc.SetSessionPolicyAsync(AdminContracts.Actor(p), tenant, req.Tier,
                 req.AccessTokenTtlSeconds, req.IdleTimeoutSeconds, req.AbsoluteCapSeconds,
                 req.MaxConcurrentSessions, req.StepUpRequired, ct);
-            return Results.Ok(new { policy.PolicyId, tier = policy.RoleTier.ToString(), policy.EffectiveFrom });
-        });
+            return Results.Ok(new SessionPolicyView(policy.PolicyId, policy.RoleTier.ToString(), policy.EffectiveFrom));
+        })
+        .Produces<SessionPolicyView>();
 
         w.MapPut("/device-policy", async (DevicePolicyRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
         {
@@ -43,8 +44,9 @@ public static class PolicyConfigEndpoints
 
             var policy = await svc.SetDevicePolicyAsync(AdminContracts.Actor(p), tenant, req.Role,
                 req.RequireManagedDevice, req.IpAllowList, ct);
-            return Results.Ok(new { policy.PolicyId, policy.Role, policy.EffectiveFrom });
-        });
+            return Results.Ok(new DevicePolicyView(policy.PolicyId, policy.Role, policy.EffectiveFrom));
+        })
+        .Produces<DevicePolicyView>();
 
         // Stage a policy-bundle change — Super Admin only; proposes/diffs, never deploys.
         w.MapPost("/policy-proposals", async (PolicyProposalRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>

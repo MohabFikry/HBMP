@@ -301,7 +301,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.analytics",
     "network.tiers",
   ],
-  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access"],
+  // 28.10 — `admin.tenants` is NOT here. The tenant registry's read and write are both
+  // `AdminPolicies.ManageTenant`, which names `super_admin` alone, so an org admin holding this permission
+  // could only ever reach a screen that answered 403. Removing it takes nothing away that worked.
+  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.audit", "admin.config", "admin.access"],
   // Super admin can administer globally; sensitive PHI reads remain break-glass on the server, not routine UI.
   // `admin.programs` is super-admin only: enablement is set by Mersal programme administration, and a tenant
   // that can switch on its own programmes is not gated at all (design 40 §4, A4).
@@ -335,6 +338,25 @@ export function permissionsForRole(role: Role): ReadonlySet<Permission> {
   if (!NON_PROFILE_ROLES.has(role)) perms.add("profile.read");
   if (PROFILE_EXPORTERS.has(role)) perms.add("profile.export");
   return perms;
+}
+
+/**
+ * The permissions of somebody holding SEVERAL portal roles.
+ *
+ * A plain union, and deliberately so: `permissionsForRole` already adds the cross-cutting grants
+ * (`notification.read`, `profile.read`, `profile.export`) per role, and unioning the finished sets keeps
+ * exactly one place where those rules live. Computing them again over the merged role list would be a
+ * second implementation of the same policy, free to disagree with the first.
+ *
+ * This does NOT widen anybody. Each portal's nav and routes are gated by its own catalog sections, so a
+ * doctor who is also an org admin sees the clinician rail in `/clinician` and the administration rail in
+ * `/admin` — never one inside the other. And the server re-authorizes every call from the token, which is
+ * where the real answer has always been.
+ */
+export function unionPermissions(roles: readonly Role[]): ReadonlySet<Permission> {
+  const out = new Set<Permission>();
+  for (const role of roles) for (const p of permissionsForRole(role)) out.add(p);
+  return out;
 }
 
 export function hasPermission(perms: ReadonlySet<Permission>, required: Permission): boolean {

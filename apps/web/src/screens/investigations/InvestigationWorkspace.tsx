@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type SetStateAction } from "react";
 import { z } from "zod";
-import { Button, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
 import type {
   CheckState, CptSection, InvestigationDraftLine, InvestigationOrderType, Localized,
   OrderAcknowledgement, OrderCheckKind, OrderFinding, OrderValidationResult, ProcedureType,
@@ -25,6 +25,16 @@ const S = {
   procedureType: { en: "Procedure type", ar: "نوع الإجراء" },
   chooseType: { en: "Choose a type…", ar: "اختر النوع…" },
   sessions: { en: "Sessions", ar: "عدد الجلسات" },
+  // 31.4 — copying an order that has already been raised. The KIND and the session count are order-level
+  // facts the worklist row does not carry, so a copied course arrives without them and says so.
+  cloned: {
+    en: "Copied {n} item(s) from {ref}. Nothing has been ordered yet — check it and send.",
+    ar: "تم نسخ {n} بند من {ref}. لم يتم طلب أي شيء بعد — راجعه ثم أرسل.",
+  },
+  cloneEmpty: {
+    en: "Nothing on {ref} could be copied — it records no items.",
+    ar: "لا يوجد ما يمكن نسخه من {ref} — لا تسجّل أي بنود.",
+  },
   // 31.1 — the course, at the level it is decided.
   courseLegend: { en: "Procedure course", ar: "خطة الإجراء" },
   quantityPerSession: { en: "Quantity per session", ar: "الكمية لكل جلسة" },
@@ -252,11 +262,26 @@ export function sectionsFor(orderType: InvestigationOrderType): CptSection[] {
  * The verdict here is ADVISORY. orders-service re-derives everything on create and reads nothing this
  * returned, so nothing below is a security control.
  */
+/**
+ * 31.4 — an order to copy into this composer, as the row that offered it knows it.
+ *
+ * <p>No `procedureTypeCode` or `sessions`: those are ORDER-level facts (31.1) and the worklist row does not
+ * carry them, so a copied procedure course arrives with its items and without its kind. Stated rather than
+ * defaulted — a session count invented here is a course nobody prescribed.</p>
+ */
+export interface OrderClone {
+  /** What the doctor is copying, for the confirmation — "ORD-2026-000118". */
+  reference: string;
+  items: { code: string; description: string | null; quantity: number }[];
+}
+
 export function InvestigationWorkspace({
   encounterId,
   beneficiaryId,
   orderType,
   diagnosisIcdCodes,
+  clone,
+  onCloneApplied,
   onDone,
 }: {
   encounterId: string;
@@ -265,6 +290,9 @@ export function InvestigationWorkspace({
   beneficiaryId: string;
   orderType: InvestigationOrderType;
   diagnosisIcdCodes: string[];
+  /** 31.4 — set by a row's Clone action; consumed once and reported back through `onCloneApplied`. */
+  clone?: OrderClone | null;
+  onCloneApplied?: () => void;
   onDone?: () => void;
 }) {
   const api = useApi();
@@ -323,6 +351,45 @@ export function InvestigationWorkspace({
     setDraft((d) => ({ ...d, result: r, validatedFingerprint: fingerprint }));
 
   const [busy, setBusy] = useState(false);
+
+  /*
+   * 31.4 — COPY AN EXISTING ORDER INTO THIS COMPOSER.
+   *
+   * Repeat bloods on a chronic patient are the commonest thing on this tab, and re-ordering them meant
+   * finding each code in the CPT book again. The row hands over the codes; nothing needs resolving, because
+   * a line here IS a code and a description.
+   *
+   * It APPENDS rather than replaces, and the only line it removes is a single empty placeholder — a doctor
+   * who has half-composed an order and reaches for Clone must not watch it disappear. The copy makes any
+   * check already run stale, which is said by clearing the result rather than by leaving a verdict that was
+   * reached about a different set of tests.
+   */
+  useEffect(() => {
+    if (!clone) return;
+    // An order carrying no lines copies nothing, and must say so rather than leaving the request unconsumed
+    // and the doctor watching a button that appears to do nothing.
+    if (clone.items.length === 0) {
+      toast(t(S.cloneEmpty).replace("{ref}", clone.reference), "bad");
+      onCloneApplied?.();
+      return;
+    }
+    setLines((prev) => [
+      ...prev.filter((l) => l.test !== null || prev.length > 1),
+      ...clone.items.map((item) => ({
+        ...newLine(),
+        test: { code: item.code, description: item.description ?? item.code },
+        quantity: item.quantity,
+      })),
+    ]);
+    setChecked(null, null);
+    toast(
+      t(S.cloned).replace("{n}", String(clone.items.length)).replace("{ref}", clone.reference),
+      "ok",
+    );
+    onCloneApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clone]);
+
   const [discarding, setDiscarding] = useState(false);
   const composed = !isEmptyDraft(draft);
   const [openChecks, setOpenChecks] = useState<string | null>(null);
@@ -498,15 +565,14 @@ export function InvestigationWorkspace({
           <div className="rx-course-fields">
             <label className="rx-field">
               <span className="rx-field-label">{t(S.procedureType)}</span>
-              <select
-                className="rx-field-input"
-                value={procedureTypeCode ?? ""}
+              <Combobox
+                value={procedureTypeCode}
                 disabled={busy || typesFailed}
-                onChange={(e) => {
-                  // Read the value BEFORE the updater — `setDraft`'s callback runs after React has released
-                  // the synthetic event, and reaching for `currentTarget` there throws inside a state
-                  // updater and takes the whole composer down with it.
-                  const code = e.currentTarget.value || null;
+                placeholder={t(S.chooseType)}
+                onChange={(next) => {
+                  // The event-timing note that used to live here is gone with the native select: `onChange`
+                  // hands over the VALUE, so there is no synthetic event to read after React has released it.
+                  const code = next || null;
                   const picked = code ? typeByCode.get(code) : undefined;
                   setDraft((d) => ({
                     ...d,
@@ -518,12 +584,8 @@ export function InvestigationWorkspace({
                     sessions: picked?.isSessionBased ? (picked.defaultSessions ?? 1) : null,
                   }));
                 }}
-              >
-                <option value="">{t(S.chooseType)}</option>
-                {procedureTypes.map((p) => (
-                  <option key={p.code} value={p.code}>{t(p.name)}</option>
-                ))}
-              </select>
+                options={procedureTypes.map((p) => ({ value: p.code, label: t(p.name), keywords: p.code }))}
+              />
             </label>
 
             {/* Revealed by the TYPE's `isSessionBased` flag and never by its NAME — dialysis and
@@ -723,7 +785,7 @@ export function InvestigationWorkspace({
         className="rx-add-line"
         disabled={busy}
         onClick={() => setLines((prev) => [...prev, newLine()])}
-        leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+        leadingIcon={<Icon name="plus" aria-hidden="true" />}
       >
         {t(S.addLine)}
       </Button>
@@ -750,7 +812,7 @@ export function InvestigationWorkspace({
         <Button variant="secondary" loading={busy} disabled={!allLinesHaveTests} onClick={() => void validate()}>
           {t(S.validate)}
         </Button>
-        <Button variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
+        <Button leadingIcon={<Icon name="check2" />} variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
           {t(S.submit)}
         </Button>
       </div>
@@ -777,7 +839,7 @@ export function InvestigationWorkspace({
         title={t(S.confirmDiscard)}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
+            <Button variant="secondary" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
             <Button
               variant="danger"
               onClick={() => { setDraft(emptyDraft()); setOpenChecks(null); setDiscarding(false); }}

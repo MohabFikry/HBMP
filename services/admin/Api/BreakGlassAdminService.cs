@@ -77,14 +77,27 @@ public sealed class BreakGlassAdminService(AdminDbContext db, IAuditClient audit
         return new(true, null, grant);
     }
 
-    /// <summary>Activate an approved grant — requires the requester + a satisfied step-up MFA. Opens the scoped,
-    /// auto-expiring window.</summary>
-    public async Task<BreakGlassResult> ActivateAsync(ActorContext actor, string tenant, Guid grantId, bool stepUpSatisfied, CancellationToken ct = default)
+    /// <summary>Activate an approved grant — requires the requester and a multi-factor token. Opens the
+    /// scoped, auto-expiring window.</summary>
+    /// <param name="mfaSatisfied">
+    /// Whether the CALLER'S TOKEN evidences a second factor, as derived by <c>MfaEvaluator</c> from the
+    /// signed acr/amr claims. The endpoint must pass <c>principal.MfaSatisfied</c> and nothing else: this
+    /// parameter used to be a boolean lifted straight off the request body, so the requester attested to
+    /// their own authentication and the elevated window opened for anyone who sent <c>true</c>.
+    /// </param>
+    /// <remarks>
+    /// KNOWN LIMIT, recorded rather than papered over: this proves the session was established with MFA, not
+    /// that a factor was re-presented FOR THIS ACTION, which is what "step-up" properly means. Freshness
+    /// needs an <c>auth_time</c> the frozen token contract does not carry (docs/security/token-contract.md),
+    /// so closing that gap is a contract change and a decision for its owners. What this fixes is the part
+    /// that was not a weak check but no check at all.
+    /// </remarks>
+    public async Task<BreakGlassResult> ActivateAsync(ActorContext actor, string tenant, Guid grantId, bool mfaSatisfied, CancellationToken ct = default)
     {
         var grant = await Load(tenant, grantId, ct);
         if (grant is null || grant.Status != BreakGlassStatus.Approved) return new(false, "not-activatable", grant);
         if (!string.Equals(grant.RequesterUserId, actor.UserId, StringComparison.Ordinal)) return new(false, "not-requester", grant);
-        if (!stepUpSatisfied) return new(false, "step-up-required", grant);
+        if (!mfaSatisfied) return new(false, "step-up-required", grant);
 
         var now = clock.GetUtcNow();
         var (notBefore, expiresAt) = BreakGlassPolicy.Window(now, grant.WindowMinutes);

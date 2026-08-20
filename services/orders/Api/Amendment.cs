@@ -42,8 +42,9 @@ public static class AmendmentEndpoints
         // ---- The coded vocabulary the picker renders ---------------------------------------------------
         v1.MapGet("/amendment-reasons", () =>
                 Results.Ok(AmendmentReasons.For(ReasonScope.Order)
-                    .Select(r => new { code = r.Code, nameEn = r.NameEn, nameAr = r.NameAr })))
-            .RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+                    .Select(r => new AmendmentReasonView(r.Code, r.NameEn, r.NameAr))))
+            .RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<AmendmentReasonView>>();
 
         // ---- Cancel ONE line ---------------------------------------------------------------------------
         v1.MapPost("/{orderId:guid}/lines/{lineId:guid}/cancel", async Task<IResult> (
@@ -154,6 +155,12 @@ public static class AmendmentEndpoints
                             reasonCode = record.ReasonCode, reasonText = record.ReasonText,
                             orderedByUserId = record.AmendedBy.ToString(),
                             amendedAt = record.AmendedAt,
+                            // The routing feed's two required facts, same as the create path. `serviceCodes`
+                            // is the amended LINE's code and only it: this re-review is about the line that
+                            // left the approved scope, and offering the reviewer the whole order's codes
+                            // would invite a partial approval that silently re-scopes lines nobody amended.
+                            providerId = o.OrderingProviderId == Guid.Empty ? (Guid?)null : o.OrderingProviderId,
+                            serviceCodes = new[] { line.Code },
                         }, innerCt);
                     }
                 }, ct);

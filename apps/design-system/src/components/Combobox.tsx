@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
 import { Icon } from "./Icon";
+import { PopupPortal, useAnchoredPopup } from "./Popup";
 
 export interface ComboboxOption {
   value: string;
@@ -27,6 +28,37 @@ export interface ComboboxProps {
   /** Rendered on the error path by the caller; only used to set aria-invalid here. */
   invalid?: boolean;
   "aria-describedby"?: string;
+  /**
+   * An icon belonging to the CONTROL, shown whether or not anything is selected — sized by CSS, so pass a
+   * bare `<Icon />`.
+   *
+   * <p>Distinct from an option's `leading`, which belongs to the VALUE: the branch switcher's glyph says
+   * "this control picks a branch" and must stay while the operator types, whereas a country's flag says
+   * "this is the country you chose" and is meaningless next to a half-typed query. They share one slot
+   * because they occupy the same place in the control; when both are supplied the control's icon wins,
+   * because it is the one that is still true while the list is open.</p>
+   */
+  leadingIcon?: ReactNode;
+  /**
+   * Pill silhouette to match the app-bar search; default is the field radius.
+   *
+   * <p>Only the app bar uses this. A pill in a form grid reads as a filter or a search rather than as a
+   * field, which is the distinction it exists to draw.</p>
+   */
+  shape?: "pill" | "field";
+  /**
+   * Carry the selected option's `hint` into the closed control, as `Select` does — off by default.
+   *
+   * <p>`hint` is doing two different jobs across the product and only one of them belongs in the box. On the
+   * nationality picker `hint` is "SY": a SEARCH AID, there so typing the code finds the country, and reading
+   * "Syria · SY" back as though it were the answer is noise. On the branch switcher `hint` is "Home": a
+   * QUALIFIER OF THE VALUE, and an operator who cannot see it has lost the one word that tells them which
+   * of six clinics is theirs.</p>
+   *
+   * <p>Off by default so it is the screens that need the qualifier which ask for it, rather than every
+   * existing picker silently gaining a suffix.</p>
+   */
+  hintWhenClosed?: boolean;
 }
 
 /**
@@ -59,6 +91,9 @@ export function Combobox({
   disabled,
   className,
   invalid,
+  leadingIcon,
+  shape = "field",
+  hintWhenClosed = false,
   ...aria
 }: ComboboxProps) {
   const autoId = useId();
@@ -75,7 +110,17 @@ export function Combobox({
 
   // Closed, the input SHOWS the selection; open, it holds whatever is being typed. One input doing both jobs
   // is what makes this feel like a droplist you can type into rather than a text box with suggestions.
-  const display = open ? query : (selected?.label ?? "");
+  //
+  // With `hintWhenClosed`, the hint travels with the label. `Select` renders it as a muted span — an <input>
+  // cannot hold one, so it is joined into the text with the same " · " separator. Display only: the value is
+  // `selected.value`, never what is in the box. Without it a branch reading "Maadi · Home" in a Select became
+  // a bare "Maadi" on conversion, and the operator lost the one word telling them which branch is theirs.
+  const closedLabel = !selected
+    ? ""
+    : hintWhenClosed && selected.hint
+      ? `${selected.label} · ${selected.hint}`
+      : selected.label;
+  const display = open ? query : closedLabel;
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -110,7 +155,10 @@ export function Combobox({
     // pointerdown, not click: a drag that starts inside and ends outside must not close, and pointerdown
     // fires before the browser moves focus.
     function onPointerDown(e: PointerEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) close();
+      const t = e.target as Node;
+      // BOTH refs. The list is portalled to <body>, so it is no longer inside `rootRef` — checking only that
+      // one would treat every click on an option as an outside click and close the popup before it commits.
+      if (!rootRef.current?.contains(t) && !listRef.current?.contains(t)) close();
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -162,12 +210,17 @@ export function Combobox({
     }
   }
 
+  const popup = useAnchoredPopup(rootRef, listRef, open);
+
   return (
-    <div ref={rootRef} className={cx("mrs-combo", className)}>
+    <div ref={rootRef} className={cx("mrs-combo", `mrs-combo--${shape}`, className)}>
       <div className="mrs-combo-control">
-        {/* The selected option's flag stays visible while the field is closed — for nationality that is the
-            fastest way to confirm the right country at a glance, which is the whole reason it is there. */}
-        {!open && selected?.leading && <span className="mrs-combo-leading">{selected.leading}</span>}
+        {/* The control's own icon stays through typing; the selected option's flag does not. See the two
+            props' doc comments — the first describes the control, the second describes the value, and a
+            value's glyph beside a half-typed query is describing something the operator has left behind. */}
+        {leadingIcon
+          ? <span className="mrs-combo-leading">{leadingIcon}</span>
+          : !open && selected?.leading && <span className="mrs-combo-leading">{selected.leading}</span>}
         <input
           id={inputId}
           role="combobox"
@@ -199,9 +252,16 @@ export function Combobox({
         <Icon name="chevron" className="mrs-combo-chevron" aria-hidden />
       </div>
 
-      {/* Rendered only while open, so the closed control contributes nothing to the a11y tree or hit-testing. */}
+      {/*
+        Rendered only while open, so the closed control contributes nothing to the a11y tree or hit-testing,
+        and PORTALLED out of this control so no scrolling ancestor can clip it — see `Popup.tsx`. The input
+        keeps focus throughout, so moving the list out of the control changes nothing about the keyboard
+        contract: `aria-activedescendant` and `aria-controls` reach across the portal.
+      */}
       {open && (
-        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list mrs-scroll"
+        <PopupPortal>
+        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list mrs-popup mrs-scroll"
+            data-flipped={popup.flipped || undefined} style={popup.style}
             aria-label={aria["aria-label"]} aria-labelledby={aria["aria-labelledby"]}>
           {matches.length === 0 && (
             // A silent empty popup reads as a broken control. Not an option, so it is never selectable.
@@ -223,10 +283,18 @@ export function Combobox({
               <Icon name="ok" className="mrs-combo-check" aria-hidden />
               {o.leading && <span className="mrs-combo-leading">{o.leading}</span>}
               <span className="mrs-combo-label">{o.label}</span>
-              {o.hint && <span className="mrs-combo-hint">{o.hint}</span>}
+              {/* The separator is DOM text, not a `::before`, for two reasons: it is what `Select` renders,
+                  so a converted screen's list reads the same as the one it replaced; and it is part of the
+                  option's accessible name, which CSS-generated content is not reliably part of. It also has
+                  to agree with the closed control, which joins label and hint with the same " · " because an
+                  <input> cannot hold two styled spans. The hint stays a SIBLING of the label rather than
+                  moving inside it (which is how `Select` does it) so a long label ellipsises without taking
+                  the qualifier with it. */}
+              {o.hint && <span className="mrs-combo-hint">· {o.hint}</span>}
             </li>
           ))}
         </ul>
+        </PopupPortal>
       )}
     </div>
   );

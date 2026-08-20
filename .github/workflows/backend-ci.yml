@@ -72,6 +72,25 @@ jobs:
           --health-timeout 5s
           --health-retries 24
 
+      # Ephemeral RabbitMQ, for the same reason as the Postgres above: a gated proof that cannot reach its
+      # dependency SKIPS, and check-skipped-tests.py allows zero skips. libs/events'
+      # SagaMirrorAgainstBrokerTests assert that OrderPendingApproval really is readable out of
+      # approvals.routing-events and that a decision reaches BOTH owners' queues — the prior-authorization
+      # saga's two mirrors (ADR-0041). Neither is provable against a stub: the publish goes to the default
+      # exchange with the destination as the routing key, so an undeclared queue discards in silence.
+      rabbitmq:
+        image: rabbitmq:3.13
+        env:
+          RABBITMQ_DEFAULT_USER: hbmp
+          RABBITMQ_DEFAULT_PASS: ci_hbmp_rmq_pw
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
+
     env:
       DOTNET_NOLOGO: "1"
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
@@ -86,6 +105,8 @@ jobs:
       OWNER_PASSWORD: ci_hbmp_pw
       APP_PASSWORD: ci_hbmp_app_pw
       HBMP_APP_PASSWORD: ci_hbmp_app_pw
+      # The broker-gated mirror proofs. Same throwaway-credential rule as the DB values above.
+      HBMP_TEST_RABBIT_URI: "amqp://hbmp:ci_hbmp_rmq_pw@localhost:5672"
       # Coverage floors are NOT set here. They live in tools/ci/coverage-floors.json, the single
       # source of truth, guarded by check-floor-monotonicity.py (Gate 1.3 / Gate 7.3). A second copy
       # in this file is how a bar gets moved in a diff nobody reads as a bar being moved.
@@ -189,6 +210,27 @@ jobs:
         if: always()
         continue-on-error: true
         run: python3 tools/ci/check-login-origin.py
+
+      # MFA-off and RequireHttpsMetadata-off are laptop conveniences that became the deployment, because
+      # Compose Tier 1 is the only deployment that exists and nothing stopped them travelling. Both default
+      # to the secure value in code; this fails any config that overrides one without pinning that service
+      # to Development.
+      - name: "gate: dev-only auth relaxations stay in Development (18-security-model §3.3)"
+        id: gate_dev_auth_flags
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-dev-auth-flags.py
+
+      # 2026-08-09 audit — the docs' service inventory against the one on disk. Three independent copies of
+      # one fact (CLAUDE.md's layout, HANDOFF's count, doc 16's catalog) had drifted to 14, 21 and 17 against
+      # a real 22, and nothing connected any of them to the directory. A document cannot fail; this makes it.
+      - name: "gate: documented service inventory matches services/ (audit 2026-08-09 §3)"
+        id: gate_service_inventory
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-service-inventory.py --selftest
+          python3 tools/ci/check-service-inventory.py
 
       - name: "gate: integration DPIA / data-sharing (13.3)"
         id: gate_dpia
@@ -377,6 +419,16 @@ jobs:
         # refuse to compare nothing (24.1), report which specs drifted — are unchanged.
         run: bash tools/ci/check-openapi-drift.sh artifacts/openapi
 
+      # 31.6 — the drift gate above compares the specs it is GIVEN, and until 31.5 those described no
+      # response bodies at all: it reported "every committed spec matches" while three fields were added to a
+      # prescription line. This ratchets the share of endpoints that say what they return, per service, so
+      # the remainder can only shrink.
+      - name: "gate: response schemas (every endpoint says what it returns)"
+        id: gate_response_schemas
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-response-schemas.py --specs artifacts/openapi
+
       # ADVISORY: artefact upload. Losing the upload loses convenience, not a verdict — every number it
       # carries was already asserted by a counted gate above.
       - name: Upload coverage + OpenAPI specs + test results
@@ -401,6 +453,8 @@ jobs:
             kong-route-coverage=${{ steps.gate_kong.outcome }}
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
             login-origin=${{ steps.gate_login_origin.outcome }}
+            dev-auth-flags=${{ steps.gate_dev_auth_flags.outcome }}
+            service-inventory=${{ steps.gate_service_inventory.outcome }}
             integration-dpia=${{ steps.gate_dpia.outcome }}
             coverage-exclusions=${{ steps.gate_coverage_exclusions.outcome }}
             floor-monotonicity=${{ steps.gate_floor_monotonicity.outcome }}
@@ -414,6 +468,7 @@ jobs:
             coverage=${{ steps.gate_coverage.outcome }}
             openapi-generate=${{ steps.gate_openapi_generate.outcome }}
             openapi-drift=${{ steps.gate_openapi_drift.outcome }}
+            response-schemas=${{ steps.gate_response_schemas.outcome }}
         run: |
           echo "## Gate results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -452,6 +507,11 @@ jobs:
           name: gate-heartbeats
           path: .ci-state
           retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
       # ============================================================================================
       # The whole point of the restructure: one place that reads every gate's outcome, prints the

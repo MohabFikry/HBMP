@@ -115,18 +115,22 @@ import {
   type PlaceOrderRequest,
   type PrescribeRequest,
   type IdentityUser,
+  type RoleCatalogEntry,
+  type ScopeCatalogEntry,
   type RoleScopeGrant,
   type ReportAccessRequestRow,
   zAmendReasonOption,
   zQuantityPreview,
+  canonicaliseConfigValue,
 } from "@mersal/contracts";
-import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SystemConfigEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, OrderFinding, ValidityExtensionRequest } from "@mersal/contracts";
 import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionKind } from "@mersal/contracts";
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
+import { sectionStateFor } from "../dev/profileSectionMatrix";
 import { ApiError } from "./http";
 
 const loc = (en: string, ar: string): Localized => ({ en, ar });
@@ -1071,12 +1075,202 @@ export class DevApiClient implements ApiClient {
 
   /** 18.C2 (W5) — fixture identity users. One account WITHOUT a second factor, because that is the row the
    * screen exists to make visible. */
-  async identityUsers(): Promise<IdentityUser[]> {
+  /**
+   * The fixture identity store. MUTABLE, unlike most of this file.
+   *
+   * Everything else here answers from a literal, because a screen that only reads cannot tell the difference.
+   * User administration is the first surface in the app whose whole point is that the list CHANGES: "create
+   * a user and see them in the table" is the behaviour under test, and a client that returned the same three
+   * rows forever would pass a test that proved nothing.
+   */
+  private identityStore: IdentityUser[] = [
+    // 28.13 — POSITIONS that deliberately do not track the roles beside them, because that is the whole
+    // point of the column: `dr.hala` is a Consultant holding `doctor`, and `left.staff` is an Office
+    // Administrator holding `reception`. A fixture where every title paraphrases its role would let a screen
+    // that rendered the ROLE in this column look correct.
+    { id: "u-1", username: "org.admin", displayName: "Org Admin", email: "org.admin@mersal.org", position: "Operations Director", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
+    { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", email: "hala@mersal.org", position: "Consultant Physician", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
+    { id: "u-3", username: "left.staff", displayName: "Former Staff", email: "former@mersal.org", position: "Office Administrator", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+    // Predates 28.8, which required an address on creation: it can neither sign in by address nor be sent a
+    // reset link, and the console must say so rather than offer a button that fails.
+    // No position, and that is a state the table has to render honestly rather than blank: a service account
+    // has no job title because it is not a person.
+    { id: "u-4", username: "svc.reporting", displayName: "Reporting Service", email: null, position: null, tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["finance"] },
+    /*
+      28.16 — the two people the AUTHORITY fixtures are about, now that accounts and memberships are one
+      table. They had no account rows at all while the two halves were separate tabs reading separate
+      endpoints, which was invisible then and is the whole subject now: the merged row is an account JOINED to
+      its memberships, and a membership whose account is missing would have quietly proved nothing.
+
+      Sara holds TWO memberships in two organisations — invariant 1, and the reason the row does not blend
+      them: the table lists her once because she is one person, and the detail makes you choose which
+      membership you are configuring because authority is never the union.
+    */
+    { id: "u-5", username: "s.ibrahim", displayName: "Sara Ibrahim", email: "s.ibrahim@mersal.org", position: "Attending Physician", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["doctor", "provider_admin"] },
+    { id: "u-6", username: "m.farouk", displayName: "Mohamed Farouk", email: "m.farouk@mersal.org", position: "Dispensing Pharmacist", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["pharmacist"] },
+    /*
+      Holds `network_team`, which is an ISSUER ALIAS for the provider-admin portal rather than its canonical
+      name — and the seeded platform really does have an account exactly like this one.
+
+      It is here as a regression fixture. The portals column used to resolve with
+      `roles.includes(issuerRoleFor(portal))`, which only ever matches the CANONICAL spelling, so this
+      account rendered as holding no portal at all — and the edit form, which requires at least one, could
+      not be saved. Same defect for `imaging_tech` through the radiology rename's dual-accept window.
+    */
+    { id: "u-7", username: "n.habib", displayName: "Nour Habib", email: "n.habib@mersal.org", position: "Provider Network Analyst", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["network_team"] },
+  ];
+
+  async identityUsers(query?: string): Promise<IdentityUser[]> {
+    if (!query) return [...this.identityStore];
+    const q = query.toLowerCase();
+    return this.identityStore.filter(
+      (u) =>
+        u.username.toLowerCase().includes(q) ||
+        u.displayName.toLowerCase().includes(q) ||
+        (u.email ?? "").toLowerCase().includes(q) ||
+        (u.position ?? "").toLowerCase().includes(q),
+    );
+  }
+
+  async createIdentityUser(input: {
+    username: string; displayName: string; email: string; tenantId?: string; roles: string[]; position?: string;
+  }) {
+    // The duplicate check is here as well as on the server, because the fixture build is where the screen's
+    // conflict path gets exercised — a 409 that only a live issuer can produce is a branch nothing tests.
+    if (this.identityStore.some((u) => (u.email ?? "").toLowerCase() === input.email.toLowerCase())) {
+      // A TYPED refusal, matching what the HTTP client raises. The screens branch on `status === 409` to
+      // decide which field to blame, so a bare Error here would leave the conflict path untested — and it
+      // is the branch most likely to be wrong.
+      throw new ApiError("http", "email-taken", 409, { title: "email-taken" });
+    }
+    const id = `u-${this.identityStore.length + 1}-${input.username}`;
+    this.identityStore.push({
+      id,
+      username: input.username,
+      displayName: input.displayName,
+      email: input.email,
+      position: input.position?.trim() || null,
+      tenantId: "•••1111",
+      isActive: true,
+      // A new account has no second factor until its owner enrols one — showing it as enrolled would hide
+      // the single most important gap an administrator reviews this table for.
+      twoFactorEnabled: false,
+      roles: [...input.roles],
+    });
+    return { id, resetLinkSent: true };
+  }
+
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    if (input.displayName) u.displayName = input.displayName;
+    if (input.email) u.email = input.email;
+    // `undefined` leaves it alone; `""` CLEARS it — the server draws the same distinction, and a fixture
+    // that could only ever set a title would leave the "remove it" path untested.
+    if (input.position !== undefined) u.position = input.position.trim() || null;
+  }
+
+  myProfile() {
+    // THROUGH `gate`, like every other method here. It originally returned directly, which made it the one
+    // read in the fixture client that could not be slow and could not fail — so the app bar's loading path
+    // was unreachable in the dev build and in tests, which is precisely where the caption flicker (28.14)
+    // hid. A fixture that cannot be slow cannot exercise the states a real network produces.
+    const me = this.identityStore[0];
+    return this.gate(() => ({ displayName: me.displayName, position: me.position ?? null }));
+  }
+
+  async setIdentityUserRoles(id: string, roles: string[]) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.roles = [...roles];
+  }
+
+  async deactivateIdentityUser(id: string) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.isActive = false;
+  }
+
+  async reactivateIdentityUser(id: string) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.isActive = true;
+  }
+
+  async sendPasswordResetLink(id: string) {
+    if (!this.identityStore.some((x) => x.id === id)) throw new Error("not-found");
+  }
+
+  async changeMyPassword(currentPassword: string, newPassword: string) {
+    // Modelled, not stubbed: the screen's job is to surface the refusal, and a fixture that always succeeds
+    // leaves the only interesting branch untested.
+    if (!currentPassword || !newPassword) throw new Error("missing-field");
+    if (newPassword.length < 12) throw new Error("change-refused");
+  }
+
+  /**
+   * A slice of the real catalogue — enough domains, and one of each flag, so the screen's own rules are
+   * exercised: a service-only key must be unselectable, a deprecated one must be marked, and a
+   * platform-administration key must say what it is.
+   */
+  async scopeCatalog(): Promise<ScopeCatalogEntry[]> {
     return [
-      { id: "u-1", username: "org.admin", displayName: "Org Admin", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
-      { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
-      { id: "u-3", username: "left.staff", displayName: "Former Staff", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+      { name: "eligibility:check", domain: "eligibility", description: "Check whether a beneficiary is covered.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "call_center"] },
+      { name: "patient:read", domain: "patient", description: "Read the beneficiary directory (identity, not clinical).", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "doctor", "nurse", "pharmacist"] },
+      { name: "emr:read", domain: "emr", description: "Read the clinical record of a treated patient.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor", "nurse"] },
+      { name: "emr:write", domain: "emr", description: "Author an encounter.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor"] },
+      { name: "orders:write", domain: "orders", description: "Place an investigation order.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor"] },
+      { name: "orders:consume", domain: "orders", description: "Consume an order at a bench. Once only.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["lab_tech", "radiology_tech"] },
+      { name: "rx:dispense", domain: "pharmacy", description: "Dispense against a prescription.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["pharmacist"] },
+      { name: "finance:write", domain: "finance", description: "Raise a payment.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["finance"] },
+      { name: "finance:approve", domain: "finance", description: "Release a payment.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["finance"] },
+      { name: "claims:submit", domain: "claims", description: "Raise a claim.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: [] },
+      { name: "claims:adjudicate", domain: "claims", description: "Decide a claim.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["claims_officer"] },
+      { name: "admin:read", domain: "admin", description: "Read the administration surfaces.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: true, heldBy: ["org_admin", "super_admin"] },
+      { name: "admin:write", domain: "admin", description: "Change users, roles and configuration.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: true, heldBy: ["org_admin", "super_admin"] },
+      { name: "auth:ingest", domain: "auth", description: "Service-to-service audit ingest.", serviceOnly: true, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: [] },
+      { name: "orders:read:all", domain: "orders", description: "Superseded by the narrower bench keys.", serviceOnly: false, deprecated: true, replacedBy: "orders:read", isPlatformAdminKey: false, heldBy: [] },
+      { name: "notification:read", domain: "notification", description: "Read your own notification inbox.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "doctor", "nurse", "org_admin"] },
     ];
+  }
+
+  private customRoles: RoleCatalogEntry[] = [];
+
+  async roleCatalog(): Promise<RoleCatalogEntry[]> {
+    return [
+      { name: "reception", description: "The front desk.", sensitivityTier: "T2", level: 2, custom: false, builtIn: true, scopes: ["eligibility:check", "patient:read", "notification:read"] },
+      { name: "doctor", description: "Treating clinician.", sensitivityTier: "T3", level: 1, custom: false, builtIn: true, scopes: ["emr:read", "emr:write", "orders:write", "patient:read", "notification:read"] },
+      { name: "finance", description: "Money, never a diagnosis.", sensitivityTier: "T2", level: 2, custom: false, builtIn: true, scopes: ["finance:write", "finance:approve"] },
+      { name: "org_admin", description: "Organisation administration.", sensitivityTier: "T4", level: 0, custom: false, builtIn: true, scopes: ["admin:read", "admin:write"] },
+      ...this.customRoles,
+    ];
+  }
+
+  async createRole(input: { name: string; scopes: string[]; description?: string; sensitivityTier?: string }) {
+    if (this.customRoles.some((r) => r.name === input.name)) {
+      throw new ApiError("http", "role-name-taken", 409, { title: "role-name-taken" });
+    }
+    // The SoD rule the server enforces over the SET, mirrored here for the same reason the duplicate check
+    // is: it is the branch the screen exists to render, and only a live issuer would otherwise produce it.
+    const sod = (a: string, b: string) => input.scopes.includes(a) && input.scopes.includes(b);
+    if (sod("finance:write", "finance:approve") || sod("claims:submit", "claims:adjudicate")) {
+      throw new ApiError("http", "sod-conflict", 409, { title: "sod-conflict" });
+    }
+    const tier = input.sensitivityTier ?? "T2";
+    this.customRoles.push({
+      name: input.name,
+      description: input.description ?? null,
+      sensitivityTier: tier,
+      level: 4 - Number(tier.slice(1)),
+      custom: true,
+      builtIn: false,
+      scopes: [...input.scopes],
+    });
+  }
+
+  async setRoleScopes(role: string, scopes: string[]) {
+    const r = this.customRoles.find((x) => x.name === role);
+    if (r) r.scopes = [...scopes];
   }
 
   async identityRoleScopes(): Promise<RoleScopeGrant[]> {
@@ -2015,8 +2209,8 @@ export class DevApiClient implements ApiClient {
       const total = dose * perDay * days;
       return ok(zQuantityPreview, {
         totalUnits: total, dispenseQuantity: total, packs: null,
-        // Tablets: the pack counts the same thing the dose does, so a box count exists.
-        boxes: Math.ceil(total / 30), packSize: 30,
+        // Tablets: a box of 30 holds 30 of the thing the dose counts, so a box count exists.
+        boxes: Math.ceil(total / 30), packContent: 30,
         prescribingUnit: "Tablet", isPackSplittable: true,
       });
     });
@@ -2029,14 +2223,15 @@ export class DevApiClient implements ApiClient {
     timesPerDay?: number;
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    packContent?: number | null;
   }) {
     return this.gate(() => {
       const months = { Monthly: 1, Every2Months: 2, Every3Months: 3 }[req.refillFrequencyCode] ?? 1;
       const raw = (req.doseAmount ?? 1) * (req.timesPerDay ?? 1) * req.durationDays;
       // Round once, at the TOTAL. A non-splittable pack rounds UP to whole packs.
-      const total = req.isPackSplittable === false && (req.packSize ?? 0) > 0
-        ? Math.ceil(raw / req.packSize!) * req.packSize!
+      // 31.5 — divided by what the box HOLDS, like the server. See ChronicAllocation.
+      const total = req.isPackSplittable === false && (req.packContent ?? 0) > 0
+        ? Math.ceil(raw / req.packContent!) * req.packContent!
         : Math.round(raw);
 
       const count = Math.ceil(req.durationDays / (months * 30));
@@ -2118,6 +2313,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-amox-500", label: loc("Amoxicillin 500mg", "أموكسيسيلين ٥٠٠ملغ") },
               quantity: 21,
               dispensed: disp("RX-33110", "RXL-1"),
+              quantityUnit: "caps",
               dose: "1 capsule",
               route: "Oral",
               frequency: "TDS",
@@ -2135,6 +2331,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-guaifenesin", label: loc("Guaifenesin syrup", "شراب جوايفينيسين") },
               quantity: 1,
               dispensed: disp("RX-33110", "RXL-2"),
+              quantityUnit: "caps",
               dose: "10 ml",
               route: "Oral",
               frequency: "TDS",
@@ -2168,6 +2365,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-metformin-500", label: loc("Metformin 500mg", "ميتفورمين ٥٠٠ملغ") },
               quantity: 60,
               dispensed: 0,
+              quantityUnit: "tabs",
               route: "Oral",
               frequency: "BD",
               durationDays: 30,
@@ -3345,12 +3543,42 @@ export class DevApiClient implements ApiClient {
     };
 
     const wanted = sections?.length ? new Set<string>(sections) : null;
+
+    /**
+     * The ROLE PROJECTION, mirrored from the server (`libs/authz/ProfilePolicies.cs`, drift-checked by
+     * `test/profile-fixture-matrix.test.ts`).
+     *
+     * Without this the fixture answered every caller with all fifteen sections, so the dev build showed a
+     * receptionist the prescriptions and investigation results production withholds from them — and, worse,
+     * the screen's behaviour under a real projection was never exercised anywhere a test could see it.
+     *
+     * A section with NO CELL for the caller's roles is omitted entirely rather than sent withheld, because
+     * that is what the server does: `DecideAll` drops it, and the profile screen's tab grouping is written
+     * against that (a tab whose sections are all absent does not render at all). A `res` cell is sent as
+     * Restricted, so the "you may ask for access" state stays reachable in dev.
+     *
+     * No roles known — a client constructed without a session, which is most unit tests — means no
+     * projection, not an empty profile. See `ApiScenario.roles`.
+     */
+    const roles = this.scenario.roles?.() ?? [];
+    const project = (s: ProfileSection): ProfileSection | null => {
+      if (roles.length === 0) return s;
+      const state = sectionStateFor(roles, s.key);
+      if (state === null) return null;
+      if (state === "Restricted" && s.state !== "Restricted") {
+        return { key: s.key, state: "Restricted", reasonCode: "role-not-permitted" };
+      }
+      return s;
+    };
+
     return this.gate(() =>
       ok(zPatientProfile, {
         beneficiaryId,
         servedAt: new Date().toISOString(),
         sections: all
           .map((s) => withheld[s.key] ?? s)
+          .map(project)
+          .filter((s): s is ProfileSection => s !== null)
           .filter((s) => !wanted || wanted.has(s.key)),
       }),
     );
@@ -3668,14 +3896,48 @@ export class DevApiClient implements ApiClient {
     });
   }
 
+  /**
+   * MUTABLE, like `mdVersions` above and for the same reason: the config editor's whole point is that a
+   * value CHANGES and the change survives a reload of the table. A fixture that answered the same two rows
+   * after every write would let an editor that silently did nothing look correct here.
+   *
+   * <p>`session.timeout_minutes` is deliberately `Whole` and not `Duration`. The fixture used to say
+   * Duration with a value of "15", which the server would read as a .NET `TimeSpan` — fifteen DAYS. A
+   * fixture that would be rejected (or worse, accepted with the wrong meaning) by the real endpoint teaches
+   * the wrong shape to every screen written against it.</p>
+   */
+  private configs: { id: string; tenantId: string; key: string; type: string; value: string; versionNo: number }[] = [
+    { id: "CFG-1", tenantId: "*", key: "session.timeout_minutes", type: "Whole", value: "15", versionNo: 1 },
+    { id: "CFG-2", tenantId: "11111111-1111-1111-1111-111111111111", key: "approvals.sla_hours", type: "Whole", value: "24", versionNo: 3 },
+    { id: "CFG-3", tenantId: "11111111-1111-1111-1111-111111111111", key: "notifications.sms_enabled", type: "Boolean", value: "true", versionNo: 1 },
+    { id: "CFG-4", tenantId: "*", key: "documents.retention", type: "Duration", value: "3650.00:00:00", versionNo: 2 },
+  ];
+
   adminSystemConfig() {
-    return this.gate(
-      () => ok(z.array(zSystemConfigEntry), [
-        { id: "CFG-1", tenantId: "*", key: "session.timeout_minutes", type: "Duration", value: "15", versionNo: 1 },
-        { id: "CFG-2", tenantId: "11111111-1111-1111-1111-111111111111", key: "approvals.sla_hours", type: "Whole", value: "24", versionNo: 3 },
-      ]),
-      [],
-    );
+    return this.gate(() => ok(z.array(zSystemConfigEntry), this.configs), []);
+  }
+
+  adminSystemConfigSet(edit: SystemConfigEdit) {
+    return this.gate(() => {
+      // The SERVER's validation, not a looser copy of it. A dev client that accepted "abc" as a Whole would
+      // let the editor ship without the error path anyone will actually hit.
+      const canonical = canonicaliseConfigValue(edit.type, edit.value);
+      if (canonical === null) {
+        throw new ApiError("http", `not-a-${edit.type.toLowerCase()}`, 422, { title: `not-a-${edit.type.toLowerCase()}` });
+      }
+      const tenantId = edit.tenantId ?? "11111111-1111-1111-1111-111111111111";
+      const prior = this.configs.find((c) => c.tenantId === tenantId && c.key === edit.key);
+      const row = {
+        id: prior?.id ?? `CFG-${this.configs.length + 1}`,
+        tenantId,
+        key: edit.key,
+        type: edit.type,
+        value: canonical,
+        versionNo: (prior?.versionNo ?? 0) + 1,
+      };
+      this.configs = [...this.configs.filter((c) => !(c.tenantId === tenantId && c.key === edit.key)), row];
+      return ok(zSystemConfigEntry, row);
+    });
   }
 
   // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------
@@ -3684,8 +3946,25 @@ export class DevApiClient implements ApiClient {
   // make legible: a suspended membership, a lapsed override, an open-ended branch grant, a cap already
   // exceeded, and a feature nobody has configured either way.
 
+  /** The exception rows, per membership. See {@link devOverrides}. */
+  private overrideStore = devOverrides();
+
   memberships() {
-    return this.gate(() => ok(z.array(zMembershipRow), DEV_MEMBERSHIPS), []);
+    return this.gate(
+      () =>
+        ok(
+          z.array(zMembershipRow),
+          // Counted from the live store rather than carried as literals: the roster's "3 exceptions, 1
+          // lapsed" and the detail's three rows have to be one fact, or granting one from the detail leaves
+          // the list behind it saying something else.
+          DEV_MEMBERSHIPS.map((m) => ({
+            ...m,
+            overrideCount: (this.overrideStore.get(m.membershipId) ?? []).length,
+            expiredOverrideCount: (this.overrideStore.get(m.membershipId) ?? []).filter((o) => o.expired).length,
+          })),
+        ),
+      [],
+    );
   }
 
   membership(membershipId: string) {
@@ -3693,57 +3972,110 @@ export class DevApiClient implements ApiClient {
     return this.gate(() =>
       ok(zMembershipDetail, {
         ...row,
+        // Read back from the mutable map, so the counts on the roster and the rows in the detail are the same
+        // fact rather than two literals that agree until somebody grants an exception.
+        overrideCount: (this.overrideStore.get(row.membershipId) ?? []).length,
+        expiredOverrideCount: (this.overrideStore.get(row.membershipId) ?? []).filter((o) => o.expired).length,
         providerId: null,
         homeBranchId: "b1000000-0000-0000-0000-000000000001",
-        overrides: [
-          {
-            id: "OV-1", scope: "orders:read", effect: "Deny", reason: "Under investigation — access narrowed pending review",
-            grantedBy: "admin@mersal", validUntil: null, expired: false,
-          },
-          {
-            id: "OV-2", scope: "reports:export", effect: "Allow", reason: "Covering the monthly extract while N. is on leave",
-            grantedBy: "admin@mersal", validUntil: "2026-08-31T00:00:00Z", expired: false,
-          },
-          // Lapsed on purpose: the screen must show it as expired rather than hide it, so an administrator
-          // can explain why this person lost the key overnight.
-          {
-            id: "OV-3", scope: "claims:submit", effect: "Allow", reason: "Ramadan surge cover",
-            grantedBy: "admin@mersal", validUntil: "2026-04-30T00:00:00Z", expired: true,
-          },
-        ],
+        overrides: [...(this.overrideStore.get(row.membershipId) ?? [])],
       }),
     );
   }
 
-  setMembershipOverride() {
-    return this.gate(() => undefined);
+  setMembershipOverride(
+    membershipId: string,
+    input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
+  ) {
+    return this.gate(() => {
+      const list = this.overrideStore.get(membershipId) ?? [];
+      // SET, not add: the endpoint is idempotent per (membership, scope), and a fixture that appended would
+      // let a screen with a duplicate-key bug look correct.
+      const rest = list.filter((o) => o.scope !== input.scopeKey);
+      this.overrideStore.set(membershipId, [...rest, {
+        id: `OV-${membershipId.slice(0, 4)}-${input.scopeKey}`,
+        scope: input.scopeKey,
+        effect: input.effect,
+        reason: input.reason,
+        grantedBy: "u-1",
+        validUntil: input.validUntil,
+        expired: false,
+      }]);
+      return undefined;
+    });
   }
 
+  removeMembershipOverride(membershipId: string, scopeKey: string) {
+    return this.gate(() => {
+      const list = this.overrideStore.get(membershipId) ?? [];
+      this.overrideStore.set(membershipId, list.filter((o) => o.scope !== scopeKey));
+      return undefined;
+    });
+  }
+
+  /**
+   * Mode 2, DERIVED from the membership's roles and its live overrides.
+   *
+   * <p>It used to be five literals returned for every membership id, which meant granting an exception in the
+   * dev build changed nothing on the preview that exists to show what an exception does. The algebra here is
+   * the fixture's own — the real one runs on the server and this client never talks to it — but it has to
+   * MOVE, or the screen's most important panel is a picture.</p>
+   */
   effectiveAccess(membershipId: string) {
-    return this.gate(() =>
-      ok(zEffectiveAccess, {
-        membershipId,
-        keys: [
-          { key: "encounters:read", source: "role", via: "doctor" },
-          { key: "prescriptions:write", source: "role", via: "doctor" },
-          { key: "reports:export", source: "override", via: "admin@mersal", reason: "Covering the monthly extract while N. is on leave" },
-          { key: "labs:read", source: "role", via: "doctor", deprecated: true, replacedBy: "investigations:read" },
-          { key: "orders:read", source: "denied", via: "admin@mersal", reason: "Under investigation — access narrowed pending review" },
-        ],
-      }),
-    );
+    return this.gate(() => {
+      const row = DEV_MEMBERSHIPS.find((m) => m.membershipId === membershipId) ?? DEV_MEMBERSHIPS[0];
+      const byRole: Record<string, string[]> = {
+        doctor: ["encounters:read", "prescriptions:write", "labs:read", "orders:read"],
+        provider_admin: ["provider:read", "provider:write"],
+        network_team: ["provider:read"],
+        pharmacist: ["pharmacy:read", "pharmacy:dispense"],
+        org_admin: ["admin:read", "admin:write"],
+        reception: ["reception:search", "appointment:write"],
+      };
+      const deprecated: Record<string, string | null> = { "labs:read": "investigations:read" };
+      const overrides = (this.overrideStore.get(row.membershipId) ?? []).filter((o) => !o.expired);
+      const denied = new Map(overrides.filter((o) => o.effect === "Deny").map((o) => [o.scope, o]));
+      const allowed = overrides.filter((o) => o.effect === "Allow");
+
+      const fromRoles = row.roles.flatMap((r) => (byRole[r.name] ?? []).map((key) => ({ key, via: r.name })));
+      const keys = [
+        ...fromRoles.map((k) => {
+          const deny = denied.get(k.key);
+          return deny
+            // Listed as DENIED rather than dropped: an absence that looks like a broken role definition is
+            // what sends an administrator re-granting the role.
+            ? { key: k.key, source: "denied" as const, via: deny.grantedBy ?? undefined, reason: deny.reason }
+            : {
+                key: k.key, source: "role" as const, via: k.via,
+                deprecated: k.key in deprecated ? true : undefined,
+                replacedBy: deprecated[k.key] ?? undefined,
+              };
+        }),
+        ...allowed.map((o) => ({ key: o.scope, source: "override" as const, via: o.grantedBy ?? undefined, reason: o.reason })),
+      ];
+      return ok(zEffectiveAccess, { membershipId, keys });
+    });
   }
 
   branchScopeGrants() {
     return this.gate(
       () =>
         ok(z.array(zBranchScopeGrant), [
+          /*
+            28.10 — the branch ids MATCH `branches()` above.
+
+            They used to be `b1000000-0000-…-01/02`, which appear in no other fixture. That was invisible
+            while the column rendered `branchId.slice(0, 8)` — eight hex characters look the same whether or
+            not they identify anything. Now that the column resolves a NAME, an id matching nothing renders
+            as "Branch no longer listed", so the fixture would have shown every dev run a review finding that
+            does not exist. `BR-ALX` for the second one because its own reason already says Alexandria.
+          */
           {
-            grantId: "G-1", branchId: "b1000000-0000-0000-0000-000000000001", isHome: true,
+            grantId: "G-1", branchId: "BR-MAA", isHome: true,
             validFrom: "2026-01-01", validUntil: null, grantedBy: "admin@mersal", grantedReason: "Home branch",
           },
           {
-            grantId: "G-2", branchId: "b1000000-0000-0000-0000-000000000002", isHome: false,
+            grantId: "G-2", branchId: "BR-ALX", isHome: false,
             validFrom: "2026-10-01", validUntil: "2026-10-31", grantedBy: "admin@mersal",
             grantedReason: "Covering Alexandria for October",
           },
@@ -3799,37 +4131,111 @@ export class DevApiClient implements ApiClient {
   }
 }
 
-/** One identity holding two memberships with different authority — invariant 1, made visible. */
+/**
+ * The membership roster — keyed to the fixture ACCOUNTS above by `userId`.
+ *
+ * <p>One identity holding two memberships with different authority (Sara) is invariant 1 made visible, and
+ * `svc.reporting` deliberately has NO membership: an account that exists and holds authority nowhere is a
+ * real state, and the merged table has to render it as a fact rather than as a blank.</p>
+ */
 const DEV_MEMBERSHIPS = [
   {
     membershipId: "11111111-1111-1111-1111-111111111111",
-    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    userId: "u-5",
     username: "s.ibrahim", displayName: "Sara Ibrahim",
     tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
     roles: [{ name: "doctor", level: 3 }], level: 3, isPlatformAdmin: false,
-    overrideCount: 3, expiredOverrideCount: 1,
     activatedAt: "2026-01-15T08:00:00Z", endedAt: null,
   },
   {
     // Same person, different organisation, genuinely different authority — never a blended principal.
     membershipId: "22222222-2222-2222-2222-222222222222",
-    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    userId: "u-5",
     username: "s.ibrahim", displayName: "Sara Ibrahim",
     tenantId: "partner-ngo", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
     roles: [{ name: "provider_admin", level: 2 }], level: 2, isPlatformAdmin: false,
-    overrideCount: 0, expiredOverrideCount: 0,
     activatedAt: "2026-03-02T08:00:00Z", endedAt: null,
   },
   {
     membershipId: "33333333-3333-3333-3333-333333333333",
-    userId: "bbbbbbbb-2222-2222-2222-222222222222",
+    userId: "u-6",
     username: "m.farouk", displayName: "Mohamed Farouk",
     tenantId: "mersal", status: { kind: "warn" as const, label: loc("Suspended", "موقوفة") },
     roles: [{ name: "pharmacist", level: 4 }], level: 4, isPlatformAdmin: false,
-    overrideCount: 0, expiredOverrideCount: 0,
     activatedAt: "2026-02-01T08:00:00Z", endedAt: null,
   },
+  {
+    membershipId: "44444444-4444-4444-4444-444444444444",
+    userId: "u-1",
+    username: "org.admin", displayName: "Org Admin",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "org_admin", level: 1 }], level: 1, isPlatformAdmin: false,
+    activatedAt: "2025-11-01T08:00:00Z", endedAt: null,
+  },
+  {
+    membershipId: "55555555-5555-5555-5555-555555555555",
+    userId: "u-2",
+    username: "dr.hala", displayName: "Dr. Hala",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "doctor", level: 3 }], level: 3, isPlatformAdmin: false,
+    activatedAt: "2026-01-04T08:00:00Z", endedAt: null,
+  },
+  {
+    // Ended, not merely inactive: the account is de-provisioned AND the membership is over, and the two are
+    // separate facts that happen to agree here.
+    membershipId: "66666666-6666-6666-6666-666666666666",
+    userId: "u-3",
+    username: "left.staff", displayName: "Former Staff",
+    tenantId: "mersal", status: { kind: "neu" as const, label: loc("Ended", "منتهية") },
+    roles: [{ name: "reception", level: 4 }], level: 4, isPlatformAdmin: false,
+    activatedAt: "2025-06-01T08:00:00Z", endedAt: "2026-05-30T08:00:00Z",
+  },
+  {
+    membershipId: "77777777-7777-7777-7777-777777777777",
+    userId: "u-7",
+    username: "n.habib", displayName: "Nour Habib",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "network_team", level: 2 }], level: 2, isPlatformAdmin: false,
+    activatedAt: "2026-04-12T08:00:00Z", endedAt: null,
+  },
 ];
+
+/**
+ * The overrides, MUTABLE and per membership — 28.16.
+ *
+ * <p>`setMembershipOverride` was a no-op returning `undefined` and `membership()` answered the same three
+ * literals for every id, so the exception path could be driven in the dev build and in tests without any of
+ * it being observable. That is the shape of stub this session has already been caught by twice: a fixture
+ * that cannot disagree with a broken screen cannot test one. Granting an exception now adds a row, and
+ * withdrawing one removes it.</p>
+ */
+interface DevOverride {
+  id: string; scope: string; effect: "Allow" | "Deny"; reason: string;
+  grantedBy: string | null; validUntil: string | null; expired: boolean;
+}
+
+/** A FRESH map per client, like the identity store: a module-level one would carry one test's grant into
+ *  the next test's assertions. */
+function devOverrides(): Map<string, DevOverride[]> {
+  return new Map<string, DevOverride[]>([
+  ["11111111-1111-1111-1111-111111111111", [
+    {
+      id: "OV-1", scope: "orders:read", effect: "Deny", reason: "Under investigation — access narrowed pending review",
+      grantedBy: "u-1", validUntil: null, expired: false,
+    },
+    {
+      id: "OV-2", scope: "reports:export", effect: "Allow", reason: "Covering the monthly extract while N. is on leave",
+      grantedBy: "u-1", validUntil: "2026-08-31T00:00:00Z", expired: false,
+    },
+    // Lapsed on purpose: the screen must show it as expired rather than hide it, so an administrator
+    // can explain why this person lost the key overnight.
+    {
+      id: "OV-3", scope: "claims:submit", effect: "Allow", reason: "Ramadan surge cover",
+      grantedBy: "u-1", validUntil: "2026-04-30T00:00:00Z", expired: true,
+    },
+  ]],
+  ]);
+}
 
 /**
  * A fixture validation engine that mirrors the SERVER's five-state semantics (phase 26).

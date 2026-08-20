@@ -81,7 +81,8 @@ public static class EngineRules
 
             return Results.Ok(new RuleListView(rows, Queues.OrderBy(x => x).ToList(),
                 RuleEvaluator.DefaultQueue));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<RuleListView>();
 
         // ---- the kill switch ---------------------------------------------------------------------------
         //
@@ -103,7 +104,8 @@ public static class EngineRules
                 row?.Enabled ?? false,
                 row?.Reason ?? "Auto-decision has never been turned on for this tenant.",
                 row?.UpdatedBy, row?.UpdatedAt, AutoApproval.HardMaximumEgp));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<AutoDecisionSwitchView>();
 
         v1.MapPut("/auto-decision", async (
             SetAutoDecisionRequest req, ApprovalsDbContext db, ApprovalsGate gate, IAuditClient audit,
@@ -154,7 +156,8 @@ public static class EngineRules
 
             return Results.Ok(new AutoDecisionSwitchView(
                 row.Enabled, row.Reason, row.UpdatedBy, row.UpdatedAt, AutoApproval.HardMaximumEgp));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<AutoDecisionSwitchView>();
 
         // ---- author -----------------------------------------------------------------------------------
         v1.MapPost("/", async (
@@ -323,12 +326,11 @@ public static class EngineRules
                 }, Json),
             }, ct);
 
-            return Results.Created($"/api/v1/approval-rules/{rule.RuleId}", new
-            {
-                rule.RuleId, family = rule.Family.ToString(), rule.VersionNo, rule.EffectiveFrom,
-                supersededVersion = prior?.VersionNo,
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+            return Results.Created($"/api/v1/approval-rules/{rule.RuleId}", new ApprovalRuleCreatedView(
+                rule.RuleId, rule.Family.ToString(), rule.VersionNo, rule.EffectiveFrom, prior?.VersionNo));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<ApprovalRuleCreatedView>(StatusCodes.Status201Created);
     }
 
     private static T? TryRead<T>(JsonElement e)
@@ -358,3 +360,14 @@ public sealed record SetAutoDecisionRequest(bool Enabled, string Reason);
 public sealed record SaveRuleRequest(
     string Family, int Priority, JsonElement Predicate, JsonElement Action,
     string Rationale, bool Enabled = true, Guid? SupersedesRuleId = null);
+
+/// <summary>
+/// 31.6 — a newly-published approval rule.
+/// </summary>
+/// <param name="SupersededVersion">
+/// The version this replaced, or null when it is the first. Returned so the caller can see that publishing
+/// took effect rather than landing beside an older rule that still governs.
+/// </param>
+public sealed record ApprovalRuleCreatedView(
+    Guid RuleId, string Family, int VersionNo, DateTimeOffset EffectiveFrom, int? SupersededVersion);
+

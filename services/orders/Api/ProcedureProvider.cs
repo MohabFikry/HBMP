@@ -284,7 +284,6 @@ public static class ProcedureProviderEndpoints
                 orderingProviderId = order.OrderingProviderId, reportedAt = order.CompletionReportedAt,
             }, ct);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -292,6 +291,7 @@ public static class ProcedureProviderEndpoints
                 Action = AuditAction.Update, ActorUserId = me.Principal?.Subject,
                 DecisionOutcome = "loop-closed", FieldClasses = ["phi"],
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(new { orderId, closed = true, reportedAt = order.CompletionReportedAt });
         }).RequireAuthorization(HbmpPolicies.Scope("procedure:consume"));

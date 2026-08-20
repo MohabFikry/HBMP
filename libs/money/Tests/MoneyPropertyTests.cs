@@ -1,7 +1,7 @@
 using CsCheck;
 using FluentAssertions;
 
-namespace Mersal.Money.Tests;
+namespace Mersal.Amounts.Tests;
 
 /// <summary>
 /// Phase 18.F1 — property-based tests over the Money type.
