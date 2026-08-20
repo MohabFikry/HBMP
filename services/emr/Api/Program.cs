@@ -1,3 +1,4 @@
+using Mersal.Time;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
@@ -25,6 +26,11 @@ builder.Services.AddHbmpAuditClient("emr-service");
 builder.Services.AddHbmpAuthorization(EmrPolicies.Bundle());
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
+// 32.2 — Africa/Cairo business dates. emr had never needed one: every date it recorded came from a client
+// or from an appointment slot, which already carries its own. Stopping a medication is the first "today"
+// this service decides for itself, and a UTC "today" is yesterday for the first two to three hours of every
+// Cairo day.
+builder.Services.AddHbmpBusinessCalendar();
 builder.Services.AddHbmpDurableOutbox<EmrDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddEmrInfrastructure(builder.Configuration);

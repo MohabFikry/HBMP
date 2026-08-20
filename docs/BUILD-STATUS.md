@@ -1239,11 +1239,41 @@ Seven of the catalogue's 21 roles have been through a pass. **Fourteen have not:
 `nurse`, `lab`, `radiology`, `procedure_provider`, `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`,
 `case_manager`, `call_center`, `provider_admin`, `policy_admin`, `org_admin`, `super_admin`.
 
-Two live leads are already written down rather than waiting to be rediscovered:
+One live lead is still written down rather than waiting to be rediscovered:
 
-- **The prescriber's portal.** `POST /{rxId}/lines/{lineId}/amend-schedule` and `POST /{rxId}/cancel-lines`
-  are unreached by the SPA. Pass 4 found them and deliberately left them: they carry `rx:write`, the
-  prescriber's authority rather than the counter's, so they belong to a prescribing-portal pass.
 - **The case portal.** `caseTasks()` and `escalations()` carry the same `status: "ok"` crash as finance's
   `settlements()`. Pass 4 fixed them — one line each, and proven broken — but did **not** audit the portal
   they belong to. They are fixed, not reviewed, and the distinction is the point.
+
+### Pass 5 — the prescriber's portal (2026-08-20, design doc `50-the-prescribers-portal.md`)
+
+The `doctor` portal, and the `emr` / `orders` / `pharmacy` surfaces behind it. Eight findings, **five
+endpoints verified as correctly server-to-server** and recorded so the next pass does not re-raise them, and
+one finding — F8 — **retired by reading it**: `GET /prescriptions/{id}/dispensing` returns the same
+projection as `queue` and `search`, so it is neither a defect nor dead weight but the read for a
+scan-the-prescription-number flow that does not exist yet.
+
+The headline is not a screen that fails to load. `ValidationRequest` carried `ActiveMedicationDrugIds`,
+documented as existing so interactions are checked against what the patient is already taking; both
+production call sites passed `[]`; and every unflagged line was then reported **`Ok` — "No interaction
+found"**. Paracetamol written today against a cold-and-flu compound still active from last month — the
+validator's own worked example — was invisible unless both were on one script.
+
+**What generalises past this pass.** Every one of these had a green test:
+
+| The proof that existed | What it could not see |
+|---|---|
+| `A_line_is_checked_against_medications_the_patient_already_takes` | production handed the same loop an empty list |
+| `A_request_in_InfoRequested_is_no_longer_stuck` | the requester could not reach the row |
+| `ChronicAmendExecutor`, tested *and debugged* in 31.5 | no user could open the code path |
+
+A test proves the code it is handed. Nothing was checking that anybody could get to it — which is why every
+gate of this pass added a test at a layer the existing one could not reach.
+
+Five invariants registered: `INV-NO-CHECK-REPORTS-OK-ABOUT-A-COMPARISON-IT-DID-NOT-MAKE`,
+`INV-A-CHRONIC-AMENDMENT-IS-CONFIRMED-AGAINST-THE-ARITHMETIC-THAT-WILL-RUN`,
+`INV-A-SIGNED-CLINICAL-RECORD-HAS-A-CORRECTION-PATH`, `INV-NO-STATE-THE-PRODUCT-CAN-ENTER-AND-NOT-LEAVE`,
+`INV-A-NOTE-IS-NEVER-AN-AMENDMENT`.
+
+**Still un-audited: thirteen roles**, plus the reception walk-in queue — `emr/Api/Queue.cs` serves
+`/queues`, `call-next`, `requeue`, `remove` and `complete`, and nothing calls any of them.

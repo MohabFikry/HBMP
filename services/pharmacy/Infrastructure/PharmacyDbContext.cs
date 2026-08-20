@@ -187,10 +187,20 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasIndex(x => x.PrescriptionId);
             e.HasIndex(x => new { x.EncounterId, x.RanAt });
         });
-        // 32.5 — the orders.order_note mapping, on pharmacy's own subject (design 46 §7b).
+        // 32.5 — mapped onto pharmacy.rx_note, which migration 0015 CREATED AND LEFT UNWIRED.
+        //
+        // Its own header says so: "NOT YET WIRED. This table is created and correct, and NOTHING IN
+        // pharmacy-service WRITES OR READS IT YET — the entity, the endpoints and the projection are
+        // orders-side only as of 30.5b." That is the gap 32.5 closes, and the table needed nothing: it
+        // already has the real FK to prescription_line, the append-only trigger, the complete cancellation
+        // constraints and FORCEd RLS.
+        //
+        // A second table was written here first and deleted. Doc 46 §7b's rule — "two mechanisms means two
+        // behaviours for 'cancel a note'" — is quoted in 0015's own header, and adding prescription_note
+        // beside rx_note would have broken it while implementing it.
         b.Entity<PrescriptionNote>(e =>
         {
-            e.ToTable("prescription_note");
+            e.ToTable("rx_note");
             e.HasKey(x => x.NoteId);
             e.Property(x => x.SubjectType).HasColumnName("subject_type");
             e.Property(x => x.SubjectId).HasColumnName("subject_id");

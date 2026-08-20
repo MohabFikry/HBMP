@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
 using Mersal.Events;
+using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Emr.Api;
@@ -793,7 +794,7 @@ public static class ClinicalEndpoints
          * not hard-delete clinical data. The row stays, its status changes, and the end date records when. */
         ben.MapPost("/{beneficiaryId:guid}/medication-history/{medHistoryId:guid}/stop", async (
             Guid beneficiaryId, Guid medHistoryId, StopMedicationRequest req, EmrDbContext db,
-            ClinicalGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock,
+            ClinicalGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, IBusinessCalendar calendar,
             CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.MedicationHistory,
@@ -811,7 +812,11 @@ public static class ClinicalEndpoints
                 return Problem(409, "already-stopped",
                     $"This medication was already recorded as stopped on {med.EndDate?.ToString("yyyy-MM-dd") ?? "an unrecorded date"}.");
 
-            var endDate = req.EndDate ?? DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+            // The CAIRO business date, not a UTC one. "Today" read off a UTC instant is yesterday for the
+            // first two to three hours of every Cairo day, so a medicine stopped at 1am would be recorded as
+            // having stopped the day before — and NoUtcBusinessDateArchitectureTests fails the build for it,
+            // which is how this line was caught.
+            var endDate = req.EndDate ?? calendar.Today();
             if (med.StartDate is { } started && endDate < started)
                 return Problem(422, "stopped-before-started",
                     "A medication cannot stop before it started. Correct the start date first.");

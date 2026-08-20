@@ -26,6 +26,18 @@ public class ActiveMedicationSourceTests
 {
     private static readonly string? Db = Environment.GetEnvironmentVariable("PHARMACY_TEST_DB");
 
+    /// <summary>
+    /// The tenant every seeded row belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Stamped explicitly because this fixture builds rows through a PLAIN DbContext, with none of the
+    /// interceptors the API composes: production is stamped by TenantStampingInterceptor from the bound
+    /// request, and a fixture that skips it writes rows belonging to NO tenant — invisible to every real one
+    /// and visible to any session binding an empty one. The tenant-isolation fuzzer caught exactly that here,
+    /// which is the control working: this suite had left 60 unscoped prescriptions in the dev database.
+    /// </remarks>
+    private const string Tenant = "11111111-1111-1111-1111-111111111111";
+
     private static PharmacyDbContext Ctx() =>
         new(new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
 
@@ -129,13 +141,15 @@ public class ActiveMedicationSourceTests
 
         var successor = new PrescriptionLine
         {
-            PrescriptionLineId = Guid.NewGuid(), DrugId = successorDrug, DrugName = "Amlodipine 10mg",
+            PrescriptionLineId = Guid.NewGuid(), TenantId = Tenant,
+            DrugId = successorDrug, DrugName = "Amlodipine 10mg",
             Dose = "10mg", Route = "PO", Frequency = "OD", QuantityPrescribed = 30,
             Status = RxLineStatus.Active,
         };
         var original = new PrescriptionLine
         {
-            PrescriptionLineId = Guid.NewGuid(), DrugId = supersededDrug, DrugName = "Amlodipine 5mg",
+            PrescriptionLineId = Guid.NewGuid(), TenantId = Tenant,
+            DrugId = supersededDrug, DrugName = "Amlodipine 5mg",
             Dose = "5mg", Route = "PO", Frequency = "OD", QuantityPrescribed = 30,
             Status = RxLineStatus.Superseded, SupersededById = successor.PrescriptionLineId,
             AmendmentReasonCode = "ClinicalChange", AmendedBy = Guid.NewGuid(), AmendedAt = DateTimeOffset.UtcNow,
@@ -143,7 +157,7 @@ public class ActiveMedicationSourceTests
 
         var rx = new Prescription
         {
-            PrescriptionId = Guid.NewGuid(),
+            PrescriptionId = Guid.NewGuid(), TenantId = Tenant,
             RxNo = RxNo.Format(2026, await new SequenceIssuer(ctx).NextAsync("rx_seq", 2026)),
             BeneficiaryId = beneficiary, EncounterId = Guid.NewGuid(), PrescriberId = Guid.NewGuid(),
             Status = RxStatus.Approved, SubmittedAt = DateTimeOffset.UtcNow,
@@ -171,7 +185,7 @@ public class ActiveMedicationSourceTests
         var drugId = Guid.NewGuid();
         var rx = new Prescription
         {
-            PrescriptionId = Guid.NewGuid(),
+            PrescriptionId = Guid.NewGuid(), TenantId = Tenant,
             RxNo = RxNo.Format(2026, await new SequenceIssuer(ctx).NextAsync("rx_seq", 2026)),
             BeneficiaryId = beneficiary, EncounterId = Guid.NewGuid(), PrescriberId = Guid.NewGuid(),
             Status = rxStatus, SubmittedAt = DateTimeOffset.UtcNow, ExpiresAt = expiresAt,
@@ -179,7 +193,8 @@ public class ActiveMedicationSourceTests
             [
                 new PrescriptionLine
                 {
-                    PrescriptionLineId = Guid.NewGuid(), DrugId = drugId, DrugName = drugName,
+                    PrescriptionLineId = Guid.NewGuid(), TenantId = Tenant,
+                    DrugId = drugId, DrugName = drugName,
                     Dose = "1", Route = "PO", Frequency = "OD",
                     QuantityPrescribed = 30, Status = lineStatus,
                     AmendmentReasonCode = attributed ? "ClinicalChange" : null,
