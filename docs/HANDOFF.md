@@ -46,14 +46,18 @@ Infrastructure: `infra/compose` (Tier 1, single node). Postgres is published on 
 
 | | |
 |---|---|
-| Backend suite | **3,850 passed, 0 failed, 0 skipped** (38 assemblies, `--with-db`) — measured 2026-08-20 |
-| Web suite | **1,487 passed, 0 failed** (116 files, incl. axe over every route x locale x theme) — measured 2026-08-20 |
-| OpenAPI drift | **22 specs match the running services** — measured 2026-08-20 |
+| Backend suite | **3,988 passed, 0 failed, 0 skipped** (38 assemblies, `--with-db`) — measured 2026-08-20, after pass 6 |
+| Web suite | **1,535 passed, 0 failed** (125 files, incl. axe over every route x locale x theme) — measured 2026-08-20, after pass 6 |
+| OpenAPI drift | **22 specs match the running services** — measured 2026-08-20, after pass 6 |
 | Migration replay | **247 files, two consecutive passes, exit 0 both** — measured 2026-08-20 |
-| Tenant-isolation fuzzer | **153 tenant-scoped tables proven**, 2 declared RLS-free — measured 2026-08-20 |
-| Domain coverage | **82.5%** against an enforced floor of 58 — *last measured 2026-07-30, not re-run since* |
-| Overall coverage | **50.7%** against an enforced floor of 45 — *last measured 2026-07-30, not re-run since* |
+| Tenant-isolation fuzzer | **153 tenant-scoped tables proven**, 2 declared RLS-free — measured 2026-08-20, after pass 6 |
+| Domain coverage | **85.6%** against an enforced floor of 58 — measured 2026-08-20, after pass 6 |
+| Overall coverage | **65.2%** against an enforced floor of 45 — measured 2026-08-20, after pass 6 |
 | Gate scripts in `tools/ci/` | 20 |
+
+**Pass 6 (the counters, design doc `51-the-counters.md`) is stacked on the prescriber pass** as
+`feat/counter-portals-audit` → `feat/prescriber-portal-audit`. Both coverage rows above were re-measured for
+this update and are no longer carried forward under a stale date.
 
 **Seven stacked branches landed on `master` on 2026-08-20** (`2a19354`, `ed659a3`) after the whole gauntlet
 above ran on the merged tree. Everything below the finance pass is now in `master` and nothing is stacked.

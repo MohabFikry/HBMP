@@ -1277,3 +1277,48 @@ Five invariants registered: `INV-NO-CHECK-REPORTS-OK-ABOUT-A-COMPARISON-IT-DID-N
 
 **Still un-audited: thirteen roles**, plus the reception walk-in queue — `emr/Api/Queue.cs` serves
 `/queues`, `call-next`, `requeue`, `remove` and `complete`, and nothing calls any of them.
+
+### Pass 6 — the counters (2026-08-20, design doc `51-the-counters.md`)
+
+Reception, the nurse, the lab and radiology benches, the external delivery centre and the call centre's
+contact block. **Eight findings fixed, six endpoints verified as correctly server-to-server, and one finding
+— C8 — retired by reading the migration**: `orders/0009` rewrote every stored `Imaging` to `Radiology` in
+place and asserts none remain, so the client-side filter the audit flagged cannot drop anything. The stale
+*comment* claiming otherwise is corrected instead; left standing it invites the opposite mistake.
+
+Two findings define the pass. **A write that had never once succeeded:** the delivery centre's "Record
+session" sent the ORDER id where the server expected a LINE id, because the projection carried no line id and
+nothing on either side compared the two — 404 on every tap, beside eleven passing endpoint tests, every one
+of which handed the endpoint ids fetched from the database. **A verdict computed in the browser:** reception's
+eligibility check made no network call at all, so the tier, the plan version in force, the waiting period,
+the limits *and the audit event* were absent from what a beneficiary was told at the desk.
+
+**What generalises past this pass.** A required parameter nobody at the desk can supply is
+indistinguishable, in production, from an endpoint that does not exist:
+
+| The parameter | What the caller did instead |
+|---|---|
+| `GET /queues` wanted a `locationId` **and** a `providerId` | reception never called it; four phases of check-ins wrote tickets nothing read |
+| `POST /eligibility/check` wanted a benefit category (400 otherwise) | the desk computed its own verdict from a cached member status |
+| the procedure counter needed a line id it was never given | the screen sent the order id twice |
+
+In none of the three did the caller start supplying the missing thing. It went away, or invented an answer
+locally, and the subsystem went quiet in a way no test could see.
+
+Also decided rather than merely wired: `GET /encounters/queue` is **retired**. It described the wrong moment
+(a `QueueEntry` is written when the encounter starts, i.e. when the person stops waiting), duplicated the
+phase-3.3 queue with no branch scope, no priority and no audit, and sat behind `.RequireAuthorization()` with
+no scope at all. emr's response-schema floor drops 28 → 27 for one fewer endpoint, recorded in
+`tools/ci/response-schema-floors.json` under `_lowered`.
+
+Eight invariants registered — see `51-the-counters.md` §5.
+
+**Three CI guards rejected the first cut and all three were right** (bare `DataTable` on an operational
+queue; a destructive `api.*` call fired from a `ghost` button; an unlabelled `<th>`). Found alongside them:
+emr's test `IBranchDirectory` was named `NoBranchRestriction` and granted an **empty** permitted set, so no
+test in that suite could exercise a branch-scoped read at all.
+
+**Still un-audited: seven roles** — `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`, `case_manager`,
+`provider_admin`, `policy_admin`, `org_admin`, `super_admin`. The standing debt is unchanged and is not this
+pass's: `admin/0007`, the `inventory:Api` test project, the `notification:Api` coverage floor, and the
+`tenant_id = ''` rows in `identity.role_scope`.
