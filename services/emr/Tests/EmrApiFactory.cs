@@ -210,6 +210,7 @@ internal sealed class RecognisesNothingValidator : IClinicalCodeValidator
     public Task<bool> IcdExistsAsync(string icdCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(false);
     public Task<string?> AllergenNameAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>(null);
     public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult(false);
+    public Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>(null);
     /// <summary>LOINC is optional and accepted-and-recorded platform-wide; unchanged here so this fake
     /// differs from the default in exactly the way it claims to.</summary>
     public Task<bool> LoincValidAsync(string? loincCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);

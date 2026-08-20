@@ -121,6 +121,9 @@ public static class BloodGroups
 /// <summary>Medication history (§6.7), held at the beneficiary level. <see cref="DrugId"/> → masterdata.drug.</summary>
 public sealed class MedicationHistory
 {
+    /// <summary>Drug name as masterdata gave it when this was recorded (migration 0026). NULL = none captured.</summary>
+    public string? DrugName { get; set; }
+
     public Guid MedHistoryId { get; set; }
     public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }

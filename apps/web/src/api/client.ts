@@ -49,6 +49,9 @@ import type {
   AllergenOption,
   AddAllergyRequest,
   AllergyRecord,
+  MedicationHistoryRow,
+  MedicationStatus,
+  AddMedicationHistoryRequest,
   BloodGroup,
   MemberClinicalRecord,
   DrugRef,
@@ -390,6 +393,17 @@ export interface ApiClient {
   allergenCatalogue(): Promise<AllergenOption[]>;
   /** Record an allergy on the member's file (emr:write + treating relationship, enforced server-side). */
   addAllergy(beneficiaryId: string, req: AddAllergyRequest): Promise<AllergyRecord>;
+
+  /**
+   * 32.2 — what the patient is already taking, including medicines Mersal did not prescribe.
+   *
+   * The prescribing interaction check reads this list (32.1). An empty result means nothing has been
+   * recorded, which is not the same claim as "takes nothing" and must not be rendered as one.
+   */
+  medicationHistory(beneficiaryId: string, status?: MedicationStatus): Promise<MedicationHistoryRow[]>;
+  addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest): Promise<MedicationHistoryRow>;
+  /** Stop one. Never a delete — what a patient WAS taking is part of the clinical picture. */
+  stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string): Promise<MedicationHistoryRow>;
   /**
    * Set the member's blood group.
    *

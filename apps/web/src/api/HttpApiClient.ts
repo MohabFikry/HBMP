@@ -130,6 +130,7 @@ import {
   zServiceUseView,
   zSlaBreachView,
   zClaimsCostView,
+  zMedicationHistoryRow,
 } from "@mersal/contracts";
 import type { Period, ServiceAxis } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -142,7 +143,10 @@ import type {
   SetAutoDecision,
   GenerateSettlementRequest,
 } from "@mersal/contracts";
-import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind } from "@mersal/contracts";
+import type {
+  PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind,
+  AddMedicationHistoryRequest, MedicationStatus,
+} from "@mersal/contracts";
 import { zChronicPreview, zQuantityPreview, zRefillFrequency } from "@mersal/contracts";
 // 29.2b — VALUE imports (the schemas), not types: the payload is validated at the seam.
 import {
@@ -190,6 +194,24 @@ const ALLERGEN_CATEGORY = ["Drug", "Food", "Environmental"] as const;
  * substituted with the uuid or the reaction. The component renders "(unspecified)" in the reader's own
  * language; inventing a substance name in the API layer would put a word in a clinician's mouth.
  */
+/**
+ * 32.2 — one medication-history row.
+ *
+ * <p>Nothing is defaulted into existence here. A row with no source would be a row whose warning cannot say
+ * where it came from, and `parseOr` is meant to reject that rather than have this mapper invent
+ * "SelfReported" to keep a screen quiet — which is the shape of defect this whole pass is closing.</p>
+ */
+const toMedicationRow = (m: any) => ({
+  medHistoryId: m?.medHistoryId,
+  beneficiaryId: m?.beneficiaryId,
+  drugId: m?.drugId,
+  drugName: m?.drugName ?? null,
+  source: m?.source,
+  startDate: m?.startDate ?? null,
+  endDate: m?.endDate ?? null,
+  status: m?.status,
+});
+
 const toAllergyRecord = (a: any) => ({
   allergyId: a?.allergyId,
   allergenId: a?.allergenId,
@@ -1785,6 +1807,47 @@ export class HttpApiClient implements ApiClient {
         category: ALLERGEN_CATEGORY[Number(a.category)] ?? "Drug",
       }),
     );
+  }
+
+  /**
+   * What the patient is already taking (32.2).
+   *
+   * <p>This read exists because the prescribing interaction check needs it, not only because a screen wants
+   * to show it. Until 32.1 the check compared a prescription against nothing at all and reported "no
+   * interaction found" — so an empty answer here is rendered as "nothing recorded", never as "takes
+   * nothing", and the two sentences are not interchangeable.</p>
+   */
+  async medicationHistory(beneficiaryId: string, status?: MedicationStatus) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const r = (await getRaw(
+      `/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history${q}`,
+    )) as any[];
+    return (r ?? []).map((m) => parseOr(zMedicationHistoryRow, toMedicationRow(m)));
+  }
+
+  async addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest) {
+    const r = (await postRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history`, {
+      drugId: req.drugId,
+      source: req.source,
+      startDate: req.startDate ?? null,
+      endDate: req.endDate ?? null,
+      status: req.status,
+    })) as any;
+    return parseOr(zMedicationHistoryRow, toMedicationRow(r));
+  }
+
+  /**
+   * The patient stopped taking it.
+   *
+   * <p>Not a delete: what someone WAS taking is part of the clinical picture. The row keeps its place and
+   * gains an end date, and it leaves the active list the interaction check reads.</p>
+   */
+  async stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string) {
+    const r = (await postRaw(
+      `/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history/${encodeURIComponent(medHistoryId)}/stop`,
+      { endDate: endDate ?? null },
+    )) as any;
+    return parseOr(zMedicationHistoryRow, toMedicationRow(r));
   }
 
   async addAllergy(beneficiaryId: string, req: AddAllergyRequest) {

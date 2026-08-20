@@ -40,6 +40,26 @@ public sealed class HttpClinicalCodeValidator(HttpClient http, IMemoryCache cach
     public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) =>
         ExistsAsync($"drug:{drugId}", $"/api/v1/drugs/by-id/{drugId}/exists", bearerToken, ct);
 
+    /// <summary>Resolves the drug and returns its name (null = not in master data). Fail-closed like the
+    /// allergen lookup: a 5xx or transport error propagates, so the write is rejected rather than persisted
+    /// with an unvalidated drug and no name.</summary>
+    public async Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+    {
+        var cacheKey = $"drug-name:{drugId}";
+        if (cache.TryGetValue<string>(cacheKey, out var cached) && cached is not null) return cached;
+
+        using var req = Authorized(HttpMethod.Get, $"/api/v1/drugs/by-id/{drugId}", bearerToken);
+        using var resp = await http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<DrugNameDto>(Json, ct);
+        var name = string.IsNullOrWhiteSpace(body?.Name) ? null : body!.Name;
+        if (name is not null) cache.Set(cacheKey, name, Ttl);
+        return name;
+    }
+
+    private sealed record DrugNameDto(string? Name);
+
     public Task<bool> LoincValidAsync(string? loincCode, string? bearerToken, CancellationToken ct = default) =>
         Task.FromResult(true);   // optional; no LOINC dataset yet → accepted-and-recorded when present
 

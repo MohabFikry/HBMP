@@ -100,6 +100,7 @@ import {
   zPrescriptionSubmitResult,
   zAllergenOption,
   zAllergyRecord,
+  zMedicationHistoryRow,
   zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
@@ -138,6 +139,7 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionKind } from "@mersal/contracts";
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
+import type { AddMedicationHistoryRequest, MedicationHistoryRow, MedicationStatus } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
 import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -289,6 +291,16 @@ const RECON_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad"
 };
 
 /** The masterdata allergen seed (its migration 0002), abbreviated to the categories the picker groups by. */
+/** 32.2 — the catalogue names searchDrugs answers with, keyed by id, so the fixture resolves a name the same
+ *  way the server does rather than inventing one. */
+const DEV_DRUG_NAMES: Record<string, string> = {
+  "d-amox-500": "Amoxicillin 500mg caps",
+  "d-amox-250": "Amoxicillin 250mg caps",
+  "d-metf-500": "Metformin 500mg",
+  "d-warf-5": "Warfarin 5mg",
+  "d-sjw": "St John's Wort 300mg",
+};
+
 const DEV_ALLERGENS: AllergenOption[] = [
   { allergenId: "alg-penicillin", code: "ALG-PENICILLIN", name: "Penicillins", category: "Drug" },
   { allergenId: "alg-sulfa", code: "ALG-SULFA", name: "Sulfonamides", category: "Drug" },
@@ -1499,6 +1511,78 @@ export class DevApiClient implements ApiClient {
     );
   }
 
+  /**
+   * 32.2 — the fixture medication list.
+   *
+   * <p>Two rows, and the pair is deliberate: one `Prescribed` (Mersal's own record, derivable from the
+   * dispensing log) and one `SelfReported` (a medicine the patient mentioned, derivable from nowhere else).
+   * A fixture with only the first would let a screen look right while never exercising the half of the union
+   * that is the whole reason `medication_history` exists.</p>
+   */
+  private readonly medications = new Map<string, MedicationHistoryRow[]>();
+
+  private medicationsFor(beneficiaryId: string): MedicationHistoryRow[] {
+    if (!this.medications.has(beneficiaryId)) {
+      this.medications.set(beneficiaryId, [
+        ok(zMedicationHistoryRow, {
+          medHistoryId: "MH-1", beneficiaryId, drugId: "d-warf-5", drugName: "Warfarin 5mg",
+          source: "Prescribed", startDate: "2026-05-04", endDate: null, status: "Active",
+        }),
+        ok(zMedicationHistoryRow, {
+          medHistoryId: "MH-2", beneficiaryId, drugId: "d-sjw", drugName: "St John's Wort 300mg",
+          source: "SelfReported", startDate: "2026-07-01", endDate: null, status: "Active",
+        }),
+      ]);
+    }
+    return this.medications.get(beneficiaryId)!;
+  }
+
+  medicationHistory(beneficiaryId: string, status?: MedicationStatus) {
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      return status ? rows.filter((r) => r.status === status) : [...rows];
+    });
+  }
+
+  async addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest) {
+    // The server snapshots the name from MASTER DATA and never trusts a client-supplied one (emr 0026), so
+    // the fixture resolves it from the same catalogue the picker searched rather than echoing a label the
+    // caller passed. An id the catalogue does not hold yields no name here either — a dev path kinder than
+    // the live one teaches a flow that does not exist.
+    const catalogue = await this.searchPrescribableDrugs("");
+    const resolved = catalogue.find((d) => d.drugId === req.drugId);
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      const row = ok(zMedicationHistoryRow, {
+        medHistoryId: `MH-${rows.length + 1}`,
+        beneficiaryId,
+        drugId: req.drugId,
+        drugName: resolved ? resolved.tradeName.en : (DEV_DRUG_NAMES[req.drugId] ?? null),
+        source: req.source,
+        startDate: req.startDate ?? null,
+        endDate: req.endDate ?? null,
+        status: req.status,
+      });
+      this.medications.set(beneficiaryId, [...rows, row]);
+      return row;
+    });
+  }
+
+  stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string) {
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      const found = rows.find((r) => r.medHistoryId === medHistoryId);
+      if (!found) throw new Error(`No medication ${medHistoryId}`);
+      // The server refuses a second stop rather than restamping the end date, because "when did they stop"
+      // is a recorded clinical fact. The fixture refuses it too, or the dev path teaches a flow the live one
+      // rejects.
+      if (found.status === "Stopped") throw new Error("This medication was already recorded as stopped.");
+      const stopped = { ...found, status: "Stopped" as const, endDate: endDate ?? "2026-08-20" };
+      this.medications.set(beneficiaryId, rows.map((r) => (r.medHistoryId === medHistoryId ? stopped : r)));
+      return stopped;
+    });
+  }
+
   addAllergy(beneficiaryId: string, req: AddAllergyRequest) {
     return this.gate(() => {
       const option = DEV_ALLERGENS.find((a) => a.allergenId === req.allergenId);
@@ -2024,6 +2108,10 @@ export class DevApiClient implements ApiClient {
       { drugId: "d-amox-500", name: loc("Amoxicillin 500mg caps", "أموكسيسيلين 500مجم"), atcCode: "J01CA04", form: "Capsule", strength: "500mg" },
       { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
       { drugId: "d-metf-500", name: loc("Metformin 500mg", "ميتفورمين 500مجم"), atcCode: "A10BA02", form: "Tablet", strength: "500mg" },
+      // 32.2 — the two the current-medications fixture references. A medication list whose drugs are absent
+      // from the catalogue would render as ids, which is what a screen looks like when nobody opened it.
+      { drugId: "d-warf-5", name: loc("Warfarin 5mg", "وارفارين 5مجم"), atcCode: "B01AA03", form: "Tablet", strength: "5mg" },
+      { drugId: "d-sjw", name: loc("St John's Wort 300mg", "عشبة سانت جون 300مجم"), atcCode: "N06AX25", form: "Capsule", strength: "300mg" },
     ].filter((d) => d.name.en.toLowerCase().includes(query.toLowerCase()));
     return this.gate(() => ok(z.array(zDrugRef), all), []);
   }

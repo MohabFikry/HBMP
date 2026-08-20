@@ -218,3 +218,67 @@ describe("HttpApiClient — the two literals carried in from the case portal", (
     expect(rows[0].status.kind).toBe("warn");
   });
 });
+
+/**
+ * 32.2 — the medication list, which is an input to a clinical check rather than only a screen.
+ *
+ * A shape change here does not merely fail to render: `medicationHistory` feeds the encounter's current
+ * medications panel, and the same rows reach the prescribing interaction check through pharmacy. A mapping
+ * that silently produced an empty list would restore exactly the defect 32.1 closed — a check reporting "no
+ * interaction found" against nothing at all.
+ */
+const MEDICATION = {
+  medHistoryId: "mh-1",
+  beneficiaryId: "b-1",
+  drugId: "d-1",
+  drugName: "Warfarin 5mg",
+  source: "SelfReported",
+  startDate: "2026-05-04",
+  endDate: null,
+  status: "Active",
+};
+
+describe("HttpApiClient — medication history", () => {
+  it("parses a medication list and keeps the source, which the interaction warning names", async () => {
+    stubFetch({ body: [MEDICATION] });
+    const rows = await new HttpApiClient().medicationHistory("b-1");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe("SelfReported");
+    expect(rows[0].drugName).toBe("Warfarin 5mg");
+  });
+
+  it("asks for the active rows only when a status is given", async () => {
+    const calls = stubFetch({ body: [] });
+    await new HttpApiClient().medicationHistory("b-1", "Active");
+
+    expect(calls[0].url).toContain("status=Active");
+  });
+
+  it("refuses a source the contract does not define, rather than rendering it", async () => {
+    // The three sources are not decoration: the warning says which one it rests on. A fourth value arriving
+    // from a service that had quietly widened its enum must fail here, not reach a prescriber as a blank.
+    stubFetch({ body: [{ ...MEDICATION, source: "guessed" }] });
+
+    await expect(new HttpApiClient().medicationHistory("b-1")).rejects.toThrow(/contract validation/i);
+  });
+
+  it("keeps a missing drug name as absent rather than substituting the id", async () => {
+    // emr 0026 is nullable on purpose. "(unspecified)" is a rendering decision the screen makes; a mapper
+    // that filled in the uuid would put an identifier in front of a clinician and call it a medicine.
+    stubFetch({ body: [{ ...MEDICATION, drugName: null }] });
+    const rows = await new HttpApiClient().medicationHistory("b-1");
+
+    expect(rows[0].drugName).toBeNull();
+    expect(rows[0].drugName).not.toBe(rows[0].drugId);
+  });
+
+  it("stops a medication through the endpoint that records an end date", async () => {
+    const calls = stubFetch({ body: { ...MEDICATION, status: "Stopped", endDate: "2026-08-20" } });
+    const row = await new HttpApiClient().stopMedication("b-1", "mh-1", "2026-08-20");
+
+    expect(calls[0].url).toContain("/medication-history/mh-1/stop");
+    expect(row.status).toBe("Stopped");
+    expect(row.endDate).toBe("2026-08-20");
+  });
+});

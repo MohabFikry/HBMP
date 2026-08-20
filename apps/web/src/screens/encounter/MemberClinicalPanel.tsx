@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
-import { Button, Combobox, Icon, InlineAlert, InputField, Modal, useToast } from "@mersal/design-system";
+import {
+  Button, Combobox, ComboboxField, Icon, InlineAlert, InputField, Modal, useToast,
+} from "@mersal/design-system";
 import type {
-  AllergenOption, AllergyRecord, AllergySeverity, BloodGroup, Localized,
+  AllergenOption, AllergyRecord, AllergySeverity, BloodGroup, Localized, MedicationSource,
+  PrescribableDrug,
 } from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
+import { DrugCombobox } from "../prescribing/DrugCombobox";
 import { useAsync } from "../../api/useAsync";
 import { useLoc } from "../_shared";
 
@@ -63,6 +67,32 @@ const S = {
   categoryDrug: { en: "Drug", ar: "دواء" },
   categoryFood: { en: "Food", ar: "طعام" },
   categoryEnvironmental: { en: "Environmental", ar: "بيئي" },
+  medsTitle: { en: "Current medications", ar: "الأدوية الحالية" },
+  addMedication: { en: "Add medication", ar: "إضافة دواء" },
+  medicine: { en: "Medicine", ar: "الدواء" },
+  medicineSearch: { en: "Search by name", ar: "ابحث بالاسم" },
+  source: { en: "Source", ar: "المصدر" },
+  srcPrescribed: { en: "Prescribed by Mersal", ar: "موصوف من مرسال" },
+  srcSelfReported: { en: "Self-reported", ar: "ذكره المريض" },
+  srcExternal: { en: "External prescriber", ar: "واصف خارجي" },
+  started: { en: "Started (optional)", ar: "تاريخ البدء (اختياري)" },
+  markStopped: { en: "Mark stopped", ar: "تسجيل التوقف" },
+  medStopped: { en: "Recorded as stopped.", ar: "تم تسجيل التوقف." },
+  medSaved: { en: "Medication recorded on the member's file.", ar: "تم تسجيل الدواء في ملف العضو." },
+  chooseMedicine: { en: "Choose a medicine.", ar: "اختر الدواء." },
+  noMeds: {
+    en: "No medications recorded — not the same as taking none.",
+    ar: "لا توجد أدوية مسجّلة — وهذا لا يعني عدم تناوله أي دواء.",
+  },
+  noMedsHint: {
+    en: "Nobody has recorded what this patient is already taking. Prescribe-time interaction screening says "
+      + "so rather than reporting a clean check.",
+    ar: "لم يسجّل أحد ما يتناوله هذا المريض بالفعل. سيوضّح فحص التداخلات عند الوصف ذلك بدلًا من الإبلاغ عن فحص سليم.",
+  },
+  medsLoadFailed: {
+    en: "The medication list could not be loaded. This is NOT a report that there are none.",
+    ar: "تعذّر تحميل قائمة الأدوية. هذا ليس تقريرًا بعدم وجودها.",
+  },
   sevMild: { en: "Mild", ar: "خفيفة" },
   sevModerate: { en: "Moderate", ar: "متوسطة" },
   sevSevere: { en: "Severe", ar: "شديدة" },
@@ -138,7 +168,205 @@ export function MemberClinicalPanel({
       </ul>
 
       <AddAllergyControl beneficiaryId={beneficiaryId} onSaved={afterWrite} />
+
+      <div className="mc-divider" aria-hidden="true" />
+
+      {/* 32.2 — the third standing fact, and the newest reason this panel exists. Allergies turn the
+          prescribe-time allergy check from NotChecked into an answer; this list does the same for the
+          interaction check, which until 32.1 compared every prescription against nothing and reported "no
+          interaction found". Same panel, same rule about absence, because it is the same kind of claim. */}
+      <CurrentMedications beneficiaryId={beneficiaryId} onChanged={afterWrite} />
     </section>
+  );
+}
+
+const SOURCE_LABEL: Record<MedicationSource, Localized> = {
+  Prescribed: S.srcPrescribed, SelfReported: S.srcSelfReported, External: S.srcExternal,
+};
+
+/**
+ * What the patient is already taking.
+ *
+ * <p>Reads its own list rather than taking one from <c>memberClinicalRecord</c>: the medication list is
+ * filtered to Active for this purpose, and a stopped medicine has to leave it without leaving the record.
+ * Folding it into the clinical record read would have meant either sending both and filtering on screen —
+ * which puts a clinical decision in the client — or losing the stopped rows entirely.</p>
+ */
+function CurrentMedications({
+  beneficiaryId, onChanged,
+}: {
+  beneficiaryId: string;
+  onChanged: () => void;
+}) {
+  const api = useApi();
+  const t = useLoc();
+  const { toast } = useToast();
+  const [nonce, setNonce] = useState(0);
+  const state = useAsync(() => api.medicationHistory(beneficiaryId, "Active"), [beneficiaryId, nonce]);
+  const [stopping, setStopping] = useState<string | null>(null);
+
+  function reload() {
+    setNonce((n) => n + 1);
+    onChanged();
+  }
+
+  async function stop(medHistoryId: string) {
+    setStopping(medHistoryId);
+    try {
+      await api.stopMedication(beneficiaryId, medHistoryId);
+      toast(t(S.medStopped));
+      reload();
+    } catch {
+      toast(t(S.saveFailed));
+    } finally {
+      setStopping(null);
+    }
+  }
+
+  // A failed read is not an empty list — the same rule the allergy half holds, and for a list the
+  // interaction check reads it matters more, not less.
+  if (state.status === "error") {
+    return (
+      <div className="mc-meds" aria-label={t(S.medsTitle)}>
+        <InlineAlert tone="bad">{t(S.medsLoadFailed)}</InlineAlert>
+      </div>
+    );
+  }
+
+  const rows = state.data ?? [];
+
+  return (
+    <div className="mc-meds">
+      <h3 className="mc-meds-title">{t(S.medsTitle)}</h3>
+      <ul className="mc-med-list" aria-label={t(S.medsTitle)} aria-live="polite">
+        {state.status === "loading" ? null : rows.length === 0 ? (
+          <li className="mc-empty" title={t(S.noMedsHint)}>
+            <span className="mc-empty-glyph" aria-hidden="true">○</span>
+            {t(S.noMeds)}
+          </li>
+        ) : (
+          rows.map((m) => (
+            <li className="mc-med" key={m.medHistoryId} aria-label={m.drugName ?? m.drugId}>
+              <span aria-hidden="true" className="mc-med-icon">◆</span>
+              <span className="mc-med-name">{m.drugName ?? m.drugId}</span>
+              {/* The source is rendered because the interaction warning names it. A prescriber weighing
+                  "interacts with St John's Wort" needs to know that came from the patient's own account
+                  rather than from a dispensing record. */}
+              <span className="mc-med-source">{t(SOURCE_LABEL[m.source])}</span>
+              {m.startDate ? <span className="mc-med-since">· {m.startDate}</span> : null}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={stopping === m.medHistoryId}
+                onClick={() => void stop(m.medHistoryId)}
+              >
+                {t(S.markStopped)}
+              </Button>
+            </li>
+          ))
+        )}
+      </ul>
+      <AddMedicationControl beneficiaryId={beneficiaryId} onSaved={reload} />
+    </div>
+  );
+}
+
+/**
+ * Record a medicine the patient is already on.
+ *
+ * <p>The source select has no default. "Prescribed by Mersal" would be wrong for the case this control
+ * exists to capture — a medicine Mersal did not prescribe is the half of the list no query over our own data
+ * can reconstruct — and defaulting to it would quietly relabel exactly the rows that matter.</p>
+ */
+function AddMedicationControl({
+  beneficiaryId, onSaved,
+}: {
+  beneficiaryId: string;
+  onSaved: () => void;
+}) {
+  const api = useApi();
+  const t = useLoc();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [drug, setDrug] = useState<PrescribableDrug | null>(null);
+  const [source, setSource] = useState<MedicationSource | "">("");
+  const [startDate, setStartDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Localized | null>(null);
+
+  async function save() {
+    if (!drug) { setError(S.chooseMedicine); return; }
+    if (!source) { setError(S.chooseMedicine); return; }
+    setBusy(true);
+    try {
+      await api.addMedicationHistory(beneficiaryId, {
+        drugId: drug.drugId,
+        source,
+        startDate: startDate.trim() ? startDate.trim() : null,
+        endDate: null,
+        status: "Active",
+      });
+      toast(t(S.medSaved));
+      setOpen(false);
+      setDrug(null);
+      setSource("");
+      setStartDate("");
+      setError(null);
+      onSaved();
+    } catch {
+      setError(S.saveFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="secondary"
+        size="sm"
+        leadingIcon={<Icon name="plus" aria-hidden="true" />}
+        onClick={() => setOpen(true)}
+      >
+        {t(S.addMedication)}
+      </Button>
+      <Modal open={open} onOpenChange={setOpen} title={t(S.addMedication)}>
+        {error ? <InlineAlert tone="bad">{t(error)}</InlineAlert> : null}
+        {/* The prescribing workspace's own picker (26.2), not a second one. It already searches by trade name
+            OR active ingredient, shows the ingredient and price under the name, and is the control a doctor
+            on this platform has learned to use to name a medicine. A different drug field here would be a
+            second answer to "how do I find a medicine", which is the shape of duplication doc 46 §7b refuses
+            for notes and the same argument applies. */}
+        <DrugCombobox value={drug} onChange={setDrug} />
+        <ComboboxField
+          label={t(S.source)}
+          value={source === "" ? null : source}
+          onChange={(v) => setSource(v as MedicationSource)}
+          placeholder="—"
+          options={[
+            { value: "Prescribed", label: t(S.srcPrescribed) },
+            { value: "SelfReported", label: t(S.srcSelfReported) },
+            { value: "External", label: t(S.srcExternal) },
+          ]}
+        />
+        <InputField
+          label={t(S.started)}
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+        />
+        <div className="mc-actions">
+          <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
+          <Button
+            onClick={() => void save()}
+            disabled={busy}
+            leadingIcon={<Icon name="check2" aria-hidden="true" />}
+          >
+            {t(S.save)}
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }
 

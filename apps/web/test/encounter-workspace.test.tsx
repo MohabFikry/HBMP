@@ -80,6 +80,10 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
     amendOrderLine: async () => {},
     cancelPrescriptionLine: async () => {},
     amendPrescriptionLine: async () => {},
+    // 32.2 — the member panel above the tabs now reads the current-medication list. This fake is a
+    // deliberate minimum: every entry is a call the workspace makes, so a new dependency has to appear here
+    // or the panel throws and the SOAP assertions below fail for a reason that has nothing to do with them.
+    medicationHistory: async () => [],
   } as unknown as ApiClient;
 }
 

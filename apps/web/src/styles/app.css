@@ -6450,3 +6450,67 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   justify-content: flex-end;
   gap: var(--sp2);
 }
+
+/* ── 32.2 Current medications ───────────────────────────────────────────────────────────────────────────
+   The third standing clinical fact in the member panel, styled as a LIST rather than as the allergy chips
+   beside it. A medication row carries four facts — name, where the fact came from, when it started, and the
+   control to stop it — and four facts do not fit in a chip without one of them being dropped. The one that
+   would be dropped is the source, which is exactly the one the prescribing interaction warning quotes. */
+.mc-meds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  align-items: flex-start;
+}
+.mc-meds-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.mc-med-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+.mc-med {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 0.3rem var(--sp2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  font-size: 0.8125rem;
+}
+.mc-med-icon {
+  color: var(--text-3);
+}
+.mc-med-name {
+  font-weight: 600;
+  color: var(--text-1);
+}
+/* The provenance, and deliberately not a colour-coded chip: "self-reported" is not a WARNING, it is a
+   qualification on how certain the fact is. Weighting it like a status would tell a clinician that a
+   patient's own account of their medication is a problem to resolve. */
+.mc-med-source {
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+.mc-med-since {
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+.mc-med .mrs-btn {
+  margin-inline-start: auto;
+}
+.mc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
+  margin-block-start: var(--sp3);
+}
