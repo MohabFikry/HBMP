@@ -406,3 +406,34 @@ public sealed class RefillFrequency
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
 }
+
+/// <summary>
+/// 32.5 — an operational note on a prescription line (design 46 §7b).
+/// </summary>
+/// <remarks>
+/// The <c>orders.OrderNote</c> model on a different subject, column for column. Doc 46 §7b requires the
+/// reuse and says why: a second notes mechanism means two behaviours for "cancel a note" and two answers to
+/// "who can read this".
+///
+/// <para><see cref="RootLineId"/> rather than the line id is the anchor, because 30.1 supersedes a line
+/// instead of mutating it: a note is written about the clinical INTENT, and the intent survives an
+/// amendment. Keying on the line would silently drop every instruction attached to a script the moment it
+/// was amended.</para>
+/// </remarks>
+public sealed class PrescriptionNote
+{
+    public Guid NoteId { get; set; }
+    public string TenantId { get; set; } = "";
+    public string SubjectType { get; set; } = "PrescriptionLine";
+    public Guid SubjectId { get; set; }
+    public Guid RootLineId { get; set; }
+    public string Visibility { get; set; } = "ToFulfiller";
+    public string Body { get; set; } = default!;
+    public Guid AuthorUserId { get; set; }
+    public string AuthorDisplayName { get; set; } = default!;
+    public DateTimeOffset AuthoredAt { get; set; }
+    public string Status { get; set; } = "Active";
+    public Guid? CancelledBy { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    public string? CancelReason { get; set; }
+}

@@ -134,6 +134,7 @@ app.MapPrescriptions();
 app.MapRxPricing();     // what the prescription costs, and the member/payer split from eligibility
 app.MapDispensing();
 app.MapRxAmendment();  // 30.2 — cancel/amend a signed prescription at LINE level (design 46 §1-§3)
+app.MapPrescriptionNotes();  // 32.5 — notes on a prescription line (design 46 §7b)
 app.MapExtendValidity();   // approvals calls this when a validity-extension request is approved
 app.MapReferrals();
 app.MapProfileSections();  // 20.2 — the profile's prescriptions + referrals sections (provider-ownership here)

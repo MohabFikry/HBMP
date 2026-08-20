@@ -19,6 +19,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<PrescriptionLineOverride> PrescriptionLineOverrides => Set<PrescriptionLineOverride>();
     public DbSet<PrescriptionDispenseWindow> DispenseWindows => Set<PrescriptionDispenseWindow>();   // 29.5
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();                  // 30.1
+    public DbSet<PrescriptionNote> PrescriptionNotes => Set<PrescriptionNote>();                     // 32.5
     public DbSet<RefillFrequency> RefillFrequencies => Set<RefillFrequency>();                       // 29.5
     /// <summary>The approval-decision consumer's dedupe ledger — event ids only, no tenant data (0019).</summary>
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
@@ -186,6 +187,23 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasIndex(x => x.PrescriptionId);
             e.HasIndex(x => new { x.EncounterId, x.RanAt });
         });
+        // 32.5 — the orders.order_note mapping, on pharmacy's own subject (design 46 §7b).
+        b.Entity<PrescriptionNote>(e =>
+        {
+            e.ToTable("prescription_note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.SubjectType).HasColumnName("subject_type");
+            e.Property(x => x.SubjectId).HasColumnName("subject_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AuthorUserId).HasColumnName("author_user_id");
+            e.Property(x => x.AuthorDisplayName).HasColumnName("author_display_name");
+            e.Property(x => x.AuthoredAt).HasColumnName("authored_at");
+            e.Property(x => x.CancelledBy).HasColumnName("cancelled_by");
+            e.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+            e.Property(x => x.CancelReason).HasColumnName("cancel_reason");
+            e.HasIndex(x => x.RootLineId);
+        });
+
 
         b.Entity<PrescriptionLineOverride>(e =>
         {
