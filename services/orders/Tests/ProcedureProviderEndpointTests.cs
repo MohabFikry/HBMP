@@ -214,6 +214,158 @@ public class ProcedureProviderEndpointTests
         finally { await app.CleanupAsync(); }
     }
 
+    // ---------------------------------------------------------------------------------------------------------
+    // 32.6 — what the ROW has to carry for the portal to be able to act on it.
+    //
+    // Every test above hands the endpoint ids it fetched from the database. That proved the endpoint and
+    // nothing else: the portal only ever has the projection, and the projection did not carry the line id.
+    // So the counter sent the ORDER id where a line was expected, the server answered 404, and "Record
+    // session" had never once worked — beside a green suite. These tests go through the row instead.
+    // ---------------------------------------------------------------------------------------------------------
+
+    [SkippableFact]
+    public async Task A_queue_row_names_the_line_it_is_about()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            var (orderId, lineId) = await SeedAsync(app, ProviderA);
+            using var centre = Centre(app, ProviderA);
+
+            var row = (await (await centre.GetAsync("/api/v1/procedure-orders/queue"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [])
+                .Single(i => i.GetProperty("orderId").GetGuid() == orderId);
+
+            row.GetProperty("orderLineId").GetGuid().Should().Be(lineId);
+            row.GetProperty("orderLineId").GetGuid().Should().NotBe(orderId,
+                "the row describes one line, and the two ids are not interchangeable — substituting one for "
+                + "the other is the defect this exists to catch");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task The_counter_can_record_a_session_using_only_what_the_row_gave_it()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            var (orderId, _) = await SeedAsync(app, ProviderA, sessions: 6);
+            using var centre = Centre(app, ProviderA);
+
+            // THE point of this test: nothing below reads the database. The ids come from the payload the
+            // portal receives, exactly as the screen has them.
+            var row = (await (await centre.GetAsync("/api/v1/procedure-orders/queue"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [])
+                .Single(i => i.GetProperty("orderId").GetGuid() == orderId);
+
+            var r = await RecordSession(
+                centre, row.GetProperty("orderId").GetGuid(), row.GetProperty("orderLineId").GetGuid(),
+                Guid.NewGuid().ToString());
+
+            r.StatusCode.Should().Be(HttpStatusCode.OK, "a centre works from the row, not from the datastore");
+            (await r.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("sessionsDelivered").GetInt32().Should().Be(1);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task The_counter_says_who_was_verified()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            var (orderId, _) = await SeedAsync(app, ProviderA);
+            await using (var db = OrdersApiFactory.Ctx())
+            {
+                app.DirectoryResolvesTo = await db.Orders.Where(o => o.OrderId == orderId)
+                    .Select(o => o.BeneficiaryId).SingleAsync();
+            }
+            app.DirectoryDisclosesName = "Amal Hassan";
+
+            using var centre = Centre(app, ProviderA);
+            var rows = await (await centre.GetAsync(
+                    "/api/v1/procedure-orders/search?cardNumber=CARD-123&memberNo=M-9"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [];
+
+            // The section is called "Verify & Deliver". It was passed a null name, so the centre had nothing
+            // to check the person against but the card number it had just typed in.
+            rows.Should().NotBeEmpty();
+            rows[0].GetProperty("beneficiaryDisplayName").GetString().Should().Be("Amal Hassan");
+
+            // And NOT on the queue: a centre browsing a list of refugees' names is a disclosure nobody asked
+            // for. The name is the counter's, behind two identifiers.
+            var queue = await (await centre.GetAsync("/api/v1/procedure-orders/queue"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [];
+            queue[0].GetProperty("beneficiaryDisplayName").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task A_name_the_directory_withheld_is_absent_rather_than_invented()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            var (orderId, _) = await SeedAsync(app, ProviderA);
+            await using (var db = OrdersApiFactory.Ctx())
+            {
+                app.DirectoryResolvesTo = await db.Orders.Where(o => o.OrderId == orderId)
+                    .Select(o => o.BeneficiaryId).SingleAsync();
+            }
+            // patient-service projects per caller. A centre it withholds the name from resolves fine and
+            // gets no name — which the counter must render as "withheld", never as a record without a name
+            // and never as a placeholder that would verify the wrong person.
+            app.DirectoryDisclosesName = null;
+
+            using var centre = Centre(app, ProviderA);
+            var rows = await (await centre.GetAsync(
+                    "/api/v1/procedure-orders/search?cardNumber=CARD-123&memberNo=M-9"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [];
+
+            rows.Should().NotBeEmpty("the sessions are still theirs — the NAME was withheld, not the person");
+            rows[0].GetProperty("beneficiaryDisplayName").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task A_closed_loop_shows_as_closed_on_the_row()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            var (orderId, _) = await SeedAsync(app, ProviderA);
+            using var centre = Centre(app, ProviderA);
+
+            var before = (await (await centre.GetAsync("/api/v1/procedure-orders/queue"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [])
+                .Single(i => i.GetProperty("orderId").GetGuid() == orderId);
+            before.GetProperty("completionReportedAt").ValueKind.Should().Be(JsonValueKind.Null,
+                "the loop is open until somebody reports back");
+
+            (await centre.PostAsJsonAsync($"/api/v1/procedure-orders/{orderId}/report",
+                new CompletionReportRequest("Six sessions completed; discharged to home exercise.")))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var after = (await (await centre.GetAsync("/api/v1/procedure-orders/queue"))
+                .Content.ReadFromJsonAsync<List<JsonElement>>() ?? [])
+                .Single(i => i.GetProperty("orderId").GetGuid() == orderId);
+
+            // A centre cannot be asked to close a loop it cannot see is open, and re-reporting because the
+            // screen said nothing is how one episode becomes two entries in the doctor's inbox.
+            after.GetProperty("completionReportedAt").ValueKind.Should().NotBe(JsonValueKind.Null);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
     // ---- helpers -------------------------------------------------------------------------------------------
 
     private static HttpClient Centre(OrdersApiFactory app, Guid providerId)

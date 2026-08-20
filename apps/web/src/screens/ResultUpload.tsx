@@ -13,10 +13,24 @@ const S = {
   order: { en: "Order", ar: "الطلب" },
   code: { en: "Code", ar: "الرمز" },
   resultValue: { en: "Result summary", ar: "ملخص النتيجة" },
-  resultHelp: { en: "A structured summary or reading. Report files upload from the workstation.", ar: "ملخص أو قراءة. تُرفع ملفات التقرير من محطة العمل." },
+  resultHelp: {
+    en: "A structured summary or reading. The ordering clinician sees this first.",
+    ar: "ملخص أو قراءة. هذا ما يراه الطبيب الطالب أولاً.",
+  },
+  // 32.6 — the report FILE. The service has taken one since phase 5 and stored it through document-service;
+  // the screen sent only the summary and told the operator that report files "upload from the workstation",
+  // which named a workflow that does not exist. For radiology the report IS the result.
+  reportFile: { en: "Report file (optional)", ar: "ملف التقرير (اختياري)" },
+  reportHelp: {
+    en: "The signed report or image, if you have one. Either the summary or the file is enough on its own.",
+    ar: "التقرير الموقّع أو الصورة، إن وُجد. يكفي أحدهما — الملخص أو الملف.",
+  },
   submit: { en: "Upload result", ar: "رفع النتيجة" },
   uploaded: { en: "Result uploaded — routed to the ordering clinician.", ar: "تم رفع النتيجة — أُرسلت إلى الطبيب الطالب." },
-  needValue: { en: "Enter a result summary.", ar: "أدخل ملخص النتيجة." },
+  needValue: {
+    en: "Enter a result summary, attach a report file, or both.",
+    ar: "أدخل ملخص النتيجة، أو أرفق ملف التقرير، أو كليهما.",
+  },
 } satisfies Record<string, Localized>;
 
 /** Result-upload worklist for a lab/imaging provider — the lines they consumed and still owe a result on. */
@@ -44,6 +58,7 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
   const api = useApi();
   const t = useLoc();
   const [value, setValue] = useState("");
+  const [report, setReport] = useState<File | null>(null);
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "empty">("idle");
   // 18.D1 (U1) — a result upload is a clinical write that previously failed SILENTLY and carried no
   // idempotency key: the spinner stopped, nothing appeared, and pressing the button again filed the result
@@ -53,9 +68,12 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (value.trim() === "") { setStatus("empty"); return; }
+    // The SERVICE's rule, not a stricter one: a summary and/or a file. Requiring the summary — which is what
+    // this did — is why a radiographer with a signed report and nothing to type had to invent a sentence.
+    if (value.trim() === "" && report === null) { setStatus("empty"); return; }
     setStatus("saving");
-    const ok = await write.run((key) => api.uploadResult(task.orderId, task.lineId, value.trim(), key));
+    const ok = await write.run((key) =>
+      api.uploadResult(task.orderId, task.lineId, { value: value.trim(), report: report ?? undefined }, key));
     if (ok) {
       setStatus("done");
       setTimeout(onDone, 800);
@@ -81,6 +99,19 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
             value={value}
             onChange={(e) => setValue(e.currentTarget.value)}
           />
+          <div className="mrs-field">
+            <label className="mrs-label" htmlFor={`report-${task.orderId}-${task.lineId}`}>
+              {t(S.reportFile)}
+            </label>
+            <input
+              id={`report-${task.orderId}-${task.lineId}`}
+              className="mrs-control"
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.dcm"
+              onChange={(e) => setReport(e.currentTarget.files?.[0] ?? null)}
+            />
+            <p className="muted" style={{ margin: 0 }}>{t(S.reportHelp)}</p>
+          </div>
           <div aria-live="polite">
             {status === "empty" && <InlineAlert tone="bad">{t(S.needValue)}</InlineAlert>}
             {/* 18.D1 (U1/U2): the typed, translated failure. InlineAlert tone="bad" carries role="alert",

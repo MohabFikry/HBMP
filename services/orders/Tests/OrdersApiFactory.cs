@@ -2,6 +2,7 @@ using Mersal.Audit.Client;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.Auth;
+using Mersal.BeneficiaryLookup;
 using Mersal.Authz;
 using Mersal.Orders.Api;
 using Mersal.Orders.Domain;
@@ -102,6 +103,14 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IPrescriptionHistoryClient>();
             services.AddSingleton<IPrescriptionHistoryClient>(new FakePrescriptionHistory(this));
 
+            // 32.6 — the beneficiary directory, faked.
+            //
+            // Until now nothing replaced it, so the ONLY counter-search path any test could reach was the
+            // local two-identifier refusal — which returns before the resolver is called. Everything past it,
+            // including whether the person's name reaches the counter at all, was untestable and untested.
+            services.RemoveAll<IBeneficiaryResolver>();
+            services.AddSingleton<IBeneficiaryResolver>(new FakeBeneficiaryResolver(this));
+
             services.RemoveAll<IReportDocumentClient>();
             services.AddSingleton<IReportDocumentClient>(new FakeReportDocuments());
             services.RemoveAll<IBranchDirectory>();
@@ -182,8 +191,35 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
             "DELETE FROM orders.investigation_order WHERE tenant_id = {0};", Tenant);
     }
 
+    /// <summary>32.6 — who the directory resolves the counter's identifiers to. Null ⇒ NotFound.</summary>
+    public Guid? DirectoryResolvesTo { get; set; }
+
+    /// <summary>32.6 — the name the directory DISCLOSES to this caller. Null is a real case: patient-service
+    /// projects per caller, and a centre that may not see the name gets a resolution without one.</summary>
+    public string? DirectoryDisclosesName { get; set; } = "Amal Hassan";
+
+    /// <summary>32.6 — the directory could not be asked. Distinct from "matched nobody", and the counter has
+    /// to say so differently.</summary>
+    public bool DirectoryUnavailable { get; set; }
+
     public static OrdersDbContext Ctx() =>
         new(new DbContextOptionsBuilder<OrdersDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
+}
+
+/// <summary>32.6 — the shared beneficiary lookup, without patient-service. Each of the four outcomes is
+/// reachable, because only one of them means "this person has nothing".</summary>
+internal sealed class FakeBeneficiaryResolver(OrdersApiFactory f) : IBeneficiaryResolver
+{
+    public Task<BeneficiaryResolution> ResolveAsync(
+        string? cardNumber, string? passport, string? memberNo, string? bearerToken, CancellationToken ct = default)
+    {
+        var supplied = new[] { cardNumber, passport, memberNo }.Count(v => !string.IsNullOrWhiteSpace(v));
+        if (supplied < 2) return Task.FromResult(BeneficiaryResolution.TooFew);
+        if (f.DirectoryUnavailable) return Task.FromResult(BeneficiaryResolution.Unavailable);
+        return Task.FromResult(f.DirectoryResolvesTo is { } id
+            ? BeneficiaryResolution.Resolved(id, f.DirectoryDisclosesName)
+            : BeneficiaryResolution.NotFound);
+    }
 }
 
 internal sealed class FakeCodeValidator(OrdersApiFactory f) : ICodeValidator

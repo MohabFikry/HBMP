@@ -543,7 +543,20 @@ export interface ApiClient {
   /** Consumed lines this provider still owes a result on (US-042). */
   awaitingResult(kind: "lab" | "radiology"): Promise<ResultTask[]>;
   /** Attach a result value to a consumed line (US-042). */
-  uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string): Promise<ResultUpload>;
+  /**
+   * Upload a result for a line THIS provider consumed.
+   *
+   * <p>32.6 — the summary AND the report file, because the service has always taken both and the screen only
+   * ever sent the first. "Report files upload from the workstation" was the portal describing a workflow that
+   * does not exist here: for radiology the report IS the result, and it had no way in.</p>
+   *
+   * <p>Either half alone is a complete upload; the server refuses only when both are missing.</p>
+   */
+  uploadResult(
+    orderId: string, lineId: string,
+    result: { value?: string; report?: File },
+    idempotencyKey?: string,
+  ): Promise<ResultUpload>;
 
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;

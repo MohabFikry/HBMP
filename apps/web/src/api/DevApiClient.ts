@@ -1840,11 +1840,14 @@ export class DevApiClient implements ApiClient {
   // refuses a single identifier, and a replayed session key returns the same progress rather than a second one.
   private procedureSessions = new Map<string, number>();
   private procedureSeenKeys = new Set<string>();
+  /** orderId → when the loop was closed. Dev-only, so the counter can show "reported" after it reports. */
+  private procedureReports = new Map<string, string>();
 
   private procedureFixture() {
     return [
       {
-        orderId: "ord-proc-1", orderNo: "ORD-2026-000901", orderType: "Procedure", status: "Active",
+        orderId: "ord-proc-1", orderLineId: "ord-proc-1-line-1",
+        orderNo: "ORD-2026-000901", orderType: "Procedure", status: "Active",
         beneficiaryId: "ben-1", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
         codeSystem: "CPT", code: "97110", description: "Therapeutic exercise",
         procedureTypeCode: "Physiotherapy",
@@ -1853,7 +1856,8 @@ export class DevApiClient implements ApiClient {
         sharedClinicalContext: "Post-op knee rehabilitation, ACL repair 12 Feb.",
       },
       {
-        orderId: "ord-proc-2", orderNo: "ORD-2026-000902", orderType: "Procedure", status: "Active",
+        orderId: "ord-proc-2", orderLineId: "ord-proc-2-line-1",
+        orderNo: "ORD-2026-000902", orderType: "Procedure", status: "Active",
         beneficiaryId: "ben-2", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
         codeSystem: "CPT", code: "90935", description: "Haemodialysis",
         procedureTypeCode: "Dialysis",
@@ -1867,6 +1871,7 @@ export class DevApiClient implements ApiClient {
       ...o,
       sessionsRemaining: Math.max(0, o.sessionsAuthorised - o.sessionsDelivered),
       progressLabel: `${o.sessionsDelivered} of ${o.sessionsAuthorised} sessions delivered`,
+      completionReportedAt: this.procedureReports.get(o.orderId) ?? null,
     }));
   }
 
@@ -1980,7 +1985,8 @@ export class DevApiClient implements ApiClient {
       if (findings.trim() === "") {
         throw new ApiError("http", "report-required", 422, { type: "urn:hbmp:report-required" });
       }
-      void orderId;
+      // 32.6 — recorded, so the counter can show the loop closed rather than offering to close it again.
+      this.procedureReports.set(orderId, new Date().toISOString());
       return undefined as void;
     });
   }
@@ -2303,9 +2309,16 @@ export class DevApiClient implements ApiClient {
       [],
     );
   }
-  uploadResult(orderId: string, lineId: string, resultValue: string) {
-    void resultValue;
-    return this.gate(() => ok(zResultUpload, { orderId, lineId, uploaded: true }));
+  uploadResult(orderId: string, lineId: string, result: { value?: string; report?: File }) {
+    return this.gate(() => {
+      // 32.6 — the service's rule, mirrored: a summary and/or a file, and refusing only when neither came.
+      // A dev client that accepted an empty upload would make the one case the screen has to prevent
+      // untestable against the fixture.
+      if (!result.value?.trim() && !result.report) {
+        throw new ApiError("http", "empty-result", 400, { type: "urn:hbmp:empty-result" });
+      }
+      return ok(zResultUpload, { orderId, lineId, uploaded: true });
+    });
   }
 
   searchDrugs(query: string) {

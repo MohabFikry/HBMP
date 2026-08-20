@@ -429,7 +429,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProcedureQueueItem"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -464,7 +474,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProcedureQueueItem"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1704,6 +1724,98 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "ProcedureQueueItem": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderLineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderType": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryDisplayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryPhotoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "codeSystem": {
+            "type": "string",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "procedureTypeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessionsAuthorised": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sessionsDelivered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "authorised": {
+            "type": "boolean"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "sharedClinicalContext": {
+            "type": "string",
+            "nullable": true
+          },
+          "completionReportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "sessionsRemaining": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+          },
+          "progressLabel": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
       },
       "ProfileInvestigationView": {
         "type": "object",

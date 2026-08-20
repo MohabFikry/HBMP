@@ -62,7 +62,8 @@ public static class ProcedureProviderEndpoints
 
             await AuditRead(audit, me, "procedure-queue", items.Count);
             return Results.Ok(items);
-        }).RequireAuthorization(HbmpPolicies.Scope("procedure:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("procedure:read"))
+        .Produces<IEnumerable<ProcedureQueueItem>>();
 
         // ---- Identity at the counter: TWO identifiers, audited ---------------------------------------------
         //
@@ -109,7 +110,23 @@ public static class ProcedureProviderEndpoints
                 .Select(o => (Order: o, Line: o.Lines.FirstOrDefault(
                     l => l.Status is OrderLineStatus.Active or OrderLineStatus.PartiallyUsed)))
                 .Where(x => x.Line is not null)
-                .Select(x => ProcedureQueueItem.From(x.Order, x.Line!, displayName: null, photoUrl: null, now))
+                // 32.6 — the NAME, at the counter and only at the counter.
+                //
+                // The projection's own contract says the name is populated on this path; it was passed null,
+                // so the section called "Verify & Deliver" rendered no identity to verify against. A centre
+                // was left checking a card number against a card number.
+                //
+                // It comes from the resolve response rather than a second lookup: patient-service has already
+                // decided what this caller may see about this person, in the same act, and asking twice would
+                // be two disclosure decisions that can disagree. Null when it disclosed none — the counter
+                // shows nothing rather than a placeholder.
+                //
+                // The PHOTO is still null, deliberately. There is a photo endpoint, in profile-service, behind
+                // `profile:read` — which an external delivery centre does not hold and should not be given as
+                // a side effect of this fix. Populating it needs a disclosure decision that nobody has made
+                // yet, and inventing one here would be exactly the thing this pass exists to stop.
+                .Select(x => ProcedureQueueItem.From(
+                    x.Order, x.Line!, displayName: resolution.DisplayName, photoUrl: null, now))
                 .ToList();
 
             // The retrieval is audited whether or not it found anything: the question "who asked about this
@@ -123,7 +140,11 @@ public static class ProcedureProviderEndpoints
             }, ct);
 
             return Results.Ok(items);
-        }).RequireAuthorization(HbmpPolicies.Scope("procedure:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("procedure:read"))
+        // 32.6 — DESCRIBED. Both reads answer with this projection and neither said so, so the committed spec
+        // carried the path and no schema — and the field the counter needed could go missing from the payload
+        // without the drift gate having anything to compare.
+        .Produces<IEnumerable<ProcedureQueueItem>>();
 
         // ---- Record ONE delivered session ------------------------------------------------------------------
         v1.MapPost("/{orderId:guid}/sessions", async (

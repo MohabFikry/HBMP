@@ -13,6 +13,8 @@ import { zLocalized } from "./common";
 export const zProcedureQueueItem = z.object({
   orderId: z.string(),
   orderNo: z.string(),
+  /** The LINE this row is about — required, because "record a session" has to name one (32.6). */
+  orderLineId: z.string(),
   orderType: z.string(),
   status: z.string(),
 
@@ -40,6 +42,9 @@ export const zProcedureQueueItem = z.object({
 
   /** What the ordering doctor DELIBERATELY chose to share. Null means NOT DISCLOSED — never "no diagnosis". */
   sharedClinicalContext: z.string().nullable().optional(),
+
+  /** When this centre closed the loop, or null while it is still open (32.6, design 45 §7). */
+  completionReportedAt: z.string().nullable().optional(),
 });
 
 export type ProcedureQueueItem = z.infer<typeof zProcedureQueueItem>;

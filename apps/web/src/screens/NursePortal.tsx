@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { Button, Card, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
-import type { Encounter, Localized, PatientListItem, VitalInput, VitalType } from "@mersal/contracts";
+import type { Encounter, Localized, PatientListItem, PatientProfile, VitalInput, VitalType } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { SectionView } from "./ProfileSectionViews";
 
 const S = {
   vitalsTitle: { en: "Vitals & Triage", ar: "العلامات والفرز" },
   resultsTitle: { en: "Results Inbox", ar: "صندوق النتائج" },
   pickPatient: { en: "Select a patient to record vitals.", ar: "اختر مريضاً لتسجيل العلامات." },
-  pickPatientRead: { en: "Select a patient to view their recorded vitals.", ar: "اختر مريضاً لعرض علاماته المسجلة." },
   empty: { en: "No patients on your worklist.", ar: "لا يوجد مرضى في قائمتك." },
   back: { en: "← Back to patients", ar: "→ العودة إلى المرضى" },
   record: { en: "Record vitals", ar: "تسجيل العلامات" },
@@ -24,6 +24,21 @@ const S = {
   diastolic: { en: "Diastolic BP", ar: "الضغط الانبساطي" },
   recorded: { en: "Recorded vitals", ar: "العلامات المسجلة" },
   none: { en: "No vitals recorded on this encounter yet.", ar: "لا توجد علامات مسجلة على هذه الزيارة بعد." },
+
+  // ---- 32.6 — the results inbox, which used to be a vitals readout ----
+  pickPatientResults: {
+    en: "Select a patient to read their investigation results.",
+    ar: "اختر مريضاً لعرض نتائج فحوصاته.",
+  },
+  noResults: {
+    en: "No investigation results for this patient.",
+    ar: "لا توجد نتائج فحوصات لهذا المريض.",
+  },
+  notYours: {
+    en: "Investigation results are not part of what your role may read for this patient. This is not a "
+      + "report that there are none.",
+    ar: "نتائج الفحوصات ليست ضمن ما يحق لدورك الاطلاع عليه لهذا المريض. وهذا ليس تأكيداً بعدم وجودها.",
+  },
 } satisfies Record<string, Localized>;
 
 /** A clickable list of the caller's patients (their own encounters). */
@@ -63,7 +78,13 @@ export function NurseVitals() {
     <>
       <PageHeader title={t(S.vitalsTitle)} />
       {patient ? (
-        <VitalsForm patient={patient} onBack={() => setPatient(null)} />
+        <>
+          {/* 32.6 — the readout moved HERE, where it belongs. Triage starts from what was last measured,
+              and the nurse who is about to write a set is the one who needs to see the previous one. It used
+              to be the whole of the "Results Inbox", which is a different promise entirely. */}
+          <VitalsForm patient={patient} onBack={() => setPatient(null)} />
+          <VitalsReadout patient={patient} />
+        </>
       ) : (
         <PatientPicker hint={S.pickPatient} onPick={setPatient} />
       )}
@@ -124,7 +145,20 @@ function VitalsForm({ patient, onBack }: { patient: PatientListItem; onBack: () 
   );
 }
 
-/** Results inbox — pick a patient, read the vitals recorded on their encounter (read-only clinical view). */
+/**
+ * 32.6 — the nurse's results inbox, which for four phases was a VITALS readout.
+ *
+ * <p>The rail said "Results Inbox", the permission was `results.inbox`, and the screen showed the heart rate
+ * and temperature the same nurse had typed in on the other tab. Design 11 §3.2 grants nurses
+ * <code>lab_result R🟠(TR)</code> and <code>imaging_result R🟠(TR)</code> — the read existed on paper and
+ * had no door.</p>
+ *
+ * <p>It asks profile-service for the INVESTIGATIONS section rather than a nurse-specific endpoint, because
+ * that projection is already composed under the caller's own token and already applies design 37 §6: a
+ * restricted result comes back marked restricted rather than omitted, so the nurse sees a locked door instead
+ * of a gap they would read as "not back yet". A section this caller may not read is ABSENT from the response,
+ * which is a third answer again — and it is said out loud rather than shown as an empty table.</p>
+ */
 export function NurseResults() {
   const t = useLoc();
   const [patient, setPatient] = useState<PatientListItem | null>(null);
@@ -132,15 +166,48 @@ export function NurseResults() {
     <>
       <PageHeader title={t(S.resultsTitle)} />
       {patient ? (
-        <VitalsReadout patient={patient} onBack={() => setPatient(null)} />
+        <PatientResults patient={patient} onBack={() => setPatient(null)} />
       ) : (
-        <PatientPicker hint={S.pickPatientRead} onPick={setPatient} />
+        <PatientPicker hint={S.pickPatientResults} onPick={setPatient} />
       )}
     </>
   );
 }
 
-function VitalsReadout({ patient, onBack }: { patient: PatientListItem; onBack: () => void }) {
+function PatientResults({ patient, onBack }: { patient: PatientListItem; onBack: () => void }) {
+  const api = useApi();
+  const t = useLoc();
+  const state = useAsync<PatientProfile>(
+    () => api.patientProfile(patient.id, ["investigations"]), [patient.id]);
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+      <div className="result-head">
+        <h2 style={{ margin: 0 }}>{t(patient.name)}</h2>
+        <Button variant="ghost" size="sm" onClick={onBack}>{t(S.back)}</Button>
+      </div>
+      <AsyncSection state={state} isEmpty={() => false} emptyLabel={S.noResults}>
+        {(profile) => {
+          const section = profile.sections.find((x) => x.key === "investigations");
+          // WITHHELD, not empty. The composer omits a section the caller may not read, and rendering that as
+          // "no results" would tell a nurse a patient has no investigations when the truth is that she may
+          // not see them.
+          if (!section) return <InlineAlert tone="info">{t(S.notYours)}</InlineAlert>;
+          return <SectionView section={section} beneficiaryId={patient.id} />;
+        }}
+      </AsyncSection>
+    </Card>
+  );
+}
+
+/**
+ * What was last measured on this encounter.
+ *
+ * <p>No heading and no back link: it sits under the form, which already carries both. A second copy of each
+ * would give the page two &lt;h2&gt;s naming the same patient and two identical "back" buttons, which reads
+ * to a screen-reader user as two patients.</p>
+ */
+function VitalsReadout({ patient }: { patient: PatientListItem }) {
   const api = useApi();
   const t = useLoc();
   const state = useAsync<Encounter>(() => api.getEncounter(patient.id), [patient.id]);
@@ -148,17 +215,18 @@ function VitalsReadout({ patient, onBack }: { patient: PatientListItem; onBack: 
   const push = (label: Localized, v: number | null | undefined, unit: string) => rows.push([label, v ?? null, unit]);
   return (
     <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
-      <div className="result-head">
-        <h2 style={{ margin: 0 }}>{t(patient.name)}</h2>
-        <Button variant="ghost" size="sm" onClick={onBack}>{t(S.back)}</Button>
-      </div>
+      <h3 className="section-h" style={{ margin: 0 }}>{t(S.recorded)}</h3>
       <AsyncSection state={state} isEmpty={() => false} emptyLabel={S.none}>
         {(enc) => {
           const v = enc.vitals;
           rows.length = 0;
           push(S.hr, v.heartRate, "bpm");
           push(S.temp, v.tempC, "°C");
+          // 32.6 — the form records the PAIR and SpO₂, and the readout showed neither. A panel that displays
+          // half of what was measured is how a systolic reading gets read as a blood pressure.
+          push(S.spo2, v.spo2, "%");
           push(S.systolic, v.systolic, "mmHg");
+          push(S.diastolic, v.diastolic, "mmHg");
           push(S.weight, v.weightKg, "kg");
           push(S.height, v.heightCm, "cm");
           const any = rows.some(([, val]) => val != null);

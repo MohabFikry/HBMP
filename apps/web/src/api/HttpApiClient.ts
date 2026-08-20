@@ -2213,10 +2213,14 @@ export class HttpApiClient implements ApiClient {
     const o = (rows ?? []).find((x: any) => String(x.orderNo ?? "") === orderNo) ?? (rows ?? [])[0];
     if (!o) return null;
 
-    // 29.1 — READS accept BOTH spellings, and must go on doing so long after writes stopped emitting the old
-    // one: orders placed before the switch keep `Imaging` in the row for the life of the order. Narrowing
-    // this to the new value alone would silently reclassify every pre-switch radiology order as a LAB order,
-    // sending it to a bench that cannot perform it.
+    // 29.1 — READS accept BOTH spellings. Belt and braces, not a live dependency: orders 0009 rewrote every
+    // stored `Imaging` to `Radiology` in place and asserts none remain, so nothing on the wire should carry
+    // the old value today. It stays because narrowing it would silently reclassify any that did as a LAB
+    // order, sending it to a bench that cannot perform it — a failure with no error attached.
+    //
+    // 32.6 — this comment used to claim pre-switch orders keep `Imaging` "for the life of the order", which
+    // the backfill contradicts. Left uncorrected it invites the opposite mistake: a reader adding a
+    // dual-accept filter elsewhere to fix a problem that does not exist.
     const rawType = String(o.orderType ?? "").toLowerCase();
     const kind = rawType === "radiology" || rawType === "imaging" ? "radiology" : "lab";
     return parseOr(zInvestigationOrder, {
@@ -2292,8 +2296,19 @@ export class HttpApiClient implements ApiClient {
         }),
       );
   }
-  async uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string) {
-    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, { resultValue }, idempotencyKey);
+  async uploadResult(
+    orderId: string, lineId: string,
+    result: { value?: string; report?: File },
+    idempotencyKey?: string,
+  ) {
+    // Only the parts that were actually given. Sending `resultValue: ""` alongside a file would overwrite a
+    // summary a previous upload had recorded — the server writes the value only when it is non-blank, and a
+    // client that always sends the field is relying on that rather than saying what it means.
+    const fields: Record<string, string | Blob> = {};
+    if (result.value?.trim()) fields.resultValue = result.value.trim();
+    // `report` is the field name the service reads (Results.cs). The filename rides along with the Blob.
+    if (result.report) fields.report = result.report;
+    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, fields, idempotencyKey);
     return parseOr(zResultUpload, { orderId, lineId, uploaded: true });
   }
   async consume(req: ConsumeRequest) {
