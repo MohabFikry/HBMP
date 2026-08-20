@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTableView, StatusChip, useTableQuery, type Column, type TableFilterSpec } from "@mersal/design-system";
+import {
+  Button, Card, DataTableView, Icon, StatusChip, useTableQuery, useToast,
+  type Column, type TableFilterSpec,
+} from "@mersal/design-system";
 import type { Localized, ReportAccessRequestRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -47,6 +50,25 @@ const S = {
     ar: "قد تكون المدة الممنوحة أقصر من المطلوبة — تحددها حساسية النتيجة.",
   },
   failed: { en: "The decision could not be recorded. Nothing was changed — please try again.", ar: "تعذّر تسجيل القرار. لم يتم تغيير أي شيء — يرجى المحاولة مرة أخرى." },
+  takeUnderReview: { en: "Take under review", ar: "بدء المراجعة" },
+  respond: { en: "Respond", ar: "الرد" },
+  send: { en: "Send", ar: "إرسال" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  supplementLabel: {
+    en: "More information for the reviewer",
+    ar: "معلومات إضافية للمراجع",
+  },
+  supplementHint: {
+    en: "Added to your original justification, which stays as you wrote it. The request returns to review.",
+    ar: "تُضاف إلى مبررك الأصلي الذي يبقى كما كتبته. يعود الطلب إلى المراجعة.",
+  },
+  supplementRequired: {
+    en: "Write the answer before sending — an empty reply leaves the request where it is.",
+    ar: "اكتب الرد قبل الإرسال — الرد الفارغ يترك الطلب كما هو.",
+  },
+  yourOriginal: { en: "Your original justification", ar: "مبررك الأصلي" },
+  pickedUp: { en: "Now under your review — the clock starts here.", ar: "أصبح قيد مراجعتك — يبدأ العد من الآن." },
+  supplied: { en: "Sent. The request is back with the reviewer.", ar: "تم الإرسال. عاد الطلب إلى المراجع." },
 } satisfies Record<string, Localized>;
 
 type Decision = "approve" | "deny" | "requestinfo";
@@ -57,9 +79,58 @@ export function ReportAccessInbox() {
   const t = useLoc();
   const [reloadKey, setReloadKey] = useState(0);
   const state = useAsync<ReportAccessRequestRow[]>(() => api.reportAccessInbox(), [reloadKey]);
+  const { toast } = useToast();
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [supplements, setSupplements] = useState<Record<string, string>>({});
+  const [answering, setAnswering] = useState<string | null>(null);
+
+  /**
+   * Pick-up: Requested → UnderReview (18.A4's routing step).
+   *
+   * <p>An ACT, never a side effect of rendering. It records the decider's identity and starts the SLA clock,
+   * so firing it on mount would attribute the review to whoever happened to open the queue — the opposite of
+   * what it was added for. Deciding without it stays allowed, because the server allows it: the decision
+   * path records an implicit pick-up, and a screen inventing a stricter rule would block work the platform
+   * permits.</p>
+   */
+  async function takeUnderReview(row: ReportAccessRequestRow) {
+    setBusy(row.requestId);
+    setError(null);
+    try {
+      await api.takeReportAccessUnderReview(row.requestId);
+      toast(t(S.pickedUp));
+      setReloadKey((k) => k + 1);
+    } catch {
+      setError(t(S.failed));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Answer a reviewer's question: InfoRequested → UnderReview. The only exit from that state. */
+  async function supply(row: ReportAccessRequestRow) {
+    const supplement = (supplements[row.requestId] ?? "").trim();
+    if (!supplement) {
+      setError(t(S.supplementRequired));
+      return;
+    }
+    setBusy(row.requestId);
+    setError(null);
+    try {
+      await api.supplyReportAccessInfo(row.requestId, supplement);
+      toast(t(S.supplied));
+      setAnswering(null);
+      setSupplements((m) => ({ ...m, [row.requestId]: "" }));
+      setReloadKey((k) => k + 1);
+    } catch {
+      setError(t(S.failed));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function decide(row: ReportAccessRequestRow, decision: Decision) {
     const reason = (reasons[row.requestId] ?? "").trim();
@@ -107,18 +178,78 @@ export function ReportAccessInbox() {
       header: t(S.actions),
       cell: (r) => (
         <div style={{ display: "grid", gap: "var(--sp2)", minWidth: "18rem" }}>
-          <label htmlFor={`reason-${r.requestId}`} style={{ fontSize: "0.85rem" }}>{t(S.reasonLabel)}</label>
-          <input
-            id={`reason-${r.requestId}`}
-            value={reasons[r.requestId] ?? ""}
-            onChange={(e) => setReasons((m) => ({ ...m, [r.requestId]: e.target.value }))}
-            style={{ minHeight: 44 }}
-          />
-          <div style={{ display: "flex", gap: "var(--sp2)", flexWrap: "wrap" }}>
-            <Button size="sm" onClick={() => void decide(r, "approve")} disabled={busy === r.requestId}>{t(S.approve)}</Button>
-            <Button size="sm" variant="secondary" onClick={() => void decide(r, "deny")} disabled={busy === r.requestId}>{t(S.deny)}</Button>
-            <Button size="sm" variant="ghost" onClick={() => void decide(r, "requestinfo")} disabled={busy === r.requestId}>{t(S.askInfo)}</Button>
-          </div>
+          {/* 32.4 — WHAT IS OFFERED DEPENDS ON WHAT THE SERVER SAID THIS CALLER MAY DO. `canDecide` is an
+              authorization answer computed in orders-service; deriving it here by comparing identity
+              strings would put the rule in a browser. The requester's own row therefore carries Respond
+              and nothing else: asking to see a result does not make you the person who may release it. */}
+          {r.canDecide ? (
+            <>
+              <label htmlFor={`reason-${r.requestId}`} style={{ fontSize: "0.85rem" }}>{t(S.reasonLabel)}</label>
+              <input
+                id={`reason-${r.requestId}`}
+                value={reasons[r.requestId] ?? ""}
+                onChange={(e) => setReasons((m) => ({ ...m, [r.requestId]: e.target.value }))}
+                style={{ minHeight: 44 }}
+              />
+              <div style={{ display: "flex", gap: "var(--sp2)", flexWrap: "wrap" }}>
+                {/* Only from Requested: a request already under review has been picked up, and offering to
+                    pick it up again would reset an attribution somebody else owns. */}
+                {r.statusCode === "Requested" && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leadingIcon={<Icon name="clock" aria-hidden="true" />}
+                    onClick={() => void takeUnderReview(r)}
+                    disabled={busy === r.requestId}
+                  >
+                    {t(S.takeUnderReview)}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => void decide(r, "approve")} disabled={busy === r.requestId}>{t(S.approve)}</Button>
+                <Button size="sm" variant="secondary" onClick={() => void decide(r, "deny")} disabled={busy === r.requestId}>{t(S.deny)}</Button>
+                <Button size="sm" variant="ghost" onClick={() => void decide(r, "requestinfo")} disabled={busy === r.requestId}>{t(S.askInfo)}</Button>
+              </div>
+            </>
+          ) : null}
+
+          {r.isRequester && r.statusCode === "InfoRequested" ? (
+            answering === r.requestId ? (
+              <section
+                aria-label={t(S.respond)}
+                style={{ display: "grid", gap: "var(--sp2)" }}
+              >
+                <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-3)" }}>
+                  <strong>{t(S.yourOriginal)}:</strong> {r.justification}
+                </p>
+                <label htmlFor={`supp-${r.requestId}`} style={{ fontSize: "0.85rem" }}>
+                  {t(S.supplementLabel)}
+                </label>
+                <textarea
+                  id={`supp-${r.requestId}`}
+                  value={supplements[r.requestId] ?? ""}
+                  onChange={(e) => setSupplements((m) => ({ ...m, [r.requestId]: e.target.value }))}
+                  rows={3}
+                />
+                <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-3)" }}>{t(S.supplementHint)}</p>
+                <div style={{ display: "flex", gap: "var(--sp2)" }}>
+                  <Button size="sm" variant="ghost" onClick={() => setAnswering(null)}>{t(S.cancel)}</Button>
+                  {/* Bare on purpose, and the icon policy says so: Send is a one-off verb, not a member of
+                      a recurring action class with a glyph of its own. */}
+                  <Button size="sm" onClick={() => void supply(r)} disabled={busy === r.requestId}>
+                    {t(S.send)}
+                  </Button>
+                </div>
+              </section>
+            ) : (
+              <Button
+                size="sm"
+                leadingIcon={<Icon name="check2" aria-hidden="true" />}
+                onClick={() => setAnswering(r.requestId)}
+              >
+                {t(S.respond)}
+              </Button>
+            )
+          ) : null}
         </div>
       ),
     },

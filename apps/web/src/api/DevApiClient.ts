@@ -1188,9 +1188,24 @@ export class DevApiClient implements ApiClient {
   }
 
   /**
-   * 18.C2 (W4) — fixture approver inbox. Two rows, deliberately: one Requested and one UnderReview, so the
-   * screen's status handling and the "already picked up by someone" case are both exercised without a backend.
+   * 18.C2 (W4) — fixture approver inbox.
+   *
+   * <p>THREE rows since 32.4, and the third is the point: a request in InfoRequested that THIS caller
+   * raised. Two rows exercised only the decider's half of the workflow, which is exactly the half that
+   * worked — the requester's row was unreachable in production and equally unreachable in the fixture, so
+   * no screen test could have found the missing exit.</p>
    */
+  async takeReportAccessUnderReview(requestId: string) {
+    void requestId;
+    await this.gate(() => undefined);
+  }
+
+  async supplyReportAccessInfo(requestId: string, supplement: string) {
+    void requestId;
+    void supplement;
+    await this.gate(() => undefined);
+  }
+
   async reportAccessInbox(): Promise<ReportAccessRequestRow[]> {
     return [
       {
@@ -1199,6 +1214,7 @@ export class DevApiClient implements ApiClient {
         justification: "Patient referred to me for follow-up; need the histology to plan treatment.",
         requestedTtlHours: 24,
         status: { kind: "warn", label: { en: "Awaiting decision", ar: "بانتظار القرار" } },
+        statusCode: "Requested", canDecide: true, isRequester: false,
         createdAt: new Date(Date.now() - 3_600_000).toISOString(),
       },
       {
@@ -1207,7 +1223,19 @@ export class DevApiClient implements ApiClient {
         justification: "Authorization review — medical necessity for the requested procedure.",
         requestedTtlHours: 8,
         status: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
+        statusCode: "UnderReview", canDecide: true, isRequester: false,
         createdAt: new Date(Date.now() - 7_200_000).toISOString(),
+      },
+      {
+        requestId: "rar-3", orderId: "ord-64", orderLineId: "ol-64b", beneficiaryToken: "•••7734",
+        requestedBy: "me", requestedForRole: "doctor", purposeCode: "TRT",
+        justification: "Treating this patient since June; need the result to plan the follow-up.",
+        requestedTtlHours: 12,
+        status: { kind: "warn", label: { en: "More information needed", ar: "مطلوب إيضاح" } },
+        // Mine, and waiting on ME. canDecide is false: I asked to see somebody else's result, so I am not
+        // that order's author and have no authority over my own request.
+        statusCode: "InfoRequested", canDecide: false, isRequester: true,
+        createdAt: new Date(Date.now() - 10_800_000).toISOString(),
       },
     ];
   }

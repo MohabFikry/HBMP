@@ -133,7 +133,7 @@ import {
   zMedicationHistoryRow,
   zNoteAddendum,
 } from "@mersal/contracts";
-import type { Period, ServiceAxis } from "@mersal/contracts";
+import type { Localized, Period, ServiceAxis } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
@@ -212,6 +212,23 @@ const toMedicationRow = (m: any) => ({
   endDate: m?.endDate ?? null,
   status: m?.status,
 });
+
+/**
+ * 32.4 — one chip per report-access state, because they say different things to different readers.
+ *
+ * `InfoRequested` is the one that mattered: it is not "awaiting a decision", it is awaiting the REQUESTER,
+ * and rendering the two identically is what made a request that needed an answer look like one that needed
+ * patience.
+ */
+const REPORT_ACCESS_CHIP: Record<string, { kind: "info" | "warn" | "ok" | "bad"; label: Localized }> = {
+  Requested: { kind: "warn", label: t("Awaiting decision", "في انتظار القرار") },
+  UnderReview: { kind: "info", label: t("Under review", "قيد المراجعة") },
+  InfoRequested: { kind: "warn", label: t("More information needed", "مطلوب إيضاح") },
+  Approved: { kind: "ok", label: t("Approved", "تمت الموافقة") },
+  Denied: { kind: "bad", label: t("Denied", "مرفوض") },
+  Expired: { kind: "info", label: t("Expired", "منتهٍ") },
+  Revoked: { kind: "bad", label: t("Revoked", "أُلغي") },
+};
 
 const toAllergyRecord = (a: any) => ({
   allergyId: a?.allergyId,
@@ -1726,12 +1743,32 @@ export class HttpApiClient implements ApiClient {
         purposeCode: String(q.purposeCode ?? ""),
         justification: String(q.justification ?? ""),
         requestedTtlHours: typeof q.requestedTtlHours === "number" ? q.requestedTtlHours : undefined,
-        status: q.status === "UnderReview"
-          ? { kind: "info" as const, label: t("Under review", "قيد المراجعة") }
-          : { kind: "warn" as const, label: t("Awaiting decision", "في انتظار القرار") },
+        // 32.4 — every state gets its own chip. This was a two-branch conditional, so an InfoRequested
+        // request rendered as "Awaiting decision": the queue told the decider it was waiting on THEM while
+        // it was in fact waiting on the requester, and told the requester nothing at all because the row
+        // was not in any list they could see.
+        status: REPORT_ACCESS_CHIP[String(q.status)] ?? { kind: "warn" as const, label: t(String(q.status), String(q.status)) },
+        statusCode: q.status,
+        canDecide: Boolean(q.canDecide),
+        isRequester: Boolean(q.isRequester),
         createdAt: q.createdAt ?? new Date().toISOString(),
       }),
     );
+  }
+
+  async takeReportAccessUnderReview(requestId: string) {
+    await postRaw(`/report-access-requests/${encodeURIComponent(requestId)}/review`, {});
+  }
+
+  /**
+   * Answer the question a reviewer asked (32.4).
+   *
+   * <p>The supplement is APPENDED server-side; the original justification is never overwritten. This is the
+   * only exit from InfoRequested, and until now no client called it — so "Ask for more" was a one-way door
+   * the product itself offered.</p>
+   */
+  async supplyReportAccessInfo(requestId: string, supplement: string) {
+    await postRaw(`/report-access-requests/${encodeURIComponent(requestId)}/supply-info`, { supplement });
   }
 
   async decideReportAccess(requestId: string, decision: "approve" | "deny" | "requestinfo", reason: string, ttlHours?: number) {

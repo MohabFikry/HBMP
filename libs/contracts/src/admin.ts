@@ -303,7 +303,24 @@ export const zReportAccessRequestRow = z.object({
   justification: z.string(),
   requestedTtlHours: z.number().optional(),
   status: zStatus,
+  /**
+   * The raw workflow state, beside the rendered chip.
+   *
+   * The chip is for reading; this is for deciding what to offer. Keying controls off a localized label
+   * would make the Respond button disappear the moment the portal is switched to Arabic.
+   */
+  statusCode: z.enum(["Requested", "UnderReview", "InfoRequested", "Approved", "Denied", "Expired", "Revoked"]),
   createdAt: zInstant,
+  /**
+   * May the signed-in caller decide this request, and did they raise it? (32.4)
+   *
+   * Both come from the SERVER. Whether someone may decide a sensitive-result release is an authorization
+   * question, and a screen that answered it by comparing identity strings would be deciding authority in a
+   * browser. They are not opposites: a medical director reviewing their own request is neither, and the
+   * ordinary requester is `isRequester` without `canDecide`.
+   */
+  canDecide: z.boolean(),
+  isRequester: z.boolean(),
 });
 export type ReportAccessRequestRow = z.infer<typeof zReportAccessRequestRow>;
 

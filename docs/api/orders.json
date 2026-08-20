@@ -1931,6 +1931,12 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "canDecide": {
+            "type": "boolean"
+          },
+          "isRequester": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

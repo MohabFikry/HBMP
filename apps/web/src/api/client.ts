@@ -405,6 +405,17 @@ export interface ApiClient {
    * 32.3 — append a correction to a signed note. The only way to change a signed clinical record: emr
    * refuses an edit with a 409 that names this path.
    */
+  /**
+   * 32.4 — Requested → UnderReview. Records the decider and starts the SLA clock, so it is an explicit act
+   * rather than something the screen does on render.
+   */
+  takeReportAccessUnderReview(requestId: string): Promise<void>;
+  /**
+   * 32.4 — InfoRequested → UnderReview: the requester answers the reviewer's question. The only exit from
+   * that state, and the reason "Ask for more" was a one-way door until now.
+   */
+  supplyReportAccessInfo(requestId: string, supplement: string): Promise<void>;
+
   addNoteAddendum(
     encounterId: string,
     noteId: string,
