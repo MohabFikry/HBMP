@@ -50,6 +50,7 @@ import type {
   AddAllergyRequest,
   AllergyRecord,
   MedicationHistoryRow,
+  NoteAddendum,
   MedicationStatus,
   AddMedicationHistoryRequest,
   BloodGroup,
@@ -400,6 +401,16 @@ export interface ApiClient {
    * The prescribing interaction check reads this list (32.1). An empty result means nothing has been
    * recorded, which is not the same claim as "takes nothing" and must not be rendered as one.
    */
+  /**
+   * 32.3 — append a correction to a signed note. The only way to change a signed clinical record: emr
+   * refuses an edit with a 409 that names this path.
+   */
+  addNoteAddendum(
+    encounterId: string,
+    noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ): Promise<NoteAddendum>;
+
   medicationHistory(beneficiaryId: string, status?: MedicationStatus): Promise<MedicationHistoryRow[]>;
   addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest): Promise<MedicationHistoryRow>;
   /** Stop one. Never a delete — what a patient WAS taking is part of the clinical picture. */

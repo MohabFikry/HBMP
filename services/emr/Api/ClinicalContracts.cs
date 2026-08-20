@@ -20,11 +20,12 @@ public sealed record SetBloodGroupRequest(string BloodGroup);
 
 public sealed record NoteResponse(
     Guid NoteId, Guid EncounterId, string NoteType, string? Subjective, string? Objective, string? Assessment,
-    string? Plan, Guid? AddendumOfNoteId, string AuthoredBy, DateTimeOffset AuthoredAt, bool IsSigned)
+    string? Plan, Guid? AddendumOfNoteId, string AuthoredBy, string? AuthoredByName,
+    DateTimeOffset AuthoredAt, bool IsSigned)
 {
     public static NoteResponse From(EmrNote n) => new(
         n.NoteId, n.EncounterId, n.NoteType.ToString(), n.Subjective, n.Objective, n.Assessment, n.Plan,
-        n.AddendumOfNoteId, n.AuthoredBy, n.AuthoredAt, n.IsSigned);
+        n.AddendumOfNoteId, n.AuthoredBy, n.AuthoredByName, n.AuthoredAt, n.IsSigned);
 }
 
 public sealed record DiagnosisResponse(

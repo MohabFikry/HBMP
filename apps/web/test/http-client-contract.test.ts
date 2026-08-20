@@ -282,3 +282,77 @@ describe("HttpApiClient — medication history", () => {
     expect(row.endDate).toBe("2026-08-20");
   });
 });
+
+/**
+ * 32.3 — the addendum mapping.
+ *
+ * `getEncounter` used to FILTER addenda out and drop them, which is why a correction written to a signed
+ * note was invisible to every reader on the platform. The two tests below are the two halves of that: the
+ * read must surface them, and the write must reach the endpoint the record says is the only correction path.
+ */
+const SIGNED_NOTE = {
+  noteId: "note-1",
+  encounterId: "enc-1",
+  noteType: "SOAP",
+  subjective: "Headache.",
+  objective: "BP 40/90.",
+  assessment: "Tension headache.",
+  plan: "Paracetamol PRN.",
+  addendumOfNoteId: null,
+  authoredBy: "usr-1",
+  authoredByName: "Dr Karim Adel",
+  authoredAt: "2026-08-01T10:00:00Z",
+  isSigned: true,
+};
+
+describe("HttpApiClient — note addenda", () => {
+  it("surfaces the corrections appended to the signed note, oldest first", async () => {
+    stubFetch({
+      body: {
+        encounter: { encounterId: "enc-1", beneficiaryId: "ben-1", startedAt: "2026-08-01T09:00:00Z" },
+        notes: [
+          SIGNED_NOTE,
+          { ...SIGNED_NOTE, noteId: "note-3", objective: "Second correction.", addendumOfNoteId: "note-1", authoredAt: "2026-08-03T10:00:00Z" },
+          { ...SIGNED_NOTE, noteId: "note-2", objective: "Correction: BP was 140/90.", addendumOfNoteId: "note-1", authoredAt: "2026-08-02T10:00:00Z" },
+        ],
+        vitals: [], allergies: [], diagnoses: [],
+      },
+    });
+
+    const enc = await new HttpApiClient().getEncounter("enc-1");
+
+    expect(enc.addenda.map((a) => a.id)).toEqual(["note-2", "note-3"]);
+    expect(enc.addenda[0].authoredByName).toBe("Dr Karim Adel");
+    // The original is untouched: it is still the note the workspace renders.
+    expect(enc.soap.objective).toBe("BP 40/90.");
+  });
+
+  it("keeps an unattributed addendum unattributed rather than substituting the subject id", async () => {
+    // emr 0027 is nullable: notes written before it captured no name. "(author not recorded)" is the
+    // screen's job; putting the uuid here would make a clinical correction look attributed when it is not.
+    stubFetch({
+      body: {
+        encounter: { encounterId: "enc-1", beneficiaryId: "ben-1", startedAt: "2026-08-01T09:00:00Z" },
+        notes: [
+          SIGNED_NOTE,
+          { ...SIGNED_NOTE, noteId: "note-2", addendumOfNoteId: "note-1", authoredByName: null },
+        ],
+        vitals: [], allergies: [], diagnoses: [],
+      },
+    });
+
+    const enc = await new HttpApiClient().getEncounter("enc-1");
+
+    expect(enc.addenda[0].authoredByName).toBeNull();
+    expect(enc.addenda[0].authoredByName).not.toBe("usr-1");
+  });
+
+  it("writes an addendum to the endpoint the signed record names as the only correction path", async () => {
+    const calls = stubFetch({ body: { ...SIGNED_NOTE, noteId: "note-2", addendumOfNoteId: "note-1" } });
+
+    await new HttpApiClient().addNoteAddendum("enc-1", "note-1", { objective: "Correction." });
+
+    expect(calls[0].url).toContain("/encounters/enc-1/notes/note-1/addendum");
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ objective: "Correction." });
+  });
+});

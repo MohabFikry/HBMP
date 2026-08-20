@@ -198,6 +198,25 @@ export const zEncounterDiagnosis = zCoded.extend({
 });
 export type EncounterDiagnosis = z.infer<typeof zEncounterDiagnosis>;
 
+/**
+ * A correction appended to a SIGNED note.
+ *
+ * <b>It never replaces anything.</b> The original stays exactly as it was signed, and stays on screen — an
+ * addendum that overwrote the text it corrects would read as a tidier record and be a worse one, because the
+ * fact that a mistake was made and by whom is itself part of the clinical history.
+ *
+ * `authoredByName` is nullish because emr 0027 is nullable: notes written before it captured no name, and
+ * "(not recorded)" is the honest rendering. It is never the subject id — a correction attributed to
+ * `22222222-…` is unattributed in every sense that matters to the next clinician reading it.
+ */
+export const zNoteAddendum = z.object({
+  id: zId,
+  authoredAt: zInstant,
+  authoredByName: z.string().nullish(),
+  soap: zSoap,
+});
+export type NoteAddendum = z.infer<typeof zNoteAddendum>;
+
 export const zEncounter = z.object({
   id: zId,
   patientId: zId,
@@ -216,6 +235,13 @@ export const zEncounter = z.object({
   vitals: zVitals,
   allergies: z.array(zAllergy),
   diagnoses: z.array(zEncounterDiagnosis),
+  /**
+   * Corrections appended to the signed note, oldest first.
+   *
+   * Empty on an unsigned encounter, because there is nothing to correct yet: while the note is editable the
+   * correction path is to type in it.
+   */
+  addenda: z.array(zNoteAddendum),
 });
 export type Encounter = z.infer<typeof zEncounter>;
 

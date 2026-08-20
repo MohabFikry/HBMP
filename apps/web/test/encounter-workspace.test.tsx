@@ -25,6 +25,9 @@ function encounter(over: Partial<Encounter> = {}): Encounter {
     },
     allergies: [],
     diagnoses: [],
+    // 32.3 — the corrections appended to a signed note. Empty here: this suite is about writing the note,
+    // not about correcting one after it is signed, which encounter-addendum.test.tsx covers.
+    addenda: [],
     ...over,
   };
 }

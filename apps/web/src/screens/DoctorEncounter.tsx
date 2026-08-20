@@ -8,6 +8,7 @@ import {
   InputField,
   Modal,
   ComboboxField,
+  TextareaField,
   StatusChip,
   Tabs,
   useTableQuery,
@@ -20,6 +21,7 @@ import type {
   EncounterDiagnosis,
   IcdRef,
   Localized,
+  NoteAddendum,
   OrderRow,
   PatientListItem,
   InvestigationOrderType,
@@ -198,6 +200,21 @@ const S = {
     en: "This note is signed and can no longer be edited. Record a correction as an addendum.",
     ar: "هذه الملاحظة موقّعة ولا يمكن تعديلها. سجّل التصحيح كملحق.",
   },
+  addAddendum: { en: "Add addendum", ar: "إضافة ملحق" },
+  saveAddendum: { en: "Save addendum", ar: "حفظ الملحق" },
+  addendumTitle: { en: "Addendum", ar: "ملحق" },
+  addendumHint: {
+    en: "The signed note stays exactly as it is. Write only what is being corrected or added.",
+    ar: "تبقى الملاحظة الموقّعة كما هي تمامًا. اكتب ما يجري تصحيحه أو إضافته فقط.",
+  },
+  addendumBy: { en: "by {who}", ar: "بواسطة {who}" },
+  addendumUnattributed: { en: "(author not recorded)", ar: "(الكاتب غير مسجّل)" },
+  addendumEmpty: {
+    en: "Write something in at least one section before saving the addendum.",
+    ar: "اكتب في قسم واحد على الأقل قبل حفظ الملحق.",
+  },
+  addendumSaved: { en: "Addendum recorded on the note.", ar: "تم تسجيل الملحق على الملاحظة." },
+  addendumFailed: { en: "Could not save the addendum. Try again.", ar: "تعذّر حفظ الملحق. حاول مرة أخرى." },
   signedDiagnosis: {
     en: "The note is signed — a coded diagnosis can no longer be retracted here.",
     ar: "الملاحظة موقّعة — لا يمكن سحب التشخيص من هنا.",
@@ -493,6 +510,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   const signed = encounter.signed;
   const [soap, setSoap] = useState<Soap>(encounter.soap);
   const [diagnoses, setDiagnoses] = useState<EncounterDiagnosis[]>(encounter.diagnoses);
+  const [addenda, setAddenda] = useState<NoteAddendum[]>(encounter.addenda);
   const [noteId, setNoteId] = useState<string | null>(encounter.noteId);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<"draft" | "final" | null>(null);
@@ -707,6 +725,19 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                         readOnly={signed}
                       />
                     ))}
+
+                    {/* 32.3 — the correction path the banner above has always named and no client could
+                        take. Only after signing: while the note is editable the way to fix it is to type in
+                        it, and offering both would give a doctor two ways to change the same unsigned text,
+                        one of which splits it permanently in two. */}
+                    {signed && (
+                      <AddendumSection
+                        encounterId={encounter.id}
+                        noteId={encounter.noteId}
+                        addenda={addenda}
+                        onAdded={(a) => setAddenda((prev) => [...prev, a])}
+                      />
+                    )}
                   </div>
                 ),
               },
@@ -2048,3 +2079,131 @@ function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
 
 // ---------------------------------------------------------------- write actions
 
+/**
+ * Corrections appended to a signed note (32.3, design 46 §1's principle applied to the clinical record).
+ *
+ * ============================================================================================================
+ * AN ADDENDUM IS AN APPEND, AND THE RENDERING HAS TO SAY SO
+ * ============================================================================================================
+ * Each one sits BELOW the signed note, in its own article, with the author and the time. It is deliberately
+ * not merged into the four SOAP boxes above: the value of the mechanism is that the original text stays as
+ * signed, so a reader can see both what was recorded and what was corrected. A UI that folded the correction
+ * into the original would produce a tidier record and a less truthful one, while appearing to implement the
+ * same feature.
+ *
+ * Only the sections the author wrote are shown. An addendum that says "BP was 140/90" has nothing to say
+ * about the plan, and four boxes with three of them empty would suggest it did.
+ */
+function AddendumSection({
+  encounterId, noteId, addenda, onAdded,
+}: {
+  encounterId: string;
+  noteId: string | null;
+  addenda: NoteAddendum[];
+  onAdded: (a: NoteAddendum) => void;
+}) {
+  const api = useApi();
+  const t = useLoc();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({ subjective: "", objective: "", assessment: "", plan: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Localized | null>(null);
+
+  const sections = [
+    { key: "subjective" as const, title: S.subjective },
+    { key: "objective" as const, title: S.objective },
+    { key: "assessment" as const, title: S.assessment },
+    { key: "plan" as const, title: S.plan },
+  ];
+
+  async function save() {
+    // The server refuses an addendum with no populated section (422 empty-note). Saying so here means the
+    // doctor hears it from the form rather than from a failed request.
+    const hasContent = Object.values(draft).some((v) => v.trim().length > 0);
+    if (!hasContent) { setError(S.addendumEmpty); return; }
+    if (!noteId) { setError(S.addendumFailed); return; }
+
+    setBusy(true);
+    try {
+      const saved = await api.addNoteAddendum(encounterId, noteId, {
+        subjective: draft.subjective.trim() || undefined,
+        objective: draft.objective.trim() || undefined,
+        assessment: draft.assessment.trim() || undefined,
+        plan: draft.plan.trim() || undefined,
+      });
+      onAdded(saved);
+      toast(t(S.addendumSaved));
+      setDraft({ subjective: "", objective: "", assessment: "", plan: "" });
+      setError(null);
+      setOpen(false);
+    } catch {
+      setError(S.addendumFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="enc-addenda">
+      {addenda.map((a) => (
+        <article key={a.id} className="enc-addendum" aria-label={t(S.addendumTitle)}>
+          <header className="enc-addendum-head">
+            <strong>{t(S.addendumTitle)}</strong>
+            <span className="enc-addendum-by">
+              {t(S.addendumBy).replace("{who}", a.authoredByName ?? t(S.addendumUnattributed))}
+            </span>
+            <time dateTime={a.authoredAt}>{a.authoredAt.slice(0, 10)}</time>
+          </header>
+          {sections
+            .filter((sec) => a.soap[sec.key].trim().length > 0)
+            .map((sec) => (
+              <p key={sec.key} className="enc-addendum-part">
+                <span className="enc-addendum-label">{t(sec.title)}</span>
+                {a.soap[sec.key]}
+              </p>
+            ))}
+        </article>
+      ))}
+
+      {open ? (
+        <section className="enc-addendum-form" aria-label={t(S.addAddendum)}>
+          {/* No wrapper: InlineAlert's `bad` tone already carries role="alert" (Toast.tsx) — only a failure
+              interrupts, a warning is role="status". Adding one nested a second alert inside the first, and
+              the test found two where a screen reader would have announced the refusal twice. */}
+          {error ? <InlineAlert tone="bad">{t(error)}</InlineAlert> : null}
+          <p className="enc-addendum-hint">{t(S.addendumHint)}</p>
+          {sections.map((sec) => (
+            <TextareaField
+              key={sec.key}
+              label={t(sec.title)}
+              value={draft[sec.key]}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                setDraft((d) => ({ ...d, [sec.key]: e.target.value }))}
+              rows={2}
+            />
+          ))}
+          <div className="enc-addendum-actions">
+            <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
+            <Button
+              onClick={() => void save()}
+              disabled={busy}
+              leadingIcon={<Icon name="check2" aria-hidden="true" />}
+            >
+              {t(S.saveAddendum)}
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
+          onClick={() => setOpen(true)}
+        >
+          {t(S.addAddendum)}
+        </Button>
+      )}
+    </div>
+  );
+}

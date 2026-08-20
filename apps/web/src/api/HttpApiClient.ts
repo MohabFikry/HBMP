@@ -131,6 +131,7 @@ import {
   zSlaBreachView,
   zClaimsCostView,
   zMedicationHistoryRow,
+  zNoteAddendum,
 } from "@mersal/contracts";
 import type { Period, ServiceAxis } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -1203,9 +1204,29 @@ export class HttpApiClient implements ApiClient {
     // their original, and a signed note is immutable, so "the note to edit" is the newest note that is
     // neither. Taking `notes[0]` picked whatever the database returned first, which after a single addendum
     // was as likely to be the locked original as the live draft.
-    const notes: any[] = (r?.notes ?? []).filter((n: any) => !n.addendumOfNoteId);
+    const allNotes: any[] = r?.notes ?? [];
+    const notes: any[] = allNotes.filter((n: any) => !n.addendumOfNoteId);
     notes.sort((a, b) => String(b.authoredAt ?? "").localeCompare(String(a.authoredAt ?? "")));
     const note = notes.find((n: any) => !n.isSigned) ?? notes[0] ?? {};
+
+    // 32.3 — the corrections appended to THIS note. They were filtered out above and then discarded, which
+    // is why an addendum written by anyone was invisible to every reader: the mechanism the workspace tells
+    // a doctor to use produced a record nothing displayed. Oldest first, because they are read in the order
+    // they were made.
+    const addenda = allNotes
+      .filter((n: any) => n.addendumOfNoteId && String(n.addendumOfNoteId) === String(note.noteId ?? ""))
+      .sort((a, b) => String(a.authoredAt ?? "").localeCompare(String(b.authoredAt ?? "")))
+      .map((n: any) => ({
+        id: n.noteId,
+        authoredAt: n.authoredAt,
+        authoredByName: n.authoredByName ?? null,
+        soap: {
+          subjective: n.subjective ?? "",
+          objective: n.objective ?? "",
+          assessment: n.assessment ?? "",
+          plan: n.plan ?? "",
+        },
+      }));
 
     const vitals: any[] = r?.vitals ?? [];
     // Newest first, so `v()` answers with the CURRENT reading. Unsorted, a vitals panel showed whichever row
@@ -1245,6 +1266,7 @@ export class HttpApiClient implements ApiClient {
         spo2: v("SpO2"),
         measuredAt: vitals[0]?.measuredAt ?? null,
       },
+      addenda,
       // The SUBSTANCE, which is what an allergy chip is for. This read `a.reaction ?? "Allergen"` — so a
       // penicillin allergy recorded with a reaction of "rash" displayed as "rash", and one recorded without
       // a reaction displayed as the literal word "Allergen". emr has carried `allergenDisplay` since its
@@ -1817,6 +1839,40 @@ export class HttpApiClient implements ApiClient {
    * interaction found" — so an empty answer here is rendered as "nothing recorded", never as "takes
    * nothing", and the two sentences are not interchangeable.</p>
    */
+  /**
+   * Append a correction to a signed note (32.3).
+   *
+   * <p>The only way to change a signed clinical record on this platform — emr refuses an edit with a 409
+   * naming this path, the workspace tells the doctor so twice, and until now no client could take it.</p>
+   */
+  async addNoteAddendum(
+    encounterId: string,
+    noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ) {
+    const r = (await postRaw(
+      `/encounters/${encodeURIComponent(encounterId)}/notes/${encodeURIComponent(noteId)}/addendum`,
+      {
+        noteType: "SOAP",
+        subjective: soap.subjective ?? null,
+        objective: soap.objective ?? null,
+        assessment: soap.assessment ?? null,
+        plan: soap.plan ?? null,
+      },
+    )) as any;
+    return parseOr(zNoteAddendum, {
+      id: r?.noteId,
+      authoredAt: r?.authoredAt,
+      authoredByName: r?.authoredByName ?? null,
+      soap: {
+        subjective: r?.subjective ?? "",
+        objective: r?.objective ?? "",
+        assessment: r?.assessment ?? "",
+        plan: r?.plan ?? "",
+      },
+    });
+  }
+
   async medicationHistory(beneficiaryId: string, status?: MedicationStatus) {
     const q = status ? `?status=${encodeURIComponent(status)}` : "";
     const r = (await getRaw(

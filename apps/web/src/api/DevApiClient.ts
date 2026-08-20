@@ -101,6 +101,7 @@ import {
   zAllergenOption,
   zAllergyRecord,
   zMedicationHistoryRow,
+  zNoteAddendum,
   zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
@@ -140,6 +141,7 @@ import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionK
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { AddMedicationHistoryRequest, MedicationHistoryRow, MedicationStatus } from "@mersal/contracts";
+import type { NoteAddendum } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
 import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -1035,7 +1037,6 @@ export class DevApiClient implements ApiClient {
    * those two tables — including any newly added one — invisible in the demo build and in the route sweep.
    */
   getEncounter(encounterId: string) {
-    void encounterId;
     return this.gate(() =>
       ok(zEncounter, {
         id: "ENC-88120",
@@ -1057,6 +1058,9 @@ export class DevApiClient implements ApiClient {
           heartRate: 82, tempC: 37.8, spo2: 97, measuredAt: NOW,
         },
         allergies: [{ id: "AL-1", substance: loc("Penicillin", "بنسلين"), severity: "moderate" }],
+        // 32.3 — corrections appended to this encounter's signed note, so the dev path can show the
+        // original and its addendum together rather than only the empty case.
+        addenda: this.addenda.get(encounterId) ?? [],
         diagnoses: [{
           id: "DX-1", system: "ICD-10", code: "J06.9", rank: "Primary",
           label: loc("Acute upper respiratory infection", "التهاب تنفسي علوي حاد"),
@@ -1535,6 +1539,34 @@ export class DevApiClient implements ApiClient {
       ]);
     }
     return this.medications.get(beneficiaryId)!;
+  }
+
+  /** 32.3 — the corrections appended to a signed note, keyed by encounter. */
+  private readonly addenda = new Map<string, NoteAddendum[]>();
+
+  addNoteAddendum(
+    encounterId: string,
+    _noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ) {
+    return this.gate(() => {
+      const existing = this.addenda.get(encounterId) ?? [];
+      const row = ok(zNoteAddendum, {
+        id: `note-add-${existing.length + 1}`,
+        authoredAt: "2026-08-20T10:00:00Z",
+        // The signed-in clinician's name, not their id — the dev path renders what live renders, or the
+        // uuid problem 0027 fixed reappears the moment somebody demos this screen.
+        authoredByName: "Dr Karim Adel",
+        soap: {
+          subjective: soap.subjective ?? "",
+          objective: soap.objective ?? "",
+          assessment: soap.assessment ?? "",
+          plan: soap.plan ?? "",
+        },
+      });
+      this.addenda.set(encounterId, [...existing, row]);
+      return row;
+    });
   }
 
   medicationHistory(beneficiaryId: string, status?: MedicationStatus) {

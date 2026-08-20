@@ -19,6 +19,9 @@ public enum MedicationStatus { Active, Stopped }
 /// An unsigned note is editable by its author only.</summary>
 public sealed class EmrNote
 {
+    /// <summary>Author display name, snapshot at write time (migration 0027). NULL = none captured.</summary>
+    public string? AuthoredByName { get; set; }
+
     public Guid NoteId { get; set; }
     public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid EncounterId { get; set; }

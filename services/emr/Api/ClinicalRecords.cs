@@ -209,7 +209,8 @@ public static class ClinicalEndpoints
             {
                 NoteId = Guid.NewGuid(), EncounterId = id, NoteType = req.NoteType,
                 Subjective = req.Subjective, Objective = req.Objective, Assessment = req.Assessment, Plan = req.Plan,
-                AuthoredBy = me.Principal!.Subject, AuthoredAt = clock.GetUtcNow(), IsSigned = false,
+                AuthoredBy = me.Principal!.Subject, AuthoredByName = me.Principal.DisplayName,
+                AuthoredAt = clock.GetUtcNow(), IsSigned = false,
             };
             if (!SoapNoteRules.HasContent(note))
                 return Problem(422, "empty-note", "A note must contain at least one populated section (S/O/A/P).");
@@ -304,7 +305,8 @@ public static class ClinicalEndpoints
             {
                 NoteId = Guid.NewGuid(), EncounterId = id, NoteType = req.NoteType,
                 Subjective = req.Subjective, Objective = req.Objective, Assessment = req.Assessment, Plan = req.Plan,
-                AddendumOfNoteId = noteId, AuthoredBy = me.Principal!.Subject, AuthoredAt = clock.GetUtcNow(),
+                AddendumOfNoteId = noteId, AuthoredBy = me.Principal!.Subject,
+                AuthoredByName = me.Principal.DisplayName, AuthoredAt = clock.GetUtcNow(),
             };
             if (!SoapNoteRules.HasContent(addendum))
                 return Problem(422, "empty-note", "An addendum must contain at least one populated section (S/O/A/P).");

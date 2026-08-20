@@ -6514,3 +6514,71 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp2);
   margin-block-start: var(--sp3);
 }
+
+/* ── 32.3 Addenda on a signed note ──────────────────────────────────────────────────────────────────────
+   Each correction is its own bordered article BELOW the signed SOAP boxes, never folded into them. The
+   separation is the design: the value of an addendum is that the original text stays exactly as it was
+   signed and stays readable, so a reader sees both what was recorded and what was corrected. A treatment
+   that visually merged the two would produce a tidier record and a less truthful one. */
+.enc-addenda {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp3);
+  margin-block-start: var(--sp3);
+  align-items: flex-start;
+}
+.enc-addendum {
+  width: 100%;
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  /* A heavier inline-start edge, which mirrors in RTL because it is a logical property. The shape says
+     "appended to the thing above" before any word is read. */
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+.enc-addendum-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp2);
+  margin-block-end: var(--sp2);
+  font-size: 0.8125rem;
+}
+.enc-addendum-by,
+.enc-addendum-head time {
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+.enc-addendum-part {
+  margin: 0 0 var(--sp2);
+  font-size: 0.875rem;
+  color: var(--text-1);
+}
+.enc-addendum-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.enc-addendum-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  padding: var(--sp3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+}
+.enc-addendum-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+.enc-addendum-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
+}
