@@ -170,9 +170,22 @@ recorded here because it was found here.
 
 Two halves, and the second is the one that must not be skipped.
 
-**The source is a union, not a table.** `ActiveMedicationDrugIds` is populated from **active Mersal
-prescriptions ∪ recorded `medication_history` rows with `Status = Active`**. Neither alone is the answer:
-prescriptions cannot know what a patient bought elsewhere, and history cannot stay current by itself.
+**The field moves, because it is fetched data in a request object — and that is why it is empty.**
+`ValidationRequest`'s own remarks record the lesson: diagnoses used to live there, that is exactly how step 2
+came to trust its client for its most important input, and the fix was to move them into
+`ValidationSnapshot` behind `Fetched<T>` — *"an invariant carried by the type system survives and one
+carried by review does not"*. `ActiveMedicationDrugIds` is fetched data still sitting in the request as a
+plain list, which is precisely why nothing fills it: it is not behind the fetch seam, so the ports never
+learned to fetch it and no type ever complained.
+
+So it becomes `Fetched<ActiveMedications>` on `ValidationSnapshot`, gathered by
+`IClinicalValidationPorts.FetchAsync` beside every other fetched fact. The empty list stops being
+representable: a source that fails is `Unavailable` with a reason, which the engine already knows how to
+report, and there is no longer a call site that can pass `[]` by omission.
+
+**The source is a union, not a table.** It is populated from **active Mersal prescriptions ∪ recorded
+`medication_history` rows with `Status = Active`**. Neither alone is the answer: prescriptions cannot know
+what a patient bought elsewhere, and history cannot stay current by itself.
 
 **The coverage is stated, or the state is not `Ok`.** This follows the rule doc 44 §8 already established
 for the interaction table itself — "coverage stated, not implied". Concretely:
