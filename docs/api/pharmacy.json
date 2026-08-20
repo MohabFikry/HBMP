@@ -735,6 +735,55 @@
         }
       }
     },
+    "/api/v1/prescriptions/{rxId}/lines/{lineId}/amend-schedule/preview": {
+      "post": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "rxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendChronicScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChronicAmendPreviewView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/prescriptions/{rxId}/lines/{lineId}/amend-schedule": {
       "post": {
         "tags": [
@@ -1145,6 +1194,40 @@
         "type": "object",
         "properties": {
           "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChronicAmendPreviewView": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "newTotal": {
+            "type": "number",
+            "format": "double"
+          },
+          "alreadyDispensed": {
+            "type": "number",
+            "format": "double"
+          },
+          "remainingWindows": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "missingField": {
             "type": "string",
             "nullable": true
           }
@@ -1785,6 +1868,19 @@
           "authorizationId": {
             "type": "string",
             "format": "uuid",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "refillFrequencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "durationDays": {
+            "type": "integer",
+            "format": "int32",
             "nullable": true
           }
         },

@@ -22,6 +22,14 @@ public sealed record AmendChronicScheduleRequest(
     /// <summary>The prescriber's EXPLICIT confirmation that shortening below the chronic definition converts
     /// the script to acute. Absent, that case is reported and nothing is written.</summary>
     bool ConvertToAcute = false);
+/// <summary>32.6 — the re-allocation a prescriber confirms, computed by the write path's own arithmetic.</summary>
+/// <param name="Outcome">Reallocated · BelowDispensed · NoLongerChronic · ConvertedToAcute · NotChecked.</param>
+/// <param name="RemainingWindows">Empty on any outcome but Reallocated/ConvertedToAcute — and legitimately
+/// empty when the remainder is genuinely zero, because a list of zeroes would read as allocations of nothing.</param>
+public sealed record ChronicAmendPreviewView(
+    string Outcome, decimal NewTotal, decimal AlreadyDispensed, decimal[] RemainingWindows,
+    string Unit, string? MissingField);
+
 public sealed record RxLineCancelReport(Guid PrescriptionLineId, string? DrugName, bool Cancelled, string? Refusal);
 
 /// <summary>
@@ -163,6 +171,29 @@ public static class RxAmendmentEndpoints
 
         // ---- Cancel every still-cancellable line, reporting partial success plainly --------------------
         // ---- Amend a chronic script's duration / frequency ---------------------------------------------
+        // ---- What the amendment would do, before it does it (32.6, design 46 §10) --------------------
+        v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/amend-schedule/preview", async Task<IResult> (
+            Guid rxId, Guid lineId, AmendChronicScheduleRequest req, HttpRequest http, PharmacyDbContext db,
+            PharmacyGate gate, ChronicAmendExecutor executor, CancellationToken ct) =>
+        {
+            // No Idempotency-Key: this writes nothing, so there is nothing to double-apply. Demanding one
+            // would make a read look like a mutation to every caller that has to supply it.
+            var rx = await db.Prescriptions.AsNoTracking().FirstOrDefaultAsync(p => p.PrescriptionId == rxId, ct);
+            if (rx is null) return NotFound();
+            if (await gate.CheckAsync(PharmacyPolicies.RxCreate, "prescription", rxId.ToString(),
+                    rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct) is { } denied)
+                return denied!;
+
+            var plan = await executor.PreviewScheduleAsync(
+                lineId, new ChronicAmendRequest(req.DurationDays, req.FrequencyMonths, req.ConvertToAcute), ct);
+            if (plan is null) return NotFound();
+
+            return Results.Ok(new ChronicAmendPreviewView(
+                plan.Outcome.ToString(), plan.NewTotal, plan.AlreadyDispensed,
+                [.. plan.RemainingWindows], plan.Unit.ToString(), plan.MissingField));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<ChronicAmendPreviewView>();
+
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/amend-schedule", async Task<IResult> (
             Guid rxId, Guid lineId, AmendChronicScheduleRequest req, HttpRequest http, PharmacyDbContext db,
             PharmacyGate gate, ChronicAmendExecutor executor, IAuditClient audit, IOutbox outbox,

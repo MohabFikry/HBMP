@@ -51,6 +51,7 @@ import type {
   AllergyRecord,
   MedicationHistoryRow,
   NoteAddendum,
+  ChronicAmendPreview,
   LineNote,
   LineNoteKind,
   NoteVisibility,
@@ -418,6 +419,21 @@ export interface ApiClient {
    * One method per verb rather than per order kind: labs, radiology, procedures and prescriptions share a
    * single panel, and a method per kind is how "cancel a note" acquires a second behaviour.
    */
+  /**
+   * 32.6 — what a chronic amendment would do (design 46 §4/§10), computed server-side by the same function
+   * the write path calls. The dialog has rendered this since 30.3 for a caller that did not exist.
+   */
+  previewChronicAmendment(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ): Promise<ChronicAmendPreview>;
+  amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ): Promise<void>;
+  /** Withdraw every still-cancellable line. Reports partial success, which is an answer and not an error. */
+  cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult>;
+
   lineNotes(kind: LineNoteKind, orderId: string, lineId: string): Promise<LineNote[]>;
   writeLineNote(
     kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,

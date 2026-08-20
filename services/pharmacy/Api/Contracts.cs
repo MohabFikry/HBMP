@@ -187,13 +187,27 @@ public sealed record PrescriptionResponse(
     /// passed their prescription when, for an ungated one, nobody had looked at it.</para>
     ///
     /// <para>Null therefore means auto-cleared, and clients label it as verified rather than approved.</para></summary>
-    Guid? AuthorizationId = null)
+    Guid? AuthorizationId = null,
+    /// <summary>
+    /// 32.6 — <c>Acute</c> or <c>Chronic</c>, and the refill cadence when chronic.
+    /// </summary>
+    /// <remarks>
+    /// The row has carried this since 29.5 and no response projected it, so no reader could tell the two
+    /// apart. That is not cosmetic: a chronic script is amended by DURATION and FREQUENCY (design 46 §4)
+    /// and an acute one by quantity, so a screen without this fact must either offer both controls on every
+    /// prescription — one of which is meaningless on any given row — or offer neither, which is what the
+    /// encounter did.
+    /// </remarks>
+    string? Kind = null,
+    string? RefillFrequencyCode = null,
+    int? DurationDays = null)
 {
     public static PrescriptionResponse From(Prescription p, IReadOnlyList<AlertView>? alerts = null) => new(
         p.PrescriptionId, p.RxNo, p.BeneficiaryId, p.EncounterId, p.PrescriberId, p.PrescriberName,
         p.Status.ToString(),
         PrescriptionWorkflow.IsDispensable(p.Status), p.SubmittedAt, p.ExpiresAt,
-        p.Lines.Select(RxLineResponse.From).ToList(), alerts ?? [], p.AuthorizationId);
+        p.Lines.Select(RxLineResponse.From).ToList(), alerts ?? [], p.AuthorizationId,
+        p.Kind, p.RefillFrequencyCode, p.DurationDays);
 }
 
 // ---- Phase 6 dispensing (min-necessary: drug/dose/route/frequency + remaining qty + patient id ONLY; never

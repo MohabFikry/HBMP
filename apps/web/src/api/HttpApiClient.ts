@@ -133,6 +133,7 @@ import {
   zMedicationHistoryRow,
   zNoteAddendum,
   zLineNote,
+  zChronicAmendPreview,
 } from "@mersal/contracts";
 import type { Localized, Period, ServiceAxis, LineNoteKind, NoteVisibility } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -1815,6 +1816,10 @@ export class HttpApiClient implements ApiClient {
         rxNo: p.rxNo,
         beneficiary: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
         lineCount: (p.lines ?? []).length,
+        // 32.6 — Acute vs Chronic, which decides which amendment control a row may offer at all.
+        kind: p.kind ?? null,
+        refillFrequencyCode: p.refillFrequencyCode ?? null,
+        durationDays: typeof p.durationDays === "number" ? p.durationDays : null,
         // The authorization decides whether this reads "Approved" or "Verified" — see `rxStatus`.
         status: rxStatus(p.status, p.authorizationId),
         submittedAt: p.submittedAt ?? undefined,
@@ -1948,6 +1953,70 @@ export class HttpApiClient implements ApiClient {
    * <p>A cancelled note still comes back. The screen strikes it through; dropping it would turn "withdrawn
    * by X because Z" into a gap.</p>
    */
+  /**
+   * 32.6 — what a chronic amendment would do, before it does it (design 46 §10).
+   *
+   * <p>Computed by the SERVER, by the same pure function the write path calls. Re-deriving largest-remainder
+   * here would fork the one piece of arithmetic `zChronicPreview` forbids forking — the copies drift, and
+   * the drift appears as a doctor shown a schedule the pharmacy never honours.</p>
+   */
+  async previewChronicAmendment(
+    rxId: string, lineId: string, req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ) {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/amend-schedule/preview`,
+      { durationDays: req.durationDays, frequencyMonths: req.frequencyMonths, convertToAcute: req.convertToAcute ?? false },
+    )) as any;
+    return parseOr(zChronicAmendPreview, {
+      outcome: r?.outcome,
+      newTotal: Number(r?.newTotal ?? 0),
+      alreadyDispensed: Number(r?.alreadyDispensed ?? 0),
+      remainingWindows: (r?.remainingWindows ?? []).map(Number),
+      unit: String(r?.unit ?? ""),
+      missingField: r?.missingField ?? null,
+    });
+  }
+
+  /** 32.6 — apply it. Idempotency-Key per user action, not per retry. */
+  async amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ) {
+    await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/amend-schedule`,
+      {
+        durationDays: req.durationDays, frequencyMonths: req.frequencyMonths,
+        reasonCode: req.reasonCode, reasonText: req.reasonText ?? null,
+        convertToAcute: req.convertToAcute ?? false,
+      },
+      crypto.randomUUID(),
+    );
+  }
+
+  /**
+   * 32.6 — withdraw every still-cancellable line of a prescription.
+   *
+   * <p>The medication twin of `withdrawOrder`, and it answers the same way: 200, 207 or 409 by how much
+   * succeeded, with a per-line refusal. All three are read identically, because "three of five withdrawn" is
+   * an answer the prescriber has to see rather than an error to swallow.</p>
+   */
+  async cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult> {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/cancel-lines`,
+      { reasonCode, reasonText },
+      crypto.randomUUID(),
+    )) as { cancelled?: number; lines?: { drugName?: string | null; cancelled: boolean; refusal?: string | null }[] };
+
+    const lines = (r.lines ?? []).map((l) => ({
+      label: l.drugName ?? "—",
+      withdrawn: l.cancelled,
+      refusal: l.refusal ?? null,
+    }));
+    // `total` is the count the prescriber ASKED about, not the count that succeeded — "3 of 5 withdrawn"
+    // needs both numbers, and deriving the denominator from the successes would always read "5 of 5".
+    return { withdrawn: r.cancelled ?? lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
+  }
+
   async lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
     const r = (await getRaw(`${lineNoteBase(kind, orderId)}/lines/${encodeURIComponent(lineId)}/notes`)) as any[];
     return (r ?? []).map((n) => parseOr(zLineNote, toLineNote(n, lineId)));

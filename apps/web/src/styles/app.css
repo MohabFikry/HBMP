@@ -6675,3 +6675,30 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   font-weight: 600;
   color: var(--text-1);
 }
+
+/* ── 32.6 Chronic schedule amendment ────────────────────────────────────────────────────────────────────
+   Duration and frequency side by side, because they are one question — how long, and how often collected —
+   and the recomputed schedule below them answers it. */
+.amend-chronic {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  margin-block: var(--sp3);
+}
+/* The conversion confirmation is a checkbox on its own line rather than a button, because it QUALIFIES the
+   amendment rather than being a second act: the prescriber is still amending, and this says what the
+   amendment additionally means for the patient's collection pattern. */
+.amend-convert {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  font-size: 0.875rem;
+}
+.enc-line-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

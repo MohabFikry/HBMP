@@ -103,6 +103,8 @@ import {
   zMedicationHistoryRow,
   zNoteAddendum,
   zLineNote,
+  zChronicAmendPreview,
+  zWithdrawResult,
   zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
@@ -1206,6 +1208,74 @@ export class DevApiClient implements ApiClient {
    */
   private readonly lineNoteStore = new Map<string, LineNote[]>();
 
+  /**
+   * 32.6 — the fixture re-allocation.
+   *
+   * <p>Mirrors the real arithmetic's SHAPE rather than approximating its numbers: a 90-day script at 3/day
+   * is 270 across three windows, so 60 days is 180 with 90 already collected. The three refusal outcomes
+   * are reachable from the same inputs the live path refuses on, because a dev path that can only succeed
+   * teaches a flow with no failure branch — which is how the dialog came to render a preview nobody had
+   * seen.</p>
+   */
+  previewChronicAmendment(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ) {
+    void rxId;
+    void lineId;
+    return this.gate(() => {
+      const perDay = 3;
+      const alreadyDispensed = 90;
+      const newTotal = req.durationDays * perDay;
+      if (newTotal < alreadyDispensed) {
+        return ok(zChronicAmendPreview, {
+          outcome: "BelowDispensed", newTotal, alreadyDispensed, remainingWindows: [],
+          unit: "PrescribingUnits", missingField: null,
+        });
+      }
+      if (req.durationDays <= 30) {
+        return ok(zChronicAmendPreview, {
+          outcome: req.convertToAcute ? "ConvertedToAcute" : "NoLongerChronic",
+          newTotal, alreadyDispensed,
+          remainingWindows: req.convertToAcute ? [newTotal - alreadyDispensed] : [],
+          unit: "PrescribingUnits", missingField: null,
+        });
+      }
+      const remaining = newTotal - alreadyDispensed;
+      const windows = Math.max(1, Math.round(req.durationDays / (30 * req.frequencyMonths)) - 1);
+      const base = Math.floor(remaining / windows);
+      const split = Array.from({ length: windows }, (_, i) =>
+        i === 0 ? remaining - base * (windows - 1) : base);
+      return ok(zChronicAmendPreview, {
+        outcome: "Reallocated", newTotal, alreadyDispensed, remainingWindows: split,
+        unit: "PrescribingUnits", missingField: null,
+      });
+    });
+  }
+
+  async amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ) {
+    void rxId; void lineId; void req;
+    await this.gate(() => undefined);
+  }
+
+  cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string) {
+    void rxId; void reasonCode; void reasonText;
+    return this.gate(() => ok(zWithdrawResult, {
+      withdrawn: 2,
+      total: 3,
+      lines: [
+        { label: "Amoxicillin 500mg", withdrawn: true, refusal: null },
+        { label: "Paracetamol 500mg", withdrawn: true, refusal: null },
+        // Partial success is the interesting case and the fixture shows it: a dispensed line cannot be
+        // withdrawn, and "2 of 3" is the answer the prescriber has to read.
+        { label: "Amlodipine 5mg", withdrawn: false, refusal: "Already dispensed" },
+      ],
+    }));
+  }
+
   lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
     void orderId;
     return this.gate(() => {
@@ -1535,6 +1605,9 @@ export class DevApiClient implements ApiClient {
           {
             id: "rx-1", rxNo: "RX-2026-000202", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000231", token: "•••4821" },
             lineCount: 2, status: { kind: "ok", label: loc("Approved", "معتمدة") },
+            // 32.6 — one chronic row in the fixture, so the schedule control has somewhere to appear. With
+            // every fixture row acute, the amend-schedule path would still be unreachable in the demo.
+            kind: "Chronic", refillFrequencyCode: "Monthly", durationDays: 90,
             submittedAt: "2026-07-22T08:15:00Z", expiresAt: "2026-08-21T08:15:00Z",
             encounterId: "ENC-2026-000231",
             prescriber: loc("Dr Karim Abdel-Latif", "د. كريم عبد اللطيف"),
@@ -1557,6 +1630,7 @@ export class DevApiClient implements ApiClient {
           {
             id: "rx-2", rxNo: "RX-2026-000198", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000555", token: "•••2093" },
             lineCount: 1, status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") },
+            kind: "Acute", refillFrequencyCode: null, durationDays: 7,
             submittedAt: "2026-07-21T10:00:00Z", prescriber: null, encounterId: "ENC-2026-000231",
             lines: [
               {

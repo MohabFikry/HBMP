@@ -43,6 +43,7 @@ import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile, useWhe
 import { draftKeys, useUnsentDrafts } from "./draftStore";
 import { ServiceHistoryModal } from "./ServiceHistoryModal";   // 29.4 — one modal, every tab
 import { LineNotesPanel } from "./notes/LineNotesPanel";      // 32.5 — one panel, every order kind
+import { AmendLineDialog } from "./AmendLineDialog";          // 32.6 — the chronic schedule amendment
 import { TransactionActionsDialog } from "./TransactionActionsDialog";   // 30.6 — amend/withdraw from the row
 import type { TransactionAction } from "./TransactionActionsDialog";
 import type { AmendReasonOption } from "./AmendLineDialog";
@@ -204,6 +205,8 @@ const S = {
   },
   addAddendum: { en: "Add addendum", ar: "إضافة ملحق" },
   lineNotes: { en: "Notes", ar: "الملاحظات" },
+  amendSchedule: { en: "Amend schedule", ar: "تعديل الجدول" },
+  withdrawAllLines: { en: "Withdraw all items", ar: "سحب كل البنود" },
   lineNotesFor: { en: "Notes on {ref}", ar: "ملاحظات على {ref}" },
   lineNotesIntro: {
     en: "Operational instructions that travel with the order. The provider filling it reads these.",
@@ -1548,6 +1551,7 @@ function PrescriptionsTab({
   // 30.6 — which transaction is being amended or withdrawn, from the ROW. One at a time.
   const [acting, setActing] = useState<{ rx: RxRow; action: TransactionAction } | null>(null);
   const [noting, setNoting] = useState<LineNotesTarget | null>(null);
+  const [scheduling, setScheduling] = useState<{ rx: RxRow; line: RxRow["lines"][number] | null } | null>(null);
   /** 31.4 — a prescription the doctor asked to copy. Consumed by the composer, then cleared. */
   const [cloning, setCloning] = useState<PrescriptionClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
@@ -1660,6 +1664,19 @@ function PrescriptionsTab({
           >
             <Icon name="pen" />
           </Button>
+          {/* 32.6 — CHRONIC ONLY. An acute script has no refill schedule to amend, and offering the control
+              on one would open a dialog whose every field is meaningless. The quantity path beside it is
+              what an acute line uses. */}
+          {r.kind === "Chronic" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`${t(S.amendSchedule)} — ${r.rxNo}`}
+              onClick={() => setScheduling({ rx: r, line: null })}
+            >
+              <Icon name="clock" />
+            </Button>
+          )}
           <Button
             // DANGER, and frameless because it is a glyph — see `.mrs-btn.mrs-danger:has(> svg:only-child)`.
             // It is the only red in the row; a column of outlined red boxes would read as an alarm about
@@ -1769,6 +1786,52 @@ function PrescriptionsTab({
         />
       )}
       {noting && <LineNotesModal target={noting} onClose={() => setNoting(null)} />}
+
+      {/* 32.6 — the chronic schedule amendment. A line step first, because duration and frequency belong to
+          a LINE: a script with an antihypertensive and a statin can have one shortened without the other,
+          and acting on "the prescription" would have had to pick one silently. */}
+      {scheduling && scheduling.line === null && (
+        <Modal
+          open
+          onOpenChange={(o) => { if (!o) setScheduling(null); }}
+          title={`${t(S.amendSchedule)} — ${scheduling.rx.rxNo}`}
+        >
+          <ul className="enc-line-pick">
+            {scheduling.rx.lines.map((l) => (
+              <li key={l.id}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setScheduling({ rx: scheduling.rx, line: l })}
+                >
+                  {l.drug ? t(l.drug) : t(S.rxDrugMissing)}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+
+      {scheduling?.line && (
+        <AmendLineDialog
+          open
+          action="amend-schedule"
+          lineLabel={scheduling.line.drug ? t(scheduling.line.drug) : t(S.rxDrugMissing)}
+          currentDurationDays={scheduling.rx.durationDays ?? undefined}
+          currentFrequencyMonths={scheduling.rx.refillFrequencyCode === "Quarterly" ? 3 : 1}
+          reasons={reasons}
+          onPreview={(req) => api.previewChronicAmendment(scheduling.rx.id, scheduling.line!.id, req)}
+          onCancel={() => setScheduling(null)}
+          onConfirm={async ({ reasonCode, reasonText, durationDays, frequencyMonths, convertToAcute }) => {
+            await api.amendChronicSchedule(scheduling.rx.id, scheduling.line!.id, {
+              durationDays: durationDays!, frequencyMonths: frequencyMonths!,
+              reasonCode, reasonText, convertToAcute,
+            });
+            setScheduling(null);
+            rx.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
