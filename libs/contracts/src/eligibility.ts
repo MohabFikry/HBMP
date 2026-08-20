@@ -27,15 +27,39 @@ export type BeneficiaryIdentity = z.infer<typeof zBeneficiaryIdentity>;
 export const zCoverage = z.object({
   planName: zLocalized,
   band: zLocalized,
-  // validUntil + copayPercent are optional: the reception card summarises active benefit categories + remaining
-  // limits, and does not always carry a policy end-date or copay schedule. Screens render them only when present.
+  // validUntil is optional: the reception card summarises active benefit categories + remaining limits, and
+  // does not always carry a policy end-date. Screens render it only when present.
   validUntil: zDate.optional(),
-  /** Beneficiary copay as a percentage (0–100). */
-  copayPercent: z.number().min(0).max(100).optional(),
   // 18.D2 (U7): raw number; formatted as EGP in the active locale at render.
   annualCapRemaining: z.number().optional(),
 });
 export type Coverage = z.infer<typeof zCoverage>;
+
+/**
+ * 32.6 — what the member pays, or why nobody can say.
+ *
+ * <p>A discriminated union rather than an optional number, for the reason this codebase keeps rediscovering:
+ * an absent copay and a copay of zero look identical in a nullable field and mean opposite things at a desk
+ * with a beneficiary in front of it. `known: false` carries the sentence to show instead — "no category was
+ * named", "the tier could not be resolved", "the plan's cost share could not be read" — and the screen has
+ * nowhere to put a blank.</p>
+ *
+ * <p>The reasons are `Localized` because they are UI text. The service sends English prose; it is mapped to
+ * a typed pair here rather than passed through, per ADR-0042 — an Arabic-reading receptionist must not be
+ * shown an English sentence about money.</p>
+ */
+export const zCostShare = z.discriminatedUnion("known", [
+  z.object({
+    known: z.literal(true),
+    /** The network tier the quote was resolved at — "why this number" for the person reading it out. */
+    tierCode: z.string().nullable(),
+    copayPercent: z.number().min(0).max(100).nullable(),
+    copayFixed: z.number().nullable(),
+    coinsurancePercent: z.number().min(0).max(100).nullable(),
+  }),
+  z.object({ known: z.literal(false), why: zLocalized }),
+]);
+export type CostShare = z.infer<typeof zCostShare>;
 
 /** Visit-gating outcome (Phase 2.3): may the beneficiary be admitted to a visit today, and if not, why. */
 export const zVisitGate = z.object({
@@ -46,9 +70,24 @@ export type VisitGate = z.infer<typeof zVisitGate>;
 
 export const zEligibilityResult = z.object({
   verdict: z.enum(["eligible", "ineligible", "review"]),
+  /**
+   * 32.6 — WHAT the verdict is about.
+   *
+   * <p>`membership` means the desk asked without naming a benefit category: the person is an active member
+   * in good standing, and nothing here says whether any particular service is covered. `benefit` means a
+   * category was named and the verdict is about cover for it.</p>
+   *
+   * <p>Not optional, and not inferable from the other fields. The two answers render the same word —
+   * "Eligible" — and a screen that cannot tell them apart will eventually tell a beneficiary they are
+   * covered for care nobody checked.</p>
+   */
+  scope: z.enum(["benefit", "membership"]),
+  /** The category the verdict is about. Null at membership scope. */
+  benefitCategory: z.string().nullable(),
   status: zStatus,
   beneficiary: zBeneficiaryIdentity,
   coverage: zCoverage.nullable(),
+  costShare: zCostShare,
   visitGate: zVisitGate,
 });
 export type EligibilityResult = z.infer<typeof zEligibilityResult>;

@@ -711,10 +711,21 @@ export class DevApiClient implements ApiClient {
       all.filter((h) => h.name.en.toLowerCase().includes(q) || h.id.toLowerCase().includes(q) || q.length >= 2),
     );
   }
-  checkEligibility(beneficiaryId: string) {
+  /**
+   * 32.6 — the two scopes, both present in the fixture.
+   *
+   * <p>A fixture that always quoted a copay is part of why the real client's missing one went unnoticed for
+   * so long: the dev portal showed "10%" on a code path that could not produce a number against the service.
+   * So the no-category case here returns an explicitly UNKNOWN cost share carrying its reason, and only the
+   * category case quotes.</p>
+   */
+  checkEligibility(beneficiaryId: string, benefitCategory?: string) {
+    const category = benefitCategory?.trim() || undefined;
     return this.gate(() =>
       ok(zEligibilityResult, {
         verdict: "eligible",
+        scope: category ? "benefit" : "membership",
+        benefitCategory: category ?? null,
         status: { kind: "ok", label: loc("Eligible", "مؤهل") },
         beneficiary: {
           id: beneficiaryId,
@@ -727,9 +738,18 @@ export class DevApiClient implements ApiClient {
           planName: loc("Mersal Essential", "مرسال الأساسية"),
           band: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
           validUntil: "2026-12-31",
-          copayPercent: 10,
           annualCapRemaining: 8400,
         },
+        costShare: category
+          ? { known: true, tierCode: "IN", copayPercent: 10, copayFixed: null, coinsurancePercent: null }
+          : {
+              known: false,
+              why: loc(
+                "No benefit category was chosen, so no copay can be quoted. This is not a report that the "
+                  + "member pays nothing.",
+                "لم تُختَر فئة منفعة، لذا لا يمكن تحديد المساهمة. وهذا ليس تأكيداً بأن المستفيد لا يدفع شيئاً.",
+              ),
+            },
         visitGate: { allowed: true },
       }),
     );

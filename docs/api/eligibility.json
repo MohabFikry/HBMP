@@ -309,6 +309,10 @@
           },
           "costShare": {
             "$ref": "#/components/schemas/CostSharePreviewResponse"
+          },
+          "decisionScope": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

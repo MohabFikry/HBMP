@@ -323,13 +323,81 @@ const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? 
 /** Map the reception card's accessible status tone to the design-system StatusKind. */
 const toneToKind = (tone: unknown): "ok" | "warn" | "bad" | "neu" | "info" =>
   ({ positive: "ok", caution: "warn", critical: "bad", neutral: "neu" })[String(tone ?? "neutral")] as any ?? "neu";
-/** Map member coverage status → the eligibility verdict the result card renders. */
-const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" => {
-  const s = String(status ?? "").toLowerCase();
-  if (s === "active") return "eligible";
-  if (s === "blocked" || s === "expired") return "ineligible";
+/**
+ * 32.6 — the SERVICE's decision → the verdict the result card renders.
+ *
+ * <p>`NeedsAuthorization` is "review", not "ineligible": the engine's own words are that it is "a soft No
+ * that routes to the approval team, not a denial". An unrecognised value also lands on "review" rather than
+ * "eligible" — a decision this client cannot read is not permission to proceed.</p>
+ */
+const decisionToVerdict = (decision: unknown): "eligible" | "ineligible" | "review" => {
+  const d = String(decision ?? "").toLowerCase();
+  if (d === "eligible") return "eligible";
+  if (d === "ineligible") return "ineligible";
   return "review";
 };
+
+/**
+ * 32.6 — the service's cost-share preview → the typed union the screen renders.
+ *
+ * <p>The service's `reason` is English prose. It is NOT passed through: an Arabic-reading receptionist must
+ * not be shown an English sentence about what a beneficiary owes (ADR-0042). The three cases it can report
+ * are mapped to typed pairs here, and an unrecognised one falls to a sentence that says the share is unknown
+ * rather than to a number.</p>
+ */
+const toCostShare = (preview: any, category: string | undefined): any => {
+  if (!category) {
+    return {
+      known: false,
+      why: {
+        en: "No benefit category was chosen, so no copay can be quoted. This is not a report that the "
+          + "member pays nothing.",
+        ar: "لم تُختَر فئة منفعة، لذا لا يمكن تحديد المساهمة. وهذا ليس تأكيداً بأن المستفيد لا يدفع شيئاً.",
+      },
+    };
+  }
+  if (preview?.determinate === true) {
+    return {
+      known: true,
+      tierCode: preview.tierCode ?? null,
+      copayPercent: preview.copayPercent ?? null,
+      copayFixed: preview.copayFixed ?? null,
+      coinsurancePercent: preview.coinsurancePercent ?? null,
+    };
+  }
+  const reason = String(preview?.reason ?? "");
+  if (/tier could be resolved/i.test(reason)) {
+    return {
+      known: false,
+      why: {
+        en: "No network tier could be resolved for this provider on this date, so the member's share is unknown.",
+        ar: "تعذّر تحديد شريحة الشبكة لهذا المقدّم في هذا التاريخ، لذا فإن حصة المستفيد غير معروفة.",
+      },
+    };
+  }
+  if (/could not be read/i.test(reason)) {
+    return {
+      known: false,
+      why: {
+        en: "The plan's cost share could not be read, so the member's share is unknown. This is not a "
+          + "report that the service is free.",
+        ar: "تعذّرت قراءة المساهمة في الخطة، لذا فإن حصة المستفيد غير معروفة. وهذا ليس تأكيداً بأن الخدمة مجانية.",
+      },
+    };
+  }
+  return {
+    known: false,
+    why: {
+      en: "This plan does not price this benefit category, so no copay can be quoted.",
+      ar: "لا تُسعّر هذه الخطة فئة المنفعة هذه، لذا لا يمكن تحديد المساهمة.",
+    },
+  };
+};
+
+// 32.6 — `statusToVerdict` lived here and is gone. It mapped a cached member-status STRING to an eligibility
+// verdict in the browser, which is how the reception desk came to answer a question it had never asked
+// eligibility-service. Deleted rather than left unused: the next screen that needed a verdict in a hurry
+// would have found it.
 /** Map a beneficiary status (Pending/Active/Suspended/Expired/Blocked/Inactive) → a non-color StatusKind chip. */
 const beneficiaryStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
   const k = String(s ?? "Pending");
@@ -808,16 +876,50 @@ export class HttpApiClient implements ApiClient {
       });
     });
   }
-  async checkEligibility(beneficiaryId: string) {
+  /**
+   * 32.6 — THE eligibility check, asked of eligibility-service.
+   *
+   * <p>This method used to make no network call at all. It read the reception search cache, compared
+   * `identity.status` to the string "active", and returned that as the verdict. So none of the properties
+   * eligibility-service exists to apply reached the desk: not the network tier, not the plan version in force
+   * on the service date, not the waiting period, not the remaining limits, and not the audit event — the
+   * question "who checked this beneficiary's eligibility, and what were they told?" had no answer on the
+   * chain, because as far as the platform was concerned nobody had checked anything. The screen promised a
+   * copay in its own idle text and there was no code path that could ever produce one.</p>
+   *
+   * <p><b>Two questions, each asked of the service that owns it.</b> The membership check (no category) gives
+   * the visit gate: may this person be admitted today. The benefit check (with a category) gives cover and
+   * cost share for the care they came for. They are separate because a `NeedsAuthorization` verdict on a
+   * benefit is a soft No that routes to approvals — it does not turn the person away at the door, and
+   * collapsing the two would do exactly that.</p>
+   *
+   * <p>The identity block still comes from the reception card, which is the min-necessary projection the desk
+   * is entitled to. That was never the defect; deciding eligibility from it was.</p>
+   */
+  async checkEligibility(beneficiaryId: string, benefitCategory?: string) {
     const c = receptionCards.get(String(beneficiaryId));
     const identity = c?.identity ?? {};
     const categories: string[] = c?.coverage ?? [];
     const limits: any[] = c?.remainingLimits ?? [];
     // Pick a monetary remaining-limit (annual cap) for the coverage summary, if the card carries one.
     const cap = limits.find((l) => /amount|annual/i.test(String(l.limitType)));
-    const active = String(identity.status ?? "").toLowerCase() === "active";
+
+    const membership = (await postRaw(`/eligibility/check`, { beneficiaryId })) as any;
+    const category = benefitCategory?.trim() || undefined;
+    const benefit = category
+      ? ((await postRaw(`/eligibility/check`, { beneficiaryId, benefitCategory: category })) as any)
+      : null;
+
+    // The verdict on screen is the one about the question that was actually asked.
+    const answering = benefit ?? membership;
+    const decision = String(answering?.decision ?? "");
+
     return parseOr(zEligibilityResult, {
-      verdict: statusToVerdict(identity.status),
+      verdict: decisionToVerdict(decision),
+      // From the SERVER's own label, not from whether a category happened to be passed here: a response
+      // whose scope disagrees with what we asked for is a contract breach we want to see, not paper over.
+      scope: String(membership?.decisionScope ?? "") === "Membership" && !benefit ? "membership" : "benefit",
+      benefitCategory: category ?? null,
       status: { kind: toneToKind(identity.statusSemantics?.tone), label: neutral(identity.statusSemantics?.label ?? identity.status) },
       beneficiary: {
         id: identity.beneficiaryId ?? beneficiaryId,
@@ -831,9 +933,15 @@ export class HttpApiClient implements ApiClient {
             annualCapRemaining: cap ? money(cap.remaining, "coverage.annualCapRemaining") : undefined,
           }
         : null,
-      visitGate: active
+      costShare: toCostShare(benefit?.costShare, category),
+      // THE MEMBERSHIP answer, always. Whether the person may be seen today is a question about their
+      // standing, and a benefit that needs authorisation is not a closed door.
+      visitGate: String(membership?.decision ?? "") === "Eligible"
         ? { allowed: true }
-        : { allowed: false, reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." } },
+        : {
+            allowed: false,
+            reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." },
+          },
     });
   }
 

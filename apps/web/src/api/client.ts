@@ -233,7 +233,15 @@ export interface ApiClient {
   branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
-  checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
+  /**
+   * 32.6 — ask eligibility-service, optionally about a named benefit category.
+   *
+   * <p>Without a category the answer is about MEMBERSHIP: may this person be seen today. With one it is also
+   * about cover and cost share for that category. Both are decided, and audited, by the service that owns
+   * the rules — this used to be computed in the browser from a cached member status, so no tier, plan
+   * version, waiting period or audit event reached the desk at all.</p>
+   */
+  checkEligibility(beneficiaryId: string, benefitCategory?: string): Promise<EligibilityResult>;
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
   // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
