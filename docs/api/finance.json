@@ -359,6 +359,10 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "dimension": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -506,6 +510,14 @@
             "items": {
               "$ref": "#/components/schemas/SettlementLineView"
             },
+            "nullable": true
+          },
+          "submittedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "approvedBy": {
+            "type": "string",
             "nullable": true
           }
         },

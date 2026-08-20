@@ -29,6 +29,17 @@ public class TenantOnEnvelopeArchitectureTests
         // mirror is its FIRST tenant-binding consumer: nothing read it before, so nothing had ever noticed
         // that its publishers omitted the tenant.
         ("approvals.events", "emr-service CareEpisodeConsumer (via the CareFeed mirror)"),
+
+        // The reporting read model. `ProjectionConsumer` mirrors these streams onto its own queue and binds
+        // RLS from the envelope, dead-lettering anything it cannot attribute — so these are tenant-bound
+        // queues too, and were never listed here.
+        //
+        // WHAT THAT COST. All four of emr's publishers on `ProjectionFeed` — ApptBooked, ApptCheckedIn,
+        // ApptNoShow, EncounterStarted — omitted the tenant, so every one of them was nacked on arrival. The
+        // Clinic Workload report and the no-show rate had no facts at all, and a clinic with no visits looks
+        // exactly like a clinic whose visits were dropped. Nothing failed; the dashboards rendered zero.
+        ("emr.events", "reporting-service ProjectionConsumer (via the ProjectionFeed mirror)"),
+        ("claims.events", "reporting-service ProjectionConsumer (via the ProjectionFeed mirror)"),
     ];
 
     [Fact]
@@ -62,14 +73,45 @@ public class TenantOnEnvelopeArchitectureTests
     [Fact]
     public void The_scan_actually_finds_the_publish_sites_it_claims_to_check()
     {
-        // Guards the guard: a regex that silently matches nothing would make the test above vacuously green.
-        var found = SourceFiles()
-            .Sum(f => TenantBoundQueues.Sum(q => PublishSites(File.ReadAllText(f), q.Queue).Count));
-        found.Should().BeGreaterThan(5, "the platform has many publishers on these four queues");
+        // Guards the guard: a scanner that silently matches nothing would make the test above vacuously green.
+        // PER QUEUE, not in total — a summed count stays comfortably above a threshold while one queue's
+        // publishers have all become invisible, which is the failure that actually happens.
+        foreach (var (queue, consumer) in TenantBoundQueues)
+        {
+            var found = SourceFiles().Sum(f => PublishSites(File.ReadAllText(f), queue).Count);
+            found.Should().BeGreaterThan(0,
+                "nothing was found publishing to {0}, so the check for {1} is asserting nothing — either the "
+                + "queue name changed or the scanner can no longer read its call sites", queue, consumer);
+        }
     }
 
-    private static MatchCollection PublishSites(string source, string queue) =>
-        Regex.Matches(source, $@"EnqueueAsync\(\s*""[^""]+""\s*,\s*""{Regex.Escape(queue)}""\s*,");
+    /// <summary>
+    /// Every <c>EnqueueAsync</c> call site publishing to <paramref name="queue"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Anchored on the QUEUE argument and then walked backwards to the call, rather than matched
+    /// forwards from <c>EnqueueAsync(</c> across the event-type argument. The forward pattern required that
+    /// argument to be a bare string literal, and one publisher builds it with a ternary —
+    /// <c>req.Decision == AuthDecision.Approved ? "AuthApproved" : "AuthPartiallyApproved"</c> — so
+    /// approvals-service's break-glass path was invisible to this scan for as long as it has existed, while
+    /// `approvals.events` sat in the register above looking checked. It published no tenant, and every
+    /// manual and emergency approval was dead-lettered by two consumers.</para>
+    /// <para>A statement boundary (<c>;</c>) between the queue name and the call stops a string that merely
+    /// mentions the queue — a log message, a configuration default — from being read as a publish.</para>
+    /// </remarks>
+    private static IReadOnlyList<Match> PublishSites(string source, string queue)
+    {
+        var sites = new List<Match>();
+        foreach (Match at in Regex.Matches(source, $@"""{Regex.Escape(queue)}""\s*,"))
+        {
+            var window = source[Math.Max(0, at.Index - 400)..at.Index];
+            var call = window.LastIndexOf("EnqueueAsync(", StringComparison.Ordinal);
+            if (call < 0) continue;
+            if (window[call..].Contains(';', StringComparison.Ordinal)) continue;
+            sites.Add(at);
+        }
+        return sites;
+    }
 
     /// <summary>The anonymous-object payload that follows the queue argument, read to its balanced close so a
     /// nested <c>new { … }</c> (limits, identifiers) is included rather than truncating the search early.</summary>

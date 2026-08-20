@@ -2320,3 +2320,74 @@ invariants:
       - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.They_survive_an_amendment_onto_the_new_version
       - apps/web/test/encounter-transaction-actions.test.tsx::carries the dose, the frequency and the duration into the copy
 
+
+  - id: INV-THE-HTTP-ADAPTER-IS-EXECUTED-AGAINST-ITS-OWN-CONTRACTS
+    statement: >-
+      Every mapping in HttpApiClient is run against the real contract schemas in a test. A fixture client
+      proves the screens; it proves nothing about the client the user gets.
+    source: 49-finance-and-the-counter.md §1 (invariant 35)
+    severity: Critical
+    # This is the registry entry whose ABSENCE was the defect. HttpApiClient maps every service payload into
+    # the shared contracts and validates with `parseOr`, which throws — and nothing in the repository ever ran
+    # it, because every screen test constructs DevApiClient and this class only does anything when there is a
+    # gateway on the other end. Four call sites wrote the literal string "ok" into a `status` field whose
+    # schema is `{ kind, label }`, so settlements, exports, coordination tasks and escalations threw on EVERY
+    # call, for every user, while CI stayed green. Untested code is code that does not work.
+    tests:
+      - apps/web/test/http-client-contract.test.ts::parses a settlement list, which it could not do at all before
+      - apps/web/test/http-client-contract.test.ts::gives each settlement state its own chip instead of one green 'ok' for all four
+      - apps/web/test/http-client-contract.test.ts::parses coordination tasks, which threw on every call
+      - apps/web/test/http-client-contract.test.ts::parses escalations, and renders one as attention rather than as success
+
+  - id: INV-AN-EXPORT-PRODUCES-THE-REPORT-IT-NAMES
+    statement: >-
+      A report selector selects, a format that is not produced is refused rather than substituted, and the
+      export delivers a file. The audit record names the action that actually happened.
+    source: 49-finance-and-the-counter.md §2 (invariants 36–39)
+    severity: Critical
+    # The handler ran the utilization query whatever report was asked for, and used `report` only to name the
+    # file and the high-severity data.export audit event — so asking for settlements wrote an audit record
+    # asserting an export nobody performed. That is worse than no record, because the record is the thing an
+    # auditor trusts. The format control offered XLSX against a handler that has only ever emitted CSV, and
+    # stored the CLAIMED format in the export ledger. And the button produced no file at all.
+    tests:
+      - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.Each_report_produces_its_own_columns_rather_than_utilization_under_three_names
+      - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.An_unknown_report_is_refused_rather_than_falling_back
+      - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.A_format_this_endpoint_does_not_produce_is_refused
+      - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.The_row_count_is_on_a_header_and_matches_the_file_and_the_ledger
+      - apps/web/test/http-client-contract.test.ts::returns the exported FILE's receipt, reading the row count off the header
+
+  - id: INV-A-REPORTED-SHORTAGE-IS-RECORDED-AND-NOTIFIES-ONCE
+    statement: >-
+      A flag a screen can raise is stored, survives a reload, and notifies once however many times it is
+      raised. Reporting one consumes nothing; dispensing against the line ends it.
+    source: 49-finance-and-the-counter.md §5 (invariants 43–44)
+    severity: High
+    # The out-of-stock endpoint has been complete since phase 6.3 — it notifies the prescriber on a route that
+    # escalates to the pharmacy supervisor after eight hours — and nothing in the SPA called it, while the
+    # `outOfStock` flag the contract declares existed only as a literal `false` in the HTTP client and a
+    # literal `true` in one dev fixture. Notifying twice matters as much as storing at all: two pharmacists
+    # reporting one empty shelf would put two escalating notifications in front of one prescriber, and a
+    # control whose cost grows with how often the counter is short is one the counter learns not to use.
+    tests:
+      - Mersal.Pharmacy.Tests.OutOfStockIsRecordedTests.A_reported_shortage_is_stored_and_reported_back_on_the_view
+      - Mersal.Pharmacy.Tests.OutOfStockIsRecordedTests.Reporting_the_same_line_twice_notifies_the_prescriber_once
+      - Mersal.Pharmacy.Tests.OutOfStockIsRecordedTests.Reporting_a_shortage_consumes_nothing
+      - Mersal.Pharmacy.Tests.OutOfStockIsRecordedTests.A_dispense_clears_the_shortage
+      - apps/web/test/prescription-page.test.tsx::offers the control the counter did not have
+
+  - id: INV-SEGREGATION-OF-DUTIES-IS-VISIBLE-BEFORE-THE-CLICK
+    statement: >-
+      Where segregation of duties will refuse, the screen says so first and withholds the control. The
+      refusal stays; the ordinary path does not run through it.
+    source: 49-finance-and-the-counter.md §3.1 (invariant 40)
+    severity: High
+    # The service compares the submitter against the approving principal and answers 409
+    # urn:hbmp:sod-violation. SettlementView carried neither SubmittedBy nor ApprovedBy, so a screen offering
+    # Approve offered it to the submitter too and answered the click with a refusal — a control working
+    # correctly and reading as a defect in the software. The 409 is not removed: the client is not the
+    # authority on who may release a payment, it is merely no longer the only place the rule becomes visible.
+    tests:
+      - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.A_submitted_settlement_names_its_submitter
+      - Mersal.Finance.Tests.FinanceEndpointTests.A_settlement_cannot_be_approved_by_the_person_who_submitted_it
+      - apps/web/test/finance-and-counter.test.tsx::withholds Approve from the person who submitted, and says why

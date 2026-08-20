@@ -35,6 +35,12 @@ const S = {
   confirm: { en: "Confirm", ar: "تأكيد" },
   cancel: { en: "Cancel", ar: "إلغاء" },
   approved: { en: "Emergency approved.", ar: "تم الاعتماد الطارئ." },
+  emgOnlySubmitted: {
+    en: "Only a request still awaiting a decision can be emergency-approved. This list asks the server for "
+      + "exactly those.",
+    ar: "لا يمكن الاعتماد الطارئ إلا لطلب ما زال بانتظار القرار. تطلب هذه القائمة من الخادم هذه الطلبات فقط.",
+  },
+  emgFailed: { en: "Could not emergency-approve this request.", ar: "تعذّر الاعتماد الطارئ لهذا الطلب." },
 } satisfies Record<string, Localized>;
 
 // 18.D2 (U7): grouped digits follow the app locale (Arabic-Indic in ar-EG), not the browser's.
@@ -132,20 +138,36 @@ export function ApprovalsManual() {
 export function ApprovalsEmergency() {
   const api = useApi();
   const t = useLoc();
-  const state = useAsync<ApprovalItem[]>(() => api.approvalWorklist(), []);
+  /*
+    `status=Submitted`, which is the only state `emergency-approve` is legal from.
+
+    This screen used to load the unfiltered review queue, so Approved and Rejected authorizations appeared here
+    with an "Emergency approve" button beside them. Pressing it returned a 409 the screen never surfaced: the
+    row simply did not change, which reads as the application being broken rather than as the action being
+    illegal. A screen whose only action works from one state lists that state.
+  */
+  const state = useAsync<ApprovalItem[]>(
+    async () => (await api.approvalWorklist("Review", { status: "Submitted" })).rows,
+    [],
+  );
   const [active, setActive] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
 
   async function confirm(id: string) {
     if (reason.trim() === "") return;
     setBusy(true);
+    setFailed(null);
     try {
       await api.emergencyApprove(id, reason.trim());
       setDone((prev) => new Set(prev).add(id));
       setActive(null);
       setReason("");
+    } catch {
+      // Said out loud. A refusal that changes nothing on screen is indistinguishable from a dead button.
+      setFailed(id);
     } finally {
       setBusy(false);
     }
@@ -169,6 +191,7 @@ export function ApprovalsEmergency() {
               leadingIcon={<Icon name="check2" />} size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
               <Button variant="ghost" size="sm" onClick={() => { setActive(null); setReason(""); }}>{t(S.cancel)}</Button>
             </div>
+            {failed === r.id && <InlineAlert tone="bad">{t(S.emgFailed)}</InlineAlert>}
           </div>
         ) : (
           <Button variant="secondary" size="sm" onClick={() => setActive(r.id)}>{t(S.emgApprove)}</Button>
@@ -178,7 +201,8 @@ export function ApprovalsEmergency() {
   return (
     <>
       <PageHeader title={t(S.emgTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
+      <InlineAlert tone="info">{t(S.emgOnlySubmitted)}</InlineAlert>
+      <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.emgEmpty}>
           {(rows) => (
             <div aria-live="polite">

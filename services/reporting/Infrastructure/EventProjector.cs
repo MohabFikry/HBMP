@@ -98,7 +98,22 @@ public sealed class EventProjector(
                 AddCode(ev, period, CodeKind.Diagnosis, Field(ev, "icd"));
                 return true;
 
-            case "ServiceValued":
+            /*
+             * The cost of one settled service line — what `financial-summary` and the executive dashboard's
+             * financial widget are made of.
+             *
+             * THIS CASE USED TO BE `ServiceValued`, AND NOTHING PUBLISHED IT. It sat in
+             * ProjectionFeedTests.KnownUnfed since phase 8.2 with an accurate reason: finance publishes
+             * `SettlementApproved`, which is a provider's settlement total, and reporting a settlement as a
+             * service valuation would be the wrong grain. That reasoning never stopped being true — what
+             * changed is that claims-service began publishing the terminal decision, and a claim LINE at the
+             * moment it settles is exactly "this service line was worth this much".
+             *
+             * So the gap did not close because the objection was wrong. It closed because a different event
+             * turned out to be the right grain, which is why the KnownUnfed entry is deleted rather than
+             * merely relaxed.
+             */
+            case "ClaimLineSettled":
                 AddFinancial(ev, period);
                 return true;
 
@@ -128,10 +143,20 @@ public sealed class EventProjector(
             {
                 AuthorizationId = id, TenantId = ev.TenantId, Priority = Field(ev, "priority", "Routine"),
                 Status = status, SubmittedAt = ev.OccurredAt,
+                AuthNo = FieldOrNull(ev, "authNo"), ReviewerId = FieldOrNull(ev, "reviewerId"),
                 SlaDueAt = DateTimeOffset.TryParse(Field(ev, "slaDueAt"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var s) ? s : null,
             });
         }
-        else { row.Status = status; }
+        else
+        {
+            row.Status = status;
+            // A later event may name the reviewer the first one could not — AuthUnderReview is where a
+            // request acquires an owner. Only ever ADDITIVE: a null on a subsequent event means "not stated
+            // here", not "no longer assigned", and treating the two the same would blank the owner every
+            // time an unrelated lifecycle event arrived.
+            row.AuthNo ??= FieldOrNull(ev, "authNo");
+            row.ReviewerId = FieldOrNull(ev, "reviewerId") ?? row.ReviewerId;
+        }
     }
 
     private void RemovePending(ReportingEvent ev)

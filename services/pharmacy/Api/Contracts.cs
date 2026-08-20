@@ -218,7 +218,24 @@ public sealed record DispensableLineView(
     /// wherever the catalogue records what a box holds. A pharmacist reading "1" against a 24-tablet box and
     /// handing over one TABLET is an error the record previously gave them no way to catch.
     /// </remarks>
-    string? QuantityUnit = null);
+    string? QuantityUnit = null,
+    /// <summary>
+    /// The counter reported it could not fill this line, and has not filled it since (design 49 §5).
+    /// </summary>
+    /// <remarks>
+    /// <para>This view did not carry it. The web contract declared <c>outOfStock</c> as a first-class
+    /// boolean, the dispensing page rendered a chip off it and excluded the line from the fillable set, and
+    /// the HTTP client supplied the literal <c>false</c> because there was nothing here to read — while the
+    /// dev fixture supplied <c>true</c> on one row. The feature therefore rendered in development and in the
+    /// tests, and could not render in production.</para>
+    /// <para>NOT an inventory fact. inventory-service owns stock levels; this says a counter was short on a
+    /// day. Nothing here reads or writes a balance.</para>
+    /// </remarks>
+    bool OutOfStock = false,
+    DateTimeOffset? OutOfStockAt = null,
+    /// <summary>The pharmacist's note to the prescriber, shown to whoever opens the line next so a second
+    /// pharmacist does not re-report what the first already did.</summary>
+    string? OutOfStockNote = null);
 
 /// <summary>
 /// A prescription as the dispensing counter needs it.
@@ -259,7 +276,7 @@ public sealed record DispensableRxView(
             .Select(l => new DispensableLineView(
                 l.PrescriptionLineId, l.DrugId, l.DrugName, l.Dose, l.Route, l.Frequency, l.DurationDays,
                 l.QuantityPrescribed, l.QuantityDispensed, l.QuantityRemaining, l.Status.ToString(),
-                l.QuantityUnit))
+                l.QuantityUnit, l.OutOfStock, l.OutOfStockAt, l.OutOfStockNote))
             .ToList());
 }
 

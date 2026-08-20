@@ -22,7 +22,12 @@ export const zApprovalItem = z.object({
   sla: zSla.nullish(),
   status: zStatus,
   submittedAt: zInstant,
-  estimatedCost: z.string(),
+  /** Every requested service code, not just the first. */
+  serviceCodes: z.array(z.string()),
+  /** Who is holding this, or null if nobody has picked it up. A staff id, not patient data. */
+  assignedReviewerId: zId.nullish(),
+  /** The provider that asked. Null on a manual authorization, which by definition has none. */
+  requestingProviderId: zId.nullish(),
   /**
    * What KIND of request this is.
    *
@@ -88,9 +93,14 @@ export const zApprovalReview = z.object({
   patient: zPatientRef,
   service: zCoded,
   clinicalJustification: z.string(),
-  supportingCodes: z.array(zCoded),
+  /**
+   * Every requested service — NOT "supporting codes", which is what they were called.
+   *
+   * <p>They were never supporting anything. `serviceCodes[0]` was rendered as "the service" and
+   * `slice(1)` as attachments to it, so a three-service request read as one service with two footnotes.</p>
+   */
+  requestedServices: z.array(zCoded),
   documents: z.array(z.object({ id: zId, name: z.string() })),
-  requestedAmount: z.string(),
 });
 export type ApprovalReview = z.infer<typeof zApprovalReview>;
 

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Mersal.Auth;
 using Mersal.ClinicalValidation;
 using Mersal.Pharmacy.Api;
 using Mersal.Pharmacy.Domain;
@@ -317,6 +318,12 @@ public sealed class PrescribingTestAuth(
         if (Request.Headers.TryGetValue("X-Test-Tenant", out var tenant)) claims.Add(new Claim("tenant_id", tenant.ToString()));
         if (Request.Headers.TryGetValue("X-Test-Scope", out var scope)) claims.Add(new Claim("scope", scope.ToString()));
         if (Request.Headers.ContainsKey("X-Test-Mfa")) claims.Add(new Claim("amr", "otp"));
+        // The dispensing pharmacy. `DispensingGate` refuses outright when a caller carries no provider —
+        // "you are not associated with a dispensing pharmacy" — before any policy is consulted, so a
+        // counter-side test that omits this gets a 403 that says nothing about the rule it meant to exercise.
+        // Absent for a prescriber, who has no dispensing pharmacy and is gated on a different claim.
+        if (Request.Headers.TryGetValue("X-Test-Provider", out var provider))
+            claims.Add(new Claim(HbmpClaimTypes.ProviderId, provider.ToString()));
         // 21.4 — the programme gate, asked after authorization. A tenant that is not onboarded onto the
         // pharmacy programme is refused, so a token carrying a tenant must also carry the feature.
         foreach (var f in Request.Headers["X-Test-Features"].ToString()

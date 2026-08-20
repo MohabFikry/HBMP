@@ -74,10 +74,20 @@ public class BreakGlassTests
             }
 
             // Once reviewed, it drops out of the queue.
+            //
+            // The review is written WHOLE. Flipping the flag alone was enough here until migration 0016 added
+            // `ck_auth_retrospective_complete`, and the reason it is no longer enough is the finding that
+            // migration exists for: a case marked reviewed with no reviewer, no timestamp and no conclusion is
+            // a record that cannot be defended to anybody asking who signed it off — which is precisely the
+            // state the whole queue was in, because nothing anywhere ever set this flag.
             await using (var upd = new ApprovalsDbContext(Options()))
             {
                 var a = await upd.Authorizations.SingleAsync(x => x.AuthorizationId == id);
                 a.RetrospectiveReviewed = true;
+                a.RetrospectiveReviewedBy = Guid.NewGuid().ToString();
+                a.RetrospectiveReviewedAt = DateTimeOffset.UtcNow;
+                a.RetrospectiveOutcome = "Upheld";
+                a.RetrospectiveRationale = "member was present and the provider's systems were down";
                 await upd.SaveChangesAsync();
             }
             await using (var read2 = new ApprovalsDbContext(Options()))

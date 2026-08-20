@@ -41,6 +41,7 @@ import type {
   RegistrationWorklistPage,
   StatusChangeResult,
   ApprovalItem,
+  AdjudicationRow,
   ApprovalReview,
   Beneficiary360,
   BreakGlassGrant,
@@ -57,6 +58,8 @@ import type {
   LineAcknowledgement,
   ValidationResult,
   EmergencyResult,
+  RetrospectiveItem,
+  RetrospectiveReviewInput,
   ManualAuthInput,
   ManualAuthResult,
   MasterDataVersion,
@@ -81,6 +84,7 @@ import type {
   DecisionResult,
   DispenseRequest,
   DispenseResult,
+  OutOfStockResult,
   EligibilityHit,
   EligibilityResult,
   Encounter,
@@ -102,6 +106,10 @@ import type {
   ReportAccessInput,
   ReportAccessRequestResult,
   ClaimRow,
+  ClaimDetail,
+  ClaimAdjustment,
+  ClaimDecisionRequest,
+  ClaimDecisionResult,
   ReconciliationRow,
   ClaimsKpis,
   ResultTask,
@@ -119,6 +127,8 @@ import type {
   PrescribeResult,
   Prescription,
   Settlement,
+  SettlementPage,
+  GenerateSettlementRequest,
   UtilizationView,
   IdentityUser,
   RoleCatalogEntry,
@@ -149,6 +159,12 @@ import type {
   SetAutoDecision,
   AmendReasonOption,
   WithdrawResult,
+  // 2026-08-11 audit — the director oversight reads.
+  Period,
+  ServiceAxis,
+  ServiceUseView,
+  SlaBreachView,
+  ClaimsCostView,
 } from "@mersal/contracts";
 
 /**
@@ -159,6 +175,36 @@ import type {
  * Min-necessary is honoured by the CONTRACT TYPES themselves (masked refs, no cross-zone fields), so a screen
  * physically cannot read data outside its zone from this surface.
  */
+/**
+ * The questions a SHARED approval queue is actually worked by.
+ *
+ * <p>Every one of these is a parameter `GET /api/v1/authorizations/` has always accepted, and the client sent
+ * none of them: it asked for `kind` alone, took the server's 200-row page, and filtered that in the browser.
+ * A tenant with three hundred pending requests narrowing to "breached" was narrowing a truncated list and was
+ * told nothing about it.</p>
+ *
+ * <p>`assignedTo` is the axis that did not exist in any form. `"me"` resolves server-side to the caller;
+ * `"unassigned"` is nobody's yet. Without it the queue could not answer "is this mine" or "has anyone picked
+ * it up", which is how a queue with several reviewers is read before anything else on it matters.</p>
+ */
+export interface ApprovalQueueFilter {
+  status?: string;
+  priority?: string;
+  slaBreached?: boolean;
+  assignedTo?: "me" | "unassigned" | "any";
+}
+
+/**
+ * A page of the queue, and how many rows matched in total.
+ *
+ * <p>Two fields rather than a bare array because the cap now has to be visible. `total > rows.length` is the
+ * screen's cue to say so; a list that silently stops at 200 reads as the whole answer.</p>
+ */
+export interface ApprovalQueuePage {
+  rows: ApprovalItem[];
+  total: number;
+}
+
 export interface ApiClient {
   /**
    * ICD-10 titles for the codes on screen, from masterdata-service.
@@ -443,6 +489,10 @@ export interface ApiClient {
    */
   pharmacySearch(by: { rxNo?: string; cardNumber?: string; memberNo?: string; passport?: string }): Promise<Prescription[]>;
   dispense(req: DispenseRequest): Promise<DispenseResult>;
+  /** Report that the counter cannot fill a line. Idempotent — a second report notifies nobody. */
+  flagOutOfStock(req: {
+    prescriptionId: string; lineId: string; quantity?: number; note?: string;
+  }): Promise<OutOfStockResult>;
   /**
    * What the prescription costs and how it splits between member and payer.
    *
@@ -609,7 +659,7 @@ export interface ApiClient {
    * default is deliberate (ADR-0034): a few hundred dispenses a day landing in the inbox would drown the
    * twelve requests that need a decision, and a queue that is mostly noise stops being read.
    */
-  approvalWorklist(kind?: "Review" | "Fulfilment" | "All"): Promise<ApprovalItem[]>;
+  approvalWorklist(kind?: "Review" | "Fulfilment" | "All", filter?: ApprovalQueueFilter): Promise<ApprovalQueuePage>;
   /** What was actually delivered against an authorization. Empty for a review request — nothing has been
    *  delivered against a question that has not been answered. */
   authorizationItems(authorizationId: string): Promise<AuthorizationItem[]>;
@@ -619,11 +669,36 @@ export interface ApiClient {
   slaSummary(): Promise<TatSummary>;
   createManualAuth(input: ManualAuthInput, idempotencyKey?: string): Promise<ManualAuthResult>;
   emergencyApprove(authId: string, justification: string): Promise<EmergencyResult>;
+  /**
+   * The break-glass retrospective-review queue, and the act of closing one.
+   *
+   * <p>The queue endpoint has been served since 7.3 and nothing ever called it; nothing could complete a
+   * review either, because no code path anywhere assigned `retrospectiveReviewed`. So every emergency
+   * approval, director override and manual authorization entered a list nobody could see and none ever
+   * left it. The review is the control that makes break-glass defensible — an override is acceptable
+   * because somebody checks it afterwards.</p>
+   */
+  retrospectiveQueue(closed?: boolean): Promise<RetrospectiveItem[]>;
+  completeRetrospectiveReview(input: RetrospectiveReviewInput, idempotencyKey?: string): Promise<RetrospectiveItem>;
 
-  // Executive dashboard (Phase 8)
-  executiveDashboard(scope: "executive" | "finance" | "director"): Promise<ExecutiveDashboard>;
+  /*
+   * Executive dashboard (Phase 8).
+   *
+   * `period` is now sent, and `scope` now REACHES the server. Both were defects rather than omissions: every
+   * reporting endpoint has always accepted from/to and the portal sent neither, and the scope argument was
+   * taken here, never put on the wire, and used only to pick a page heading — so the executive, finance and
+   * director dashboards were byte-identical payloads.
+   */
+  executiveDashboard(scope: "executive" | "finance" | "director", period?: Period): Promise<ExecutiveDashboard>;
   // Director oversight / quality / escalations — de-identified reporting aggregates (Phase 8.3).
-  directorReport(section: "oversight" | "quality" | "escalations"): Promise<ReportView>;
+  directorReport(section: "oversight" | "quality" | "escalations", period?: Period): Promise<ReportView>;
+
+  // 2026-08-11 audit — the three oversight reads the director portal had no way to ask for.
+  /** Which services the network used, on any of the four axes. Distinct from finance's
+   *  `utilization()`, which is how much of a member's CAP was consumed — same word, other sense. */
+  serviceUse(axis: ServiceAxis, period?: Period): Promise<ServiceUseView>;
+  slaBreaches(): Promise<SlaBreachView>;
+  claimsCost(period?: Period): Promise<ClaimsCostView>;
 
   // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
   myCases(): Promise<CaseListItem[]>;
@@ -632,15 +707,41 @@ export interface ApiClient {
   escalations(): Promise<Escalation[]>;
 
   // Finance — billing codes + amounts only, no diagnosis (Phase 10.2).
-  utilization(): Promise<UtilizationView>;
-  settlements(): Promise<Settlement[]>;
-  financialSummary(dimension: "serviceline" | "category" | "provider"): Promise<FinancialSummary>;
+  /** The period is the operator's, not the server's default — see design 49 §4. */
+  utilization(period?: Period): Promise<UtilizationView>;
+  /** Server-side `providerId`/`status`, and the true count behind the endpoint's 100-row cap. */
+  settlements(filter?: { providerId?: string; status?: string }): Promise<SettlementPage>;
+  /** The three writes the `finance` role has held scopes for since phase 10.2 with no screen to use them. */
+  generateSettlement(req: GenerateSettlementRequest): Promise<Settlement>;
+  submitSettlement(id: string): Promise<Settlement>;
+  approveSettlement(id: string): Promise<Settlement>;
+  financialSummary(dimension: "serviceline" | "category" | "provider", period?: Period): Promise<FinancialSummary>;
+  /** Downloads the file as a side effect and returns the receipt. See `HttpApiClient.exportReport`. */
   exportReport(req: ExportRequest): Promise<ExportResult>;
 
   // Claims management — codes + amounts only, no diagnosis (Phase 10b). Provider users isolated to own claims server-side.
-  claimsWorklist(status?: string): Promise<ClaimRow[]>;
-  claimsReconciliation(bucket?: string): Promise<ReconciliationRow[]>;
-  claimsKpis(): Promise<ClaimsKpis>;
+  /**
+   * The CLAIM-level worklist.
+   *
+   * <p>This used to call `/claims/worklist`, which is the per-LINE adjudication queue: hard-filtered to
+   * UnderAdjudication/Pending, carrying no `status` parameter, and shaped as a line rather than a claim. The
+   * status control's four segments therefore returned identical rows, and every money column on the screen —
+   * claimed, net payable — read zero or blank, because those fields are not on that payload. `GET /claims`
+   * is the endpoint with the status filter and the amounts.</p>
+   */
+  claimsWorklist(status?: string, take?: number): Promise<ClaimRow[]>;
+  /** One claim with its lines and the adjustments raised against it. Codes and amounts; no diagnosis. */
+  claimDetail(claimId: string): Promise<ClaimDetail>;
+  claimAdjustments(claimId: string): Promise<ClaimAdjustment[]>;
+  /** The per-LINE adjudication queue — what `/claims/worklist` actually serves. */
+  adjudicationQueue(filter?: { recommendation?: string; reasonCode?: string; minValue?: number; maxValue?: number }): Promise<AdjudicationRow[]>;
+  decideClaimLine(req: ClaimDecisionRequest, idempotencyKey?: string): Promise<ClaimDecisionResult>;
+  raiseClaimAdjustment(
+    input: { claimId: string; claimLineId: string; type: string; amountDelta: number; reasonCode?: string; rationale?: string },
+    idempotencyKey?: string,
+  ): Promise<ClaimAdjustment>;
+  claimsReconciliation(bucket?: string, period?: Period): Promise<ReconciliationRow[]>;
+  claimsKpis(period?: Period): Promise<ClaimsKpis>;
 
   // Notifications — the caller's own in-app inbox (Phase 8.1). Self-service, cross-portal.
   notifications(unreadOnly?: boolean): Promise<Notification[]>;

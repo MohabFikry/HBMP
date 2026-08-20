@@ -51,11 +51,22 @@ public static class ProjectionMapping
         ["ClaimApproved.v1"] = "ClaimSettled",
         ["ClaimPartiallyApproved.v1"] = "ClaimSettled",
         ["ClaimDenied.v1"] = "ClaimSettled",
+        // The per-line twin of the three above. Not a rename of convenience: `ClaimSettled` is one fact for
+        // one claim's money and `ClaimLineSettled` is one fact per service line, and the two feed different
+        // tables — `fact_cost` and `financial_fact`. Collapsing them would double-count the same money under
+        // two grains.
+        ["ClaimLineSettled.v1"] = "ClaimLineSettled",
         // Two different creations, one dimension-label fact. policy-service does not publish a
         // "DimensionLabelled" event and should not have to invent one: it publishes that a payer was created
         // and that a plan was attached, and those are the moments a name comes into existence.
         ["PayerCreated"] = "DimensionLabelled",
         ["PolicyPlanAttached"] = "DimensionLabelled",
+        // A clinic's name. `dim_label`'s CHECK constraint has reserved `'branch'` since 19.6b and nothing
+        // ever wrote one, so the workload and no-show reports rendered a location GUID where a supervisor
+        // expected a clinic. Both the creation and the rename map here: a label that only ever learns the
+        // original name is a label that goes quietly wrong the first time a clinic is renamed.
+        ["BranchCreated"] = "DimensionLabelled",
+        ["BranchUpdated"] = "DimensionLabelled",
     };
 
     /// <summary>The projector name for a published event type, or the type itself when they already agree.</summary>
@@ -161,6 +172,15 @@ public static class ProjectionMapping
                 Alias(fields, from: "nameEn", to: "labelEn");
                 Alias(fields, from: "nameAr", to: "labelAr");
                 fields["kind"] = "payer";
+                break;
+
+            case "BranchCreated":
+            case "BranchUpdated":
+                Alias(fields, from: "branchId", to: "dimensionId");
+                Alias(fields, from: "branchCode", to: "code");
+                Alias(fields, from: "nameEn", to: "labelEn");
+                Alias(fields, from: "nameAr", to: "labelAr");
+                fields["kind"] = "branch";
                 break;
 
             case "PolicyPlanAttached":

@@ -242,6 +242,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "assignedTo",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -616,6 +623,15 @@
         "tags": [
           "Mersal.Approvals.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
         ],
+        "parameters": [
+          {
+            "name": "closed",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -624,8 +640,48 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/WorklistItemView"
+                    "$ref": "#/components/schemas/RetrospectiveItemView"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authorizations/{id}/retrospective-review": {
+      "post": {
+        "tags": [
+          "Mersal.Approvals.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrospectiveReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrospectiveItemView"
                 }
               }
             }
@@ -1344,6 +1400,82 @@
         },
         "additionalProperties": false
       },
+      "RetrospectiveItemView": {
+        "type": "object",
+        "properties": {
+          "authorizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "ageDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reviewed": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "rationale": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RetrospectiveReviewRequest": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "rationale": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ReviewDocument": {
         "type": "object",
         "properties": {
@@ -1682,6 +1814,21 @@
           },
           "kind": {
             "type": "string",
+            "nullable": true
+          },
+          "assignedReviewerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requestingProviderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
             "nullable": true
           }
         },

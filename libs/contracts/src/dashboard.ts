@@ -35,6 +35,16 @@ export const zKpiWidget = z.object({
   direction: z.enum(["up", "down"]).optional(),
   /** Status pill (e.g. TAT within SLA) — four-cue safe. */
   status: zStatus.optional(),
+  /**
+   * The detail behind the headline, when the server sent one.
+   *
+   * Optional because not every KPI has a breakdown — but the two that DO were losing theirs. The server
+   * marks pending-approvals and the financial summary as Gauge and Summary widgets, and the client mapped
+   * both to a bare `{ title, value }`, discarding a table it had already computed, serialised and sent:
+   * pending by status x priority x age x SLA breach, and cost by service line. Neither rendered anywhere in
+   * the product. A KPI is a headline, and a headline with no article behind it is where a supervisor stops.
+   */
+  dataTable: zDataTable.optional(),
 });
 export type KpiWidget = z.infer<typeof zKpiWidget>;
 
@@ -52,10 +62,22 @@ export type ChartWidget = z.infer<typeof zChartWidget>;
 export const zWidget = z.discriminatedUnion("kind", [zKpiWidget, zChartWidget]);
 export type Widget = z.infer<typeof zWidget>;
 
+/**
+ * The window a figure covers.
+ *
+ * Every reporting endpoint takes `from`/`to` and the portal sent neither, so two KPIs built from endpoints
+ * with different server defaults (30 days and 90) sat in one row with nothing on screen saying so. A number
+ * whose period is unstated is a number a supervisor cannot act on.
+ */
+export const zPeriod = z.object({ from: z.string(), to: z.string() });
+export type Period = z.infer<typeof zPeriod>;
+
 export const zExecutiveDashboard = z.object({
   /** Report version so the UI can pin to a contract (v1.0). */
   version: z.string(),
   generatedAt: z.string(),
+  /** The resolved window, echoed back so the screen states what it is showing rather than assuming. */
+  period: zPeriod.optional(),
   /** Zone label so the same shape can render an executive OR a finance-scoped board. */
   scope: z.enum(["executive", "finance", "director"]),
   kpis: z.array(zKpiWidget),

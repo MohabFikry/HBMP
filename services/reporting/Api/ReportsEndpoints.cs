@@ -63,6 +63,17 @@ public static class ReportsEndpoints
             .Produces<NoShowReport>()
             .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
+        // The drill-down behind a breach COUNT. Operational zone — an authorization number, a priority, an
+        // age and a reviewer are facts about a queue, not about a patient, and this list carries no
+        // beneficiary at all (see SlaBreachRow). Not period-parameterised: a breach is a CURRENT state, and
+        // "which are breached, as of a fortnight ago" is a question about history that the TAT report answers.
+        v1.MapGet("/sla-breaches", async (int? top, ReportContext cx, CancellationToken ct) =>
+        {
+            var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
+            return denied ?? Results.Ok(await cx.Q.SlaBreachesAsync(cx.Tenant, Math.Clamp(top ?? 100, 1, 500), ct));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
+            .Produces<SlaBreachReport>();
+
         v1.MapGet("/rejected-requests", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
             cx.RunOrQueue(ReportingPolicies.ReadOperational, "rejected-requests", from, to,
                 (f, t) => cx.Q.RejectedRequestsAsync(cx.Tenant, f, t, ct), ct))
@@ -90,6 +101,20 @@ public static class ReportsEndpoints
             cx.RunOrQueue(ReportingPolicies.ReadFinancial, "financial-summary", from, to,
                 (f, t) => cx.Q.FinancialSummaryAsync(cx.Tenant, f, t, ct), ct))
             .RequireAuthorization(HbmpPolicies.Scope("reporting:read-financial"));
+
+        // Claim outcomes and what they cost — the oversight portal's Claims & Cost view.
+        //
+        // SERVED FROM HERE RATHER THAN FROM CLAIMS-SERVICE. The Medical Director holds
+        // `reporting:read-financial` and holds neither `claims:read` nor `claims:reconcile`, and that split is
+        // the right one: a supervisor needs the shape of what was claimed and denied, and opening a
+        // claimant's file is the claims officer's authority. Reaching the chart by widening an operational
+        // scope is how the two stop being distinguishable.
+        v1.MapGet("/claims-summary", (string? from, string? to, ReportContext cx, CancellationToken ct) =>
+            cx.RunOrQueue(ReportingPolicies.ReadFinancial, "claims-summary", from, to,
+                (f, t) => cx.Q.ClaimsSummaryAsync(cx.Tenant, f, t, ct), ct))
+            .RequireAuthorization(HbmpPolicies.Scope("reporting:read-financial"))
+            .Produces<ClaimsSummaryReport>()
+            .Produces<JobHandleView>(StatusCodes.Status202Accepted);
 
         // ── Async job poll ─────────────────────────────────────────────────────────────────────────────
         v1.MapGet("/jobs/{id:guid}", async (Guid id, ReportContext cx, CancellationToken ct) =>
@@ -138,26 +163,60 @@ public static class ReportsEndpoints
         // bilingual labels. Gated on the operational zone; clinical + financial widgets are included only for a
         // caller authorized for those zones (finance widgets exclude diagnoses by construction).
         var dash = app.MapGroup("/api/v1/dashboards");
-        dash.MapGet("/executive", async (string? from, string? to, ReportContext cx, DashboardBuilder builder, CancellationToken ct) =>
+        //
+        // `scope` narrows the widget set to what a given portal's dashboard is FOR — it is not an
+        // authorization input and cannot widen anything: the two zone checks above still decide what the
+        // caller may read, and an unknown scope returns the full permitted set. It exists because the SPA
+        // already took the argument and never sent it, so the executive, finance and director dashboards
+        // were byte-identical payloads under three different headings.
+        dash.MapGet("/executive", async (string? from, string? to, string? scope, ReportContext cx, DashboardBuilder builder, CancellationToken ct) =>
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
             if (denied is not null) return denied;
             var clinical = await cx.Gate.CheckAsync(ReportingPolicies.ReadClinical, ct) is null;
             var financial = await cx.Gate.CheckAsync(ReportingPolicies.ReadFinancial, ct) is null;
             var (f, t) = Api.Period.Parse(from, to, cx.Calendar);
-            var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, ct);
+            var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, scope, ct);
             return Results.Ok(payload);
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"))
             .Produces<ExecutiveDashboard>();
 
         // ── System projection seam ───────────────────────────────────────────────────────────────────────
+        // A MACHINE seam, and the only write in this service. `ProjectionConsumer` is the production path;
+        // this endpoint has no caller in the repository and is kept as the synchronous seam the projection
+        // tests and a replay would use.
+        //
+        // Two things guard it that did not before. `reporting:project` is `service_only` in the identity
+        // catalogue (identity 0039), so no person can hold it — the policy rule names no roles, which is
+        // correct for a client credential and was catastrophic while a Medical Director could hold the scope.
+        // And the tenant now comes from the PRINCIPAL rather than the body: the gate's TenantMatch is
+        // evaluated against a resource built from the caller's own principal, so it was vacuous here, and a
+        // caller authenticated for one tenant could write facts into another's dashboard.
         v1.MapPost("/projections", async (ProjectionRequest req, ReportContext cx, CancellationToken ct) =>
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.Project, ct);
             if (denied is not null) return denied;
-            var ev = new ReportingEvent(req.EventId, req.EventType, req.TenantId, req.Fields ?? [],
+
+            if (!string.IsNullOrWhiteSpace(req.TenantId) && !string.Equals(req.TenantId, cx.Tenant, StringComparison.Ordinal))
+                return Results.Problem(statusCode: 400, title: "tenant-mismatch", type: "urn:hbmp:validation",
+                    detail: "A projection may only be written for the tenant the caller is authenticated for.");
+
+            var ev = new ReportingEvent(req.EventId, req.EventType, cx.Tenant, req.Fields ?? [],
                 req.OccurredAt ?? cx.Clock.GetUtcNow());
             var projected = await cx.Projector.ProjectAsync(ev, ct);
+
+            // Every write into the read model is audited, because the read model is what this platform's
+            // oversight is MADE of. An unaudited write here is a figure on a supervisor's dashboard with no
+            // record of where it came from, and the dashboard offers no way to tell.
+            await cx.Audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "reporting_projection", EntityId = req.EventId.ToString(), Action = AuditAction.Create,
+                ActorUserId = cx.Me.Principal?.Subject, TenantId = cx.Tenant,
+                DecisionReasonCode = req.EventType,
+                AfterState = projected ? "projected" : "deduplicated",
+                Severity = AuditSeverity.Notice,
+            }, ct);
+
             return Results.Ok(new { projected });
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:project"));
     }

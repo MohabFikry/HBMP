@@ -109,6 +109,12 @@ public static class BreakGlass
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync(req.Decision == AuthDecision.Approved ? "AuthApproved" : "AuthPartiallyApproved", "approvals.events", new
             {
+                // `tenantId` — the ordinary decision path in Decisions.cs carries it and this one did not, so
+                // every manual and emergency approval was dead-lettered by the reporting consumer and by
+                // emr's care-episode consumer, both of which refuse a message they cannot attribute. The
+                // approval-TAT report was therefore missing exactly the decisions a supervisor most wants to
+                // see, and missing them silently.
+                tenantId = auth.TenantId,
                 authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
                 source = "Manual", approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
                 releasesDownstream = true, breakGlass = true,
@@ -133,18 +139,115 @@ public static class BreakGlass
         .Produces<DecisionView>();
 
         // RETROSPECTIVE-REVIEW QUEUE: break-glass cases awaiting post-hoc review (min-necessary, no clinical payload).
+        //
+        // `closed=true` returns the reviewed half instead. "What was concluded about last month's overrides" is
+        // the other question asked of this table, and until now it had no answer at all — see the POST below.
         v1.MapGet("/retrospective-queue", async (
-            ApprovalsDbContext db, ApprovalsGate gate, TimeProvider clock, CancellationToken ct) =>
+            bool? closed, ApprovalsDbContext db, ApprovalsGate gate, TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(ApprovalsPolicies.List, null, "retrospective", ct);
             if (denied is not null) return denied;
             var now = clock.GetUtcNow();
-            var items = await db.Authorizations.AsNoTracking()
-                .Where(a => a.RetrospectiveReviewRequired && !a.RetrospectiveReviewed)
-                .OrderByDescending(a => a.DecidedAt).Take(200).ToListAsync(ct);
-            return Results.Ok(items.Select(a => WorklistItemView.From(a, now)));
+            var wantClosed = closed == true;
+            var q = db.Authorizations.AsNoTracking()
+                .Where(a => a.RetrospectiveReviewRequired && a.RetrospectiveReviewed == wantClosed);
+            var items = await (wantClosed
+                    ? q.OrderByDescending(a => a.RetrospectiveReviewedAt)
+                    : q.OrderBy(a => a.DecidedAt))          // oldest first: a backlog is worked from its tail
+                .Take(200).ToListAsync(ct);
+            return Results.Ok(items.Select(a => RetrospectiveItemView.From(a, now)));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
-        .Produces<IEnumerable<WorklistItemView>>();
+        .Produces<IEnumerable<RetrospectiveItemView>>();
+
+        // COMPLETE A RETROSPECTIVE REVIEW.
+        //
+        // The queue above has existed since 7.3 and nothing could ever empty it: `RetrospectiveReviewed`
+        // appeared in exactly two places in the repository — its declaration, and the `!` predicate that reads
+        // it. No endpoint, service or job assigned it. So the flag recorded that a review was OWED and never
+        // that one happened, and the trail could not tell "reviewed and upheld" apart from "nobody looked".
+        //
+        // That is not a missing feature; it is the control that makes break-glass defensible. An override is
+        // acceptable BECAUSE somebody checks it afterwards.
+        v1.MapPost("/{id:guid}/retrospective-review", async (
+            Guid id, RetrospectiveReviewRequest req, HttpRequest http,
+            ApprovalsDbContext db, ApprovalsGate gate, IAuditClient audit, IOutbox outbox,
+            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(ApprovalsPolicies.Retrospective, id.ToString(), "retrospective", ct);
+            if (denied is not null) return denied;
+
+            if (req.Outcome is not ("Upheld" or "NotJustified"))
+                return Results.Problem(statusCode: 422, title: "bad-outcome", type: "urn:hbmp:validation",
+                    detail: "The outcome must be Upheld or NotJustified.");
+            // A review that records no reasoning is not a review, it is a checkbox — and a checkbox is what
+            // this control already effectively was.
+            if (DecisionRules.IsBlank(req.Rationale))
+                return Results.Problem(statusCode: 422, title: "rationale-required", type: "urn:hbmp:validation",
+                    detail: "A retrospective review requires a written rationale.");
+
+            var auth = await db.Authorizations.Include(a => a.Decisions)
+                .FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
+            if (auth is null)
+                return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (!auth.RetrospectiveReviewRequired)
+                return Results.Problem(statusCode: 409, title: "no-review-required", type: "urn:hbmp:conflict",
+                    detail: "This authorization was not decided under break-glass, so there is nothing to review.");
+            if (auth.RetrospectiveReviewed)
+                return Results.Problem(statusCode: 409, title: "already-reviewed", type: "urn:hbmp:conflict",
+                    detail: "This break-glass decision has already been reviewed.");
+
+            // SEGREGATION OF DUTIES, per person. Somebody signing off their own override is the precise failure
+            // this control exists to catch, and the role split in ApprovalsPolicies does not cover it: a
+            // director reviewing another director's override is fine, reviewing their own is not.
+            var reviewer = me.Principal?.Subject;
+            var actor = auth.Decisions.Where(d => d.BreakGlass).OrderByDescending(d => d.DecidedAt)
+                .Select(d => d.ReviewerId).FirstOrDefault(rid => rid is not null);
+            if (actor is { } a2 && reviewer is not null && string.Equals(a2.ToString(), reviewer, StringComparison.OrdinalIgnoreCase))
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "authorization", EntityId = id.ToString(), Action = AuditAction.Decision,
+                    ActorUserId = reviewer, TenantId = me.Principal?.TenantId,
+                    DecisionOutcome = "Deny", DecisionReasonCode = "SOD_SELF_RETROSPECTIVE_REVIEW",
+                    BreakGlass = true, Severity = AuditSeverity.High,
+                }, ct);
+                return Results.Problem(statusCode: 403, title: "segregation-of-duties", type: "urn:hbmp:sod-violation",
+                    detail: "You took this break-glass decision. A second, distinct reviewer is required.",
+                    extensions: new Dictionary<string, object?> { ["reason"] = "SOD_SELF_RETROSPECTIVE_REVIEW" });
+            }
+
+            var now = clock.GetUtcNow();
+            auth.RetrospectiveReviewed = true;
+            auth.RetrospectiveReviewedBy = reviewer;
+            auth.RetrospectiveReviewedAt = now;
+            auth.RetrospectiveOutcome = req.Outcome;
+            auth.RetrospectiveRationale = req.Rationale!.Trim();
+            auth.UpdatedAt = now;
+
+            // NOTE WHAT DOES NOT HAPPEN HERE: `NotJustified` does not touch `auth.Status`. The care was
+            // delivered under this authorization; unwinding it retroactively would refuse a service that has
+            // already happened, to a beneficiary who had no part in the decision. The finding is the output.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await db.SaveChangesAsync(ct);
+            await outbox.EnqueueAsync("AuthRetrospectivelyReviewed", "approvals.events",
+                new
+                {
+                    tenantId = auth.TenantId,
+                    authorizationId = auth.AuthorizationId, auth.AuthNo,
+                    outcome = auth.RetrospectiveOutcome, reviewedAt = now,
+                }, ct);
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "authorization", EntityId = id.ToString(), Action = AuditAction.Decision,
+                ActorUserId = reviewer, ActorRole = string.Join(',', me.Principal?.Roles ?? new HashSet<string>()),
+                TenantId = me.Principal?.TenantId, DecisionOutcome = $"RetrospectiveReview:{req.Outcome}",
+                DecisionReasonCode = auth.RetrospectiveRationale, BreakGlass = true, Severity = AuditSeverity.High,
+            }, ct);
+            await tx.CommitAsync(ct);
+
+            return Results.Ok(RetrospectiveItemView.From(auth, now));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:retrospective"))
+        .Produces<RetrospectiveItemView>();
 
         // TAT / SLA AGGREGATE for the reporting read-model (phase 8). Count by status + avg/p95 TAT + breach count.
         v1.MapGet("/tat-summary", async (ApprovalsDbContext db, ApprovalsGate gate, CancellationToken ct) =>

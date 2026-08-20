@@ -49,10 +49,50 @@ export const zPrescriptionLine = z.object({
   /** What one unit costs, from the catalogue. Null when unpriced — never zero. */
   unitPriceEgp: z.number().nullish(),
   status: zStatus,
-  /** True when the line is flagged out-of-stock (blocks dispense of this line, not the whole Rx). */
+  /**
+   * The counter has reported it cannot fill this line, and has not filled it since.
+   *
+   * <p>Blocks dispense of THIS line, not the whole prescription — the other lines are unaffected and the
+   * unfilled quantity stays available, because nothing was consumed.</p>
+   *
+   * <p><b>This field was, until 2026-08-12, a value the real client could not produce.</b> `HttpApiClient`
+   * supplied the literal `false` because the server's `DispensableLineView` did not carry it, while
+   * `DevApiClient` supplied `true` on one fixture. So the chip rendered in development and in the tests and
+   * could not render in production, and no pharmacist had any way to raise it. Design 49 §5.</p>
+   */
   outOfStock: z.boolean(),
+  /**
+   * When it was reported, so the chip can say how long it has been that way.
+   *
+   * <p>Null when the line is not flagged. Ageing is the difference between "we ran out this morning" and "we
+   * have been short for three weeks", and only the second is a purchasing decision.</p>
+   */
+  outOfStockAt: zInstant.nullish(),
+  /**
+   * What the reporting pharmacist wrote for the prescriber.
+   *
+   * <p>Shown to whoever opens the line next, so a second pharmacist does not re-report what the first
+   * already did — and so they can see whether a substitute was already discussed.</p>
+   */
+  outOfStockNote: z.string().nullish(),
 });
 export type PrescriptionLine = z.infer<typeof zPrescriptionLine>;
+
+/**
+ * What came back from reporting a line out of stock.
+ *
+ * <p>`replayed` is the interesting field. The server refuses to notify the prescriber twice about the same
+ * shortage, so a second report — by a colleague, or by the same pharmacist after a timeout — returns what was
+ * already recorded. The counter is told which of the two happened, because "already reported this morning"
+ * and "reported just now" are different answers to "does the doctor know".</p>
+ */
+export const zOutOfStockResult = z.object({
+  lineId: zId,
+  flagged: z.boolean(),
+  replayed: z.boolean(),
+  outOfStockAt: zInstant.nullish(),
+});
+export type OutOfStockResult = z.infer<typeof zOutOfStockResult>;
 
 export const zPrescription = z.object({
   id: zId,

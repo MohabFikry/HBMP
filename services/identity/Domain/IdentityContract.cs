@@ -63,6 +63,10 @@ public static class IdentityContract
         "auth:configure",
         "auth:request-extension",   // fulfillers ask for an expired prescription / order to be revalidated
         "auth:request-substitution",// a technician asks whether another examination may stand in for the one ordered
+        // Completing the post-hoc review of a break-glass decision. Held by the DIRECTOR and Super Admin, not
+        // by the approval team who raise manual and emergency authorizations — one team cannot be both the
+        // actor and the auditor of its own exceptions (approvals/0016, identity/0040).
+        "auth:retrospective",
         "reception:search",
         "emr:read", "emr:write", "encounter:write",
         "rx:write", "patient:read", "patient:write", "eligibility:check",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, InputField, StatusChip, TextareaField, useTheme, useToast } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, Modal, StatusChip, TextareaField, useTheme, useToast } from "@mersal/design-system";
 import type { Coded, DispenseLine, Localized, Prescription, PrescriptionLine, RxPricing } from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
 import { useWrite, writeErrorText } from "../../api/useWrite";
@@ -58,6 +58,37 @@ const S = {
   undoSubstitute: { en: "Undo", ar: "تراجع" },
   fillLine: { en: "Fill the remaining quantity", ar: "صرف الكمية المتبقية" },
   outOfStock: { en: "Out of stock", ar: "غير متوفر" },
+  // ---- reporting a shortage (design 49 §5) ----
+  reportOutOfStock: { en: "Report out of stock", ar: "الإبلاغ عن نفاد المخزون" },
+  oosTitle: { en: "Report that you cannot fill this line", ar: "الإبلاغ عن تعذّر صرف هذا البند" },
+  oosBody: {
+    en: "Nothing is consumed. The quantity stays available for a later visit, and the prescriber is told so "
+      + "they can decide whether to change the prescription.",
+    ar: "لن يُستهلك شيء. تبقى الكمية متاحة لزيارة لاحقة، ويُبلَّغ الواصف ليقرّر ما إذا كان سيغيّر الوصفة.",
+  },
+  oosQty: { en: "How much is short (optional)", ar: "الكمية الناقصة (اختياري)" },
+  oosQtyHint: {
+    en: "Leave empty if you have none of it at all — the common case.",
+    ar: "اتركه فارغاً إذا لم يتوفّر منه شيء إطلاقاً — وهي الحالة الأكثر شيوعاً.",
+  },
+  oosNote: { en: "Note for the prescriber (optional)", ar: "ملاحظة للواصف (اختياري)" },
+  oosNoteHint: {
+    en: "What you would say on the phone — when you expect it back, or whether a substitute would work.",
+    ar: "ما كنت ستقوله عبر الهاتف — متى تتوقّع توفّره، أو ما إذا كان البديل مناسباً.",
+  },
+  oosSend: { en: "Report it", ar: "إبلاغ" },
+  oosDone: {
+    en: "Reported. The prescriber has been notified; the quantity stays available.",
+    ar: "تم الإبلاغ. أُخطر الواصف؛ وتبقى الكمية متاحة.",
+  },
+  /* A colleague got there first. Said plainly, because "does the doctor know" is the question the second
+     pharmacist is actually asking, and a silent success would leave them assuming they had just told them. */
+  oosAlready: {
+    en: "Already reported — the prescriber was notified then, and has not been notified again.",
+    ar: "سبق الإبلاغ عنه — أُخطر الواصف حينها، ولم يُخطر مجدداً.",
+  },
+  oosFailed: { en: "That could not be reported. Nothing changed.", ar: "تعذّر الإبلاغ. لم يتغيّر شيء." },
+  cancel: { en: "Cancel", ar: "إلغاء" },
   overRemaining: {
     en: "Only {n} left on this line",
     ar: "المتبقي على هذا البند {n} فقط",
@@ -376,7 +407,7 @@ function DispenseBody({
   const t = useLoc();
   const { toast } = useToast();
   const { lang } = useTheme();
-  const { money } = useFormat();
+  const { money, date } = useFormat();
   const write = useWrite();
 
   // Quantities default to ZERO, never to the remaining amount. Pre-filling the maximum makes "dispense
@@ -384,6 +415,8 @@ function DispenseBody({
   // short — into a correction of a number that already looked right. `Dispense all` is the explicit act.
   const [draft, setDraft] = useState<Record<string, LineDraft>>({});
   const [substituting, setSubstituting] = useState<PrescriptionLine | null>(null);
+  /** The line whose shortage is being reported, or null. */
+  const [reporting, setReporting] = useState<PrescriptionLine | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   /** What was handed over in the last successful dispense, so the counter can print it. */
@@ -685,7 +718,21 @@ function DispenseBody({
                     <td className="rx-num tnum">{left}{unit(l)}</td>
                     <td className="rx-col-qty">
                       {l.outOfStock ? (
-                        <StatusChip kind="warn" label={t(S.outOfStock)} />
+                        /* WHO AND WHEN, not just "out of stock".
+                           The chip alone told the next pharmacist nothing about whether the prescriber had
+                           been told, or how long ago. "Reported this morning" and "reported three weeks ago"
+                           are the difference between waiting and ringing. */
+                        <div className="stack" style={{ gap: "var(--sp1)" }}>
+                          <StatusChip kind="warn" label={t(S.outOfStock)} />
+                          {l.outOfStockAt && (
+                            <span className="muted tnum" style={{ fontSize: "var(--fs-sm)" }}>
+                              {date(l.outOfStockAt)}
+                            </span>
+                          )}
+                          {l.outOfStockNote && (
+                            <span className="muted" style={{ fontSize: "var(--fs-sm)" }}>{l.outOfStockNote}</span>
+                          )}
+                        </div>
                       ) : (
                         <div className="rx-qty">
                           {/* The label names the medicine for assistive tech and is HIDDEN on screen. Five
@@ -728,6 +775,31 @@ function DispenseBody({
                             onClick={() => setQty(l.id, qty(l.id) === left ? 0 : left)}
                           >
                             <Icon name="check2" width={18} height={18} aria-hidden="true" />
+                          </button>
+                          {/* THE CONTROL THAT DID NOT EXIST (design 49 §5).
+
+                              `POST …/out-of-stock` has been complete since phase 6.3 — it consumes nothing,
+                              so the unfilled quantity stays available for a later visit; it notifies the
+                              PRESCRIBER on a route that escalates to the pharmacy supervisor after eight
+                              hours; it audits. Nothing in this application called it. A pharmacist facing an
+                              empty shelf had two options on this screen: dispense, which is impossible, or
+                              nothing. The prescriber was never told, the escalation never fired, and a
+                              refugee beneficiary made a second journey for a medicine nobody had recorded as
+                              missing.
+
+                              Beside the fill control rather than in a menu: it is the OTHER answer to the
+                              same question the row is asking, and a counter under pressure does not go
+                              looking. Disabled on an expired prescription for the same reason dispense is —
+                              nothing about that line can be acted on until the approval team revalidates it. */}
+                          <button
+                            type="button"
+                            className="rx-icon-btn"
+                            aria-label={`${t(S.reportOutOfStock)} — ${productName(t(l.drug.label))}`}
+                            title={t(S.reportOutOfStock)}
+                            disabled={rx.expired || left === 0}
+                            onClick={() => setReporting(l)}
+                          >
+                            <Icon name="triangle" width={18} height={18} aria-hidden="true" />
                           </button>
                         </div>
                       )}
@@ -792,7 +864,95 @@ function DispenseBody({
         />
       )}
 
+      {reporting && (
+        <OutOfStockModal
+          key={reporting.id}
+          rxId={rx.id}
+          line={reporting}
+          onClose={() => setReporting(null)}
+          onReported={() => { setReporting(null); reload(); }}
+        />
+      )}
+
     </>
+  );
+}
+
+/**
+ * Report that the counter cannot fill a line.
+ *
+ * <p>Both fields are OPTIONAL. "We have none of it at all" is the common case and needs neither, and a
+ * required field on the one control a busy counter reaches for under pressure is a control that gets
+ * skipped — which returns us to the prescriber never being told.</p>
+ *
+ * <p>The confirmation distinguishes a fresh report from a replay. The server does not notify the prescriber
+ * twice about the same shortage, so a second pharmacist pressing this needs to know that their action told
+ * nobody anything new — otherwise they walk away believing the doctor has just been informed.</p>
+ */
+function OutOfStockModal({
+  rxId, line, onClose, onReported,
+}: {
+  rxId: string;
+  line: PrescriptionLine;
+  onClose: () => void;
+  onReported: () => void;
+}) {
+  const api = useApi();
+  const t = useLoc();
+  const { toast } = useToast();
+  const [quantity, setQuantity] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function send() {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const qty = quantity.trim() === "" ? undefined : Number(quantity);
+      const res = await api.flagOutOfStock({
+        prescriptionId: rxId,
+        lineId: line.id,
+        quantity: Number.isFinite(qty) ? qty : undefined,
+        note: note.trim() === "" ? undefined : note.trim(),
+      });
+      toast(t(res.replayed ? S.oosAlready : S.oosDone), res.replayed ? "info" : "ok");
+      onReported();
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onOpenChange={(open) => { if (!open) onClose(); }} title={t(S.oosTitle)}>
+      <p className="muted" style={{ marginBlockStart: 0 }}>{productName(t(line.drug.label))}</p>
+      <InlineAlert tone="info">{t(S.oosBody)}</InlineAlert>
+      <InputField
+        label={t(S.oosQty)}
+        help={t(S.oosQtyHint)}
+        type="number"
+        min={0}
+        value={quantity}
+        onChange={(e) => setQuantity(e.currentTarget.value)}
+      />
+      <TextareaField
+        label={t(S.oosNote)}
+        help={t(S.oosNoteHint)}
+        rows={2}
+        maxLength={500}
+        value={note}
+        onChange={(e) => setNote(e.currentTarget.value)}
+      />
+      {failed && <InlineAlert tone="bad">{t(S.oosFailed)}</InlineAlert>}
+      <div className="rx-actions">
+        <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+        <Button variant="primary" loading={busy} disabled={busy} onClick={() => void send()}>
+          {t(S.oosSend)}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

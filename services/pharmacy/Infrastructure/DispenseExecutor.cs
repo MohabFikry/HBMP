@@ -128,6 +128,23 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
 
         line.QuantityDispensed += quantity;
         line.Status = Domain.Dispensing.RecomputeLineStatus(line);
+
+        /*
+         * A DISPENSE ENDS THE SHORTAGE (design 49 §5.1).
+         *
+         * The flag says "the counter could not fill this line". Something has just been handed over against
+         * it, so it is no longer true — and a chip that outlives the shortage is worse than no chip: the
+         * next pharmacist reads a stale warning and rings a prescriber about a medicine that is on the
+         * shelf. Cleared inside the same transaction as the accumulator, so a line can never be both
+         * dispensed-against and reported short by the same act.
+         *
+         * `out_of_stock_by`/`_at` go together (CHECK ck_rx_line_out_of_stock_complete), so all four clear.
+         * The audit trail keeps the history; this column only ever states the CURRENT position.
+         */
+        line.OutOfStockAt = null;
+        line.OutOfStockBy = null;
+        line.OutOfStockQty = null;
+        line.OutOfStockNote = null;
         var evt = new DispenseEvent
         {
             DispenseId = Guid.NewGuid(), PrescriptionLineId = lineId, DispensingPharmacyId = dispensingPharmacyId,

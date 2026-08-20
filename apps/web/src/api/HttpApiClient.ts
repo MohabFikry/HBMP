@@ -6,6 +6,11 @@ import {
   zBookableSlot,
   zBookingResult,
   zApprovalItem,
+  zAdjudicationRow,
+  zClaimDetail,
+  zClaimAdjustment,
+  zClaimDecisionResult,
+  zRetrospectiveItem,
   zApprovalReview,
   zBreakGlassGrant,
   zMasterDataVersion,
@@ -85,6 +90,8 @@ import {
   zExportResult,
   zFinancialSummary,
   zSettlement,
+  zSettlementPage,
+  zOutOfStockResult,
   zUtilizationView,
   type ConsumeRequest,
   type DecisionRequest,
@@ -119,7 +126,13 @@ import {
   zAppointmentDay,
   zAppointmentCounts,
   zAmendReasonOption,
+  // 2026-08-11 audit — the director oversight reads. VALUE imports: the payload is validated at the seam.
+  zServiceUseView,
+  zSlaBreachView,
+  zClaimsCostView,
 } from "@mersal/contracts";
+import type { Period, ServiceAxis } from "@mersal/contracts";
+import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
   MasterDataEdit,
@@ -127,6 +140,7 @@ import type {
   SetDocumentValidity,
   SaveApprovalRule,
   SetAutoDecision,
+  GenerateSettlementRequest,
 } from "@mersal/contracts";
 import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind } from "@mersal/contracts";
 import { zChronicPreview, zQuantityPreview, zRefillFrequency } from "@mersal/contracts";
@@ -138,7 +152,9 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { SubstitutionRequest, WithdrawResult } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { ApiError, getRaw, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, postForFile, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { newIdempotencyKey } from "./http";
+import type { ApprovalQueueFilter } from "./client";
 import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
@@ -305,6 +321,52 @@ function cairoToday(): string {
 }
 
 /**
+ * `?from=&to=` for the reporting reads, plus whatever else the caller needs on the same query.
+ *
+ * <p>Returns an EMPTY string when there is no period, rather than `?from=&to=`. An empty `from` is not the
+ * same request as an absent one: the server parses what it is given and falls back to its own default only
+ * when the parameter is missing, so sending blanks would have every director screen silently asking for
+ * whatever `DateOnly.TryParse("")` decided.</p>
+ *
+ * <p>The period reaches the server at all because it never used to. Every reporting endpoint has accepted
+ * `from`/`to` since phase 8.2 and the director portal sent neither, so two KPIs built from two endpoints
+ * with different server defaults — thirty days and ninety — sat in the same row with nothing on screen
+ * saying they covered different windows.</p>
+ */
+/**
+ * Hand a downloaded file to the user.
+ *
+ * <p>An object URL and an anchor click — the only way a browser saves bytes it already holds. The URL is
+ * revoked immediately afterwards: it pins the blob in memory for as long as it lives, and a finance export
+ * is an audited extract of what the organisation spent, which should not outlive the click that produced
+ * it.</p>
+ *
+ * <p>Guarded on `document` so a non-DOM environment (a contract test driving this client over a stubbed
+ * `fetch`) exercises the mapping without needing a document to click into.</p>
+ */
+function saveBlob(blob: Blob, filename: string): void {
+  if (typeof document === "undefined" || typeof URL?.createObjectURL !== "function") return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function periodQuery(period?: Period, extra?: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  if (period?.from) params.set("from", period.from);
+  if (period?.to) params.set("to", period.to);
+  for (const [k, v] of Object.entries(extra ?? {})) if (v) params.set(k, v);
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+/**
  * `?dispense=<lineId>:<qty>` / `?perform=<lineId>:<qty>`, repeated — the basis a cost share is quoted on.
  *
  * <p>Zero and negative entries are dropped rather than sent. A line the counter has not touched is not part
@@ -351,32 +413,87 @@ function toPractitioner(p: any) {
 function attachReason(e: unknown): string {
   return e instanceof ApiError ? e.reason : String(e);
 }
-/** Map a claim lifecycle status (36 §3) → a non-color StatusKind chip. */
-const claimStatusChip = (s: unknown): { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+type Chip = { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } };
+
+/**
+ * A claim lifecycle status → a non-colour StatusKind chip.
+ *
+ * FOUR OF THE ELEVEN REAL STATUSES WERE MISSING AND FOUR OF THE EIGHT ENTRIES NAMED NOTHING. The map listed
+ * `UnderReview`, `Adjudicated`, `Rejected` and `Cancelled`; `ClaimStatus` has none of those. Meanwhile
+ * `UnderAdjudication`, `Approved`, `Denied`, `PendingInfo`, `ClinicalReview`, `Appealed` and `Void` — the
+ * statuses claims actually hold — all fell through to the neutral fallback, which puts the raw English token
+ * in the Arabic slot. An Arabic reader saw "Denied" in Latin script on a denied claim.
+ */
+const claimStatusChip = (s: unknown): Chip => {
   const k = String(s ?? "");
-  const map: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+  const map: Record<string, Chip> = {
     Draft: { kind: "neu", label: { en: "Draft", ar: "مسودة" } },
     Submitted: { kind: "info", label: { en: "Submitted", ar: "مُقدّمة" } },
-    UnderReview: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
-    Adjudicated: { kind: "ok", label: { en: "Adjudicated", ar: "تمت المراجعة" } },
+    UnderAdjudication: { kind: "info", label: { en: "Under adjudication", ar: "قيد البتّ" } },
+    PendingInfo: { kind: "warn", label: { en: "Awaiting information", ar: "بانتظار معلومات" } },
+    ClinicalReview: { kind: "warn", label: { en: "Clinical review", ar: "مراجعة سريرية" } },
+    Approved: { kind: "ok", label: { en: "Approved", ar: "معتمدة" } },
     PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "موافقة جزئية" } },
-    Rejected: { kind: "bad", label: { en: "Rejected", ar: "مرفوضة" } },
+    Denied: { kind: "bad", label: { en: "Denied", ar: "مرفوضة" } },
     Settled: { kind: "ok", label: { en: "Settled", ar: "مُسوّاة" } },
-    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغاة" } },
+    Appealed: { kind: "warn", label: { en: "Appealed", ar: "مستأنَفة" } },
+    Void: { kind: "neu", label: { en: "Void", ar: "ملغاة" } },
   };
   return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
 };
-/** Map a reconciliation bucket (36 §7) → a non-color StatusKind chip. */
-const reconBucketChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+
+/** A claim LINE status (`ClaimLineStatus`) → a chip. Distinct vocabulary from the claim's own. */
+const claimLineStatusChip = (s: unknown): Chip => {
   const k = String(s ?? "");
-  const map: Record<string, { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+  const map: Record<string, Chip> = {
+    Pending: { kind: "info", label: { en: "Pending", ar: "معلّق" } },
+    Approved: { kind: "ok", label: { en: "Approved", ar: "معتمد" } },
+    PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "موافقة جزئية" } },
+    Denied: { kind: "bad", label: { en: "Denied", ar: "مرفوض" } },
+    Adjusted: { kind: "warn", label: { en: "Adjusted", ar: "معدَّل" } },
+    Void: { kind: "neu", label: { en: "Void", ar: "ملغى" } },
+  };
+  return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
+};
+
+/**
+ * A reconciliation bucket → a chip. All SIX, including the two that carry the money.
+ *
+ * `Duplicate` is the double-billing signal and `QuantityVariance` is a provider billing more units than were
+ * delivered. Both were classified server-side, neither had a chip, so both rendered as their raw English token
+ * in both languages — and neither could be filtered to.
+ */
+const reconBucketChip = (s: unknown): Chip => {
+  const k = String(s ?? "");
+  const map: Record<string, Chip> = {
     Matched: { kind: "ok", label: { en: "Matched", ar: "مطابقة" } },
     PriceVariance: { kind: "warn", label: { en: "Price variance", ar: "فرق سعر" } },
+    QuantityVariance: { kind: "warn", label: { en: "Quantity variance", ar: "فرق كمية" } },
     BilledNotDelivered: { kind: "bad", label: { en: "Billed, not delivered", ar: "فوترة بلا تنفيذ" } },
     DeliveredNotBilled: { kind: "info", label: { en: "Delivered, not billed", ar: "تنفيذ بلا فوترة" } },
+    Duplicate: { kind: "bad", label: { en: "Duplicate", ar: "مكرّرة" } },
   };
   return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
 };
+
+/**
+ * Who asked, from the request's SOURCE.
+ *
+ * This was the literal string "Provider" on every row of the approval queue — including manual
+ * authorizations, which the approval team raises itself and which carry no requesting provider at all. A
+ * constant that is true of some rows and false of others is worse than an empty column: it cannot be
+ * questioned, because it never looks missing.
+ */
+const requesterLabel = (source: unknown): { en: string; ar: string } => {
+  const map: Record<string, { en: string; ar: string }> = {
+    OrderLine: { en: "Clinician order", ar: "طلب طبيب" },
+    Prescription: { en: "Prescription", ar: "وصفة" },
+    Manual: { en: "Raised by the approval team", ar: "من فريق الموافقات" },
+    ValidityExtension: { en: "Validity extension request", ar: "طلب تمديد صلاحية" },
+  };
+  return map[String(source ?? "")] ?? { en: "—", ar: "—" };
+};
+
 /** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
 const encounterStatus = (s: unknown) => {
   const k = String(s ?? "InProgress");
@@ -415,6 +532,53 @@ const breakGlassChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "n
   if (k === "rejected" || k === "revoked") return { kind: "bad", label: { en: raw, ar: "ملغى" } };
   return { kind: "neu", label: { en: raw || "Expired", ar: "منتهٍ" } };
 };
+/**
+ * A settlement's lifecycle state → its chip.
+ *
+ * <p>All four states used to render an identical green "ok" chip, because this client wrote the literal
+ * string `"ok"` into the `status` field. Two consequences, and the second is the reason the Settlements
+ * screen had never worked at all:</p>
+ *
+ * <ol>
+ *   <li>Draft, Submitted, Approved and Paid were visually indistinguishable — the four-cue rule broken at
+ *       its root, not by a missing icon but by the same cue for every value. The real state travelled in
+ *       `state` and was never displayed.</li>
+ *   <li><b>`"ok"` is a string and `zStatus` is `{ kind, label }`, so `parseOr` threw on every call.</b>
+ *       Every settlement read failed with `ApiError("schema")` against a real gateway, and no test noticed
+ *       because the tests construct `DevApiClient`. Design 49 §1.</li>
+ * </ol>
+ *
+ * <p>`Approved` is `info` rather than `ok`: approval authorises a payment, it does not complete one. `Paid`
+ * is the settled state and is the only one that gets the affirmative chip — a distinction a finance clerk
+ * answering "has this provider been paid" depends on.</p>
+ */
+const settlementChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
+  switch (String(s ?? "").toLowerCase()) {
+    case "submitted": return { kind: "warn", label: { en: "Submitted", ar: "مُقدَّمة" } };
+    case "approved":  return { kind: "info", label: { en: "Approved", ar: "معتمدة" } };
+    case "paid":      return { kind: "ok",   label: { en: "Paid", ar: "مدفوعة" } };
+    default:          return { kind: "neu",  label: { en: "Draft", ar: "مسودة" } };
+  }
+};
+
+/**
+ * A coordination task's state → its chip. Same literal-`"ok"` crash as {@link settlementChip} described.
+ *
+ * <p>Carried along from a different portal, deliberately and knowingly: `caseTasks` and `escalations` are
+ * case management, outside the finance/pharmacy audit that found this. Leaving a proven, one-line,
+ * always-throwing crash in place on the grounds that it belongs to another portal is scope discipline
+ * applied until it stops making sense. They are noted in design 49 §6 so the next reader takes them as two
+ * lines carried, not two screens audited.</p>
+ */
+const taskChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
+  switch (String(s ?? "").toLowerCase().replace(/[^a-z]/g, "")) {
+    case "done":       return { kind: "ok",   label: { en: "Done", ar: "منجزة" } };
+    case "inprogress": return { kind: "info", label: { en: "In progress", ar: "جارية" } };
+    case "blocked":    return { kind: "warn", label: { en: "Blocked", ar: "معطّلة" } };
+    default:           return { kind: "neu",  label: { en: "To do", ar: "قيد الانتظار" } };
+  }
+};
+
 /** Map a case/approval priority string → the zCasePriority enum. */
 const casePriority = (p: unknown): "low" | "normal" | "high" | "urgent" =>
   ({ low: "low", normal: "normal", routine: "normal", high: "high", urgent: "urgent", emergency: "urgent" })[
@@ -1963,7 +2127,14 @@ export class HttpApiClient implements ApiClient {
           activeIngredient: null,
           unitPriceEgp: null,
           status: rxStatus(l.status),
-          outOfStock: false,
+          // READ, not asserted. This was the literal `false` — the server's `DispensableLineView` did not
+          // carry the field, so the one client that talks to a real gateway could never produce anything
+          // else, while the dev fixture supplied `true` on one row. The chip, the "out of stock" exclusion
+          // from the fillable set, and the tests covering both were all exercising a value production could
+          // not reach. Design 49 §5, pharmacy migration 0020.
+          outOfStock: Boolean(l.outOfStock),
+          outOfStockAt: l.outOfStockAt ?? null,
+          outOfStockNote: l.outOfStockNote ?? null,
         })),
       });
     });
@@ -2297,6 +2468,39 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
+  /**
+   * Report that the counter cannot fill a line.
+   *
+   * <p>The endpoint has been complete since phase 6.3 — it consumes nothing, so the unfilled quantity stays
+   * available for a later visit; it notifies the PRESCRIBER on a route that escalates to the pharmacy
+   * supervisor after eight hours; it audits. Nothing in this application called it, so a pharmacist facing an
+   * empty shelf had no control at all: the prescriber was never told, the escalation never fired, and a
+   * refugee beneficiary made a second journey for a medicine nobody recorded as missing.</p>
+   *
+   * <p>Quantity and note are both optional. "We have none at all" is the common case and needs neither, and
+   * a required field on the one control a busy counter reaches for under pressure is a control that gets
+   * skipped.</p>
+   *
+   * <p>Raising it twice is safe: the server returns what it already recorded and does <b>not</b> notify
+   * again. Two pharmacists reporting the same empty shelf must not put two escalating notifications in front
+   * of one prescriber.</p>
+   */
+  async flagOutOfStock(req: { prescriptionId: string; lineId: string; quantity?: number; note?: string }) {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(req.prescriptionId)}/lines/${encodeURIComponent(req.lineId)}/out-of-stock`,
+      { prescriptionLineId: req.lineId, quantity: req.quantity, note: req.note },
+    )) as any;
+    return parseOr(zOutOfStockResult, {
+      lineId: r?.prescriptionLineId ?? req.lineId,
+      flagged: r?.flagged !== false,
+      // TRUE when the line was already flagged and this call notified nobody. The screen says so, because
+      // "already reported by a colleague" and "reported just now" are different things to a pharmacist
+      // deciding whether the prescriber has heard about it.
+      replayed: !!r?.replayed,
+      outOfStockAt: r?.outOfStockAt ?? null,
+    });
+  }
+
   async prescriptionPricing(prescriptionId: string, dispenseNow?: Record<string, number>) {
     return parseOr(
       zRxPricing,
@@ -2309,33 +2513,65 @@ export class HttpApiClient implements ApiClient {
   // Approvals (Phase 7, US-060) — the worklist is GET /authorizations/ (min-necessary: codes + SLA, NO clinical
   // payload — that is /review only, audited as a PHI read). Decisions are per-type endpoints, not one /decision;
   // a decision needs the request UnderReview, so decide assigns first (idempotent-ish) then routes by kind.
-  async approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review") {
+  async approvalWorklist(
+    kind: "Review" | "Fulfilment" | "All" = "Review",
+    filter?: ApprovalQueueFilter,
+  ) {
     // Defaulting to Review matches the server's default and is the same argument (ADR-0034): the inbox is a
     // work queue, and a few hundred dispenses a day landing in it would drown the requests that need a
     // decision. The register is asked for deliberately.
-    const r = (await getRaw(`/authorizations/?kind=${encodeURIComponent(kind)}`)) as any[];
+    //
+    // THE FILTERS NOW REACH THE SERVER. `status`, `priority`, `slaBreached` and `unassigned` have always been
+    // accepted by this endpoint and none of them was ever sent: the client took the server's 200-row page and
+    // filtered it in the browser, so a tenant with three hundred pending requests narrowing to "breached" was
+    // narrowing a truncated list and was told nothing. `assignedTo` is new on both sides — the queue had no
+    // notion of ownership at all, which is the first question a queue worked by several people is read with.
+    const q = new URLSearchParams({ kind });
+    if (filter?.status) q.set("status", filter.status);
+    if (filter?.priority) q.set("priority", filter.priority);
+    if (filter?.slaBreached) q.set("slaBreached", "true");
+    if (filter?.assignedTo === "unassigned") q.set("unassigned", "true");
+    else if (filter?.assignedTo === "me") q.set("assignedTo", "me");
+
+    const { body, total } = await getRawCounted(`/authorizations/?${q.toString()}`);
+    const r = (body ?? []) as any[];
     const now = Date.now();
-    return (r ?? []).map((a: any) => {
+    const rows = (r ?? []).map((a: any) => {
       const dueMs = a.slaDueAt ? Date.parse(a.slaDueAt) : now;
-      const submittedAt = new Date(now - Number(a.tatElapsedSeconds ?? 0) * 1000).toISOString();
-      const code = (a.serviceCodes ?? [])[0] ?? "—";
+      const codes: string[] = Array.isArray(a.serviceCodes) ? a.serviceCodes : [];
+      const code = codes[0] ?? "—";
       return parseOr(zApprovalItem, {
         id: a.authorizationId,
         patient: { id: a.beneficiaryId, token: caseToken({ beneficiaryId: a.beneficiaryId }) },
+        // `service` stays the first code because a table cell holds one thing; `serviceCodes` below carries
+        // all of them, and the review panel lists the whole set rather than calling the tail "supporting".
         service: { system: "CPT", code, label: neutral(code) },
-        requestedBy: t("Provider", "مقدم الخدمة"),
+        serviceCodes: codes,
+        // The SOURCE, not the literal string "Provider" this used to be on every row — including the manual
+        // authorizations, which by definition have no requesting provider at all.
+        requestedBy: requesterLabel(a.source),
+        requestingProviderId: a.requestingProviderId ?? null,
+        assignedReviewerId: a.assignedReviewerId ?? null,
         priority: String(a.priority ?? "routine").toLowerCase(),
-        // A fulfilment authorization has no SLA — nothing waited on anybody. The due date used to be
-        // fabricated from the submission time when the server sent none, which put a countdown on settled
-        // work: a clock ticking towards a deadline that does not exist.
+        /*
+          NO DUE DATE MEANS NO SLA, whatever kind of row this is.
+
+          A fulfilment authorization never had one — nothing waited on anybody, the medicine is already in the
+          patient's hand. A review request that has not been picked up has not started its clock either: the
+          timer is set by `assign`, so `slaDueAt` is null until somebody takes it.
+
+          Previously only the fulfilment case answered null, and every other row with no due date got one
+          fabricated from the submission time — a countdown towards a deadline that does not exist, on a
+          request nobody has accepted. The screen renders null as an em-dash and the "breached" filter counts
+          it as neither breached nor in time, which is what it is.
+        */
         sla: a.slaDueAt
           ? { dueAt: a.slaDueAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) }
-          : a.kind === "Fulfilment"
-            ? null
-            : { dueAt: submittedAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) },
+          : null,
         status: authStatus(a.status),
-        submittedAt,
-        estimatedCost: "—",
+        // The server's own timestamp. This was `now - tatElapsedSeconds`, recomputed on every render, so a
+        // row's submission time crept forward while the page sat open.
+        submittedAt: a.submittedAt ?? new Date(now - Number(a.tatElapsedSeconds ?? 0) * 1000).toISOString(),
         source: a.source ?? "Manual",
         itemReference: a.itemReference ?? null,
         extensionReason: a.extensionReason ?? null,
@@ -2343,6 +2579,51 @@ export class HttpApiClient implements ApiClient {
         // so the fallback is the truth for that server rather than a guess.
         kind: a.kind === "Fulfilment" ? "Fulfilment" : "Review",
       });
+    });
+    return { rows, total: total ?? rows.length };
+  }
+
+  async retrospectiveQueue(closed?: boolean) {
+    const r = (await getRaw(`/authorizations/retrospective-queue${closed ? "?closed=true" : ""}`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zRetrospectiveItem, {
+        authorizationId: a.authorizationId,
+        authNo: a.authNo ?? "",
+        beneficiaryId: a.beneficiaryId,
+        serviceCodes: Array.isArray(a.serviceCodes) ? a.serviceCodes : [],
+        source: String(a.source ?? "Manual"),
+        status: authStatus(a.status),
+        decidedAt: a.decidedAt ?? null,
+        ageDays: Number(a.ageDays ?? 0),
+        reviewed: !!a.reviewed,
+        outcome: a.outcome ?? null,
+        reviewedAt: a.reviewedAt ?? null,
+        reviewedBy: a.reviewedBy ?? null,
+        rationale: a.rationale ?? null,
+      }),
+    );
+  }
+
+  async completeRetrospectiveReview(input: RetrospectiveReviewInput, idempotencyKey?: string) {
+    const r = (await postRaw(
+      `/authorizations/${encodeURIComponent(input.authorizationId)}/retrospective-review`,
+      { outcome: input.outcome, rationale: input.rationale },
+      idempotencyKey ?? `retro:${input.authorizationId}`,
+    )) as any;
+    return parseOr(zRetrospectiveItem, {
+      authorizationId: r?.authorizationId ?? input.authorizationId,
+      authNo: r?.authNo ?? "",
+      beneficiaryId: r?.beneficiaryId,
+      serviceCodes: Array.isArray(r?.serviceCodes) ? r.serviceCodes : [],
+      source: String(r?.source ?? "Manual"),
+      status: authStatus(r?.status),
+      decidedAt: r?.decidedAt ?? null,
+      ageDays: Number(r?.ageDays ?? 0),
+      reviewed: true,
+      outcome: r?.outcome ?? input.outcome,
+      reviewedAt: r?.reviewedAt ?? null,
+      reviewedBy: r?.reviewedBy ?? null,
+      rationale: r?.rationale ?? input.rationale,
     });
   }
 
@@ -2374,9 +2655,11 @@ export class HttpApiClient implements ApiClient {
       patient: { id: required(a?.beneficiaryId, "approval.beneficiaryId"), token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
       service: { system: "CPT", code: codes[0] ?? "—", label: neutral(codes[0] ?? "") },
       clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
-      supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
+      // EVERY requested service, including the first. `slice(1)` labelled the rest of the request
+      // "supporting codes", which they never were — a three-service request read as one service with two
+      // attachments, and a reviewer deciding on it was deciding on a third of what was asked.
+      requestedServices: codes.map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
       documents: (a?.documents ?? []).map((d: any) => ({ id: d.id ?? d.documentId ?? "", name: d.name ?? d.title ?? "document" })),
-      requestedAmount: "—",
     });
   }
   async decide(req: DecisionRequest) {
@@ -2448,8 +2731,11 @@ export class HttpApiClient implements ApiClient {
   // /dashboards/executive (zone-tagged widgets, each with chart series + a mandatory accessible dataTable +
   // bilingual labels, PHI-free). The zod contract splits widgets into kpis + charts, so we map gauge/summary
   // widgets to KPI cards and the rest to charts (every chart keeps its required dataTable — US-073).
-  async executiveDashboard(scope: "executive" | "finance" | "director") {
-    const d = (await getRaw(`/dashboards/executive`)) as any;
+  async executiveDashboard(scope: "executive" | "finance" | "director", period?: Period) {
+    // `scope` and the period REACH THE SERVER now. Both used to stop here: the scope picked a page heading
+    // and the period did not exist, so three portals rendered the same payload over whatever window the
+    // server happened to default to.
+    const d = (await getRaw(`/dashboards/executive${periodQuery(period, { scope })}`)) as any;
     const widgets: any[] = d?.widgets ?? [];
     const bi = (x: any) => ({ en: String(x?.en ?? ""), ar: String(x?.ar ?? "") });
     const points = (w: any) => (w.series?.[0]?.points ?? []) as any[];
@@ -2461,7 +2747,19 @@ export class HttpApiClient implements ApiClient {
         kind: "kpi",
         id: w.key,
         title: bi(w.title),
+        // MONEY IS MONEY. This was `String(sum)` for every KPI, and one of the two KPI widgets is the
+        // financial summary — so the director's only cost figure rendered as a bare decimal with no currency,
+        // no locale grouping and whatever float artefact the sum produced, in an application that formats
+        // every other amount through `useFormat().money` precisely because `ar-EG` must not read as `en-US`.
+        // The raw total travels as `value`; the screen formats it, because only the screen knows the locale.
         value: String(points(w).reduce((acc: number, p: any) => acc + Number(p.value ?? 0), 0)),
+        // The breakdown the server already computed and this client used to throw away. Pending-approvals
+        // ships status x priority x age x SLA breach; the financial summary ships cost by service line.
+        // Neither rendered anywhere in the product.
+        dataTable: {
+          columns: (w.dataTable?.columns ?? []).map(bi),
+          rows: (w.dataTable?.rows ?? []).map((row: any[]) => row.map((c) => String(c))),
+        },
       }),
     );
     const charts = widgets.filter((w) => !isKpi(w)).map((w) =>
@@ -2481,6 +2779,12 @@ export class HttpApiClient implements ApiClient {
       version: d?.contractVersion ?? "1.0",
       generatedAt: d?.generatedAt ?? new Date().toISOString(),
       scope,
+      // Echoed from the widgets rather than from what we asked for: the server resolves the window on the
+      // Cairo calendar and may not have used our dates at all. Stating the request back would be stating a
+      // question, and what the screen has to show is the answer.
+      period: widgets[0]?.from && widgets[0]?.to
+        ? { from: String(widgets[0].from), to: String(widgets[0].to) }
+        : period,
       kpis,
       charts,
     });
@@ -2488,12 +2792,13 @@ export class HttpApiClient implements ApiClient {
 
   // Director oversight / quality / escalations (Phase 8.3) — de-identified reporting aggregates (no PHI). Each
   // section fetches the relevant /reports/* endpoints and normalises them to KPI headlines + accessible tables.
-  async directorReport(section: "oversight" | "quality" | "escalations") {
+  async directorReport(section: "oversight" | "quality" | "escalations", period?: Period) {
+    const q = periodQuery(period);
     const min = (s: unknown) => `${Math.round(Number(s ?? 0) / 60)}`;
     const pct = (n: unknown) => `${Math.round(Number(n ?? 0) * 100)}%`;
     if (section === "oversight") {
       const pend = (await getRaw(`/reports/pending-approvals`)) as any;
-      const tat = (await getRaw(`/reports/approval-tat`)) as any;
+      const tat = (await getRaw(`/reports/approval-tat${q}`)) as any;
       return parseOr(zReportView, {
         kpis: [
           { label: { en: "Pending", ar: "معلّقة" }, value: String(pend?.total ?? 0) },
@@ -2516,9 +2821,9 @@ export class HttpApiClient implements ApiClient {
       });
     }
     if (section === "quality") {
-      const dx = (await getRaw(`/reports/top-diagnoses`)) as any;
-      const rx = (await getRaw(`/reports/top-medications`)) as any;
-      const ns = (await getRaw(`/reports/no-show`)) as any;
+      const dx = (await getRaw(`/reports/top-diagnoses${q}`)) as any;
+      const rx = (await getRaw(`/reports/top-medications${q}`)) as any;
+      const ns = (await getRaw(`/reports/no-show${q}`)) as any;
       return parseOr(zReportView, {
         kpis: [
           { label: { en: "Booked", ar: "محجوزة" }, value: String(ns?.booked ?? 0) },
@@ -2546,7 +2851,7 @@ export class HttpApiClient implements ApiClient {
       });
     }
     // escalations → rejected/flagged authorization requests by reason (de-identified).
-    const rej = (await getRaw(`/reports/rejected-requests`)) as any;
+    const rej = (await getRaw(`/reports/rejected-requests${q}`)) as any;
     return parseOr(zReportView, {
       kpis: [{ label: { en: "Rejected", ar: "مرفوضة" }, value: String(rej?.total ?? 0) }],
       tables: [
@@ -2556,6 +2861,66 @@ export class HttpApiClient implements ApiClient {
           rows: (rej?.byReason ?? []).map((r: any) => [String(r.reasonCode), String(r.count)]),
         },
       ],
+    });
+  }
+
+  /*
+   * ── The 2026-08-11 oversight reads ──────────────────────────────────────────────────────────────────
+   *
+   * All three sit in reporting-service's PHI-free zone. The claims one is deliberately NOT a claims-service
+   * call: the Medical Director holds `reporting:read-financial` and holds neither `claims:read` nor
+   * `claims:reconcile`, and reaching a chart by widening an operational scope is how an analytical need
+   * quietly becomes an operational authority.
+   */
+  /*
+   * Named `serviceUse`, not `utilization`.
+   *
+   * `utilization()` is already taken on this client, by finance's member-benefit sense of the word: how much
+   * of a cap somebody has consumed. This is the other sense — which services the network is using and how
+   * often. Two methods with one name, distinguished only by which overload the caller picked, is how a
+   * screen ends up rendering the wrong report and type-checking on the way.
+   */
+  async serviceUse(axis: ServiceAxis, period?: Period) {
+    const r = (await getRaw(`/reports/utilization${periodQuery(period, { dimension: axis })}`)) as any;
+    return parseOr(zServiceUseView, {
+      dimension: axis,
+      period: period ?? { from: "", to: "" },
+      rows: (r?.rows ?? []).map((row: any) => ({ code: String(row.code ?? ""), count: Number(row.count ?? 0) })),
+    });
+  }
+
+  async slaBreaches() {
+    const r = (await getRaw(`/reports/sla-breaches`)) as any;
+    return parseOr(zSlaBreachView, {
+      total: Number(r?.total ?? 0),
+      rows: (r?.rows ?? []).map((row: any) => ({
+        authNo: String(row.authNo ?? ""),
+        priority: String(row.priority ?? "Routine"),
+        status: String(row.status ?? ""),
+        ageBucket: String(row.ageBucket ?? ""),
+        ageSeconds: Number(row.ageSeconds ?? 0),
+        reviewerId: row.reviewerId ?? null,
+      })),
+    });
+  }
+
+  async claimsCost(period?: Period) {
+    const r = (await getRaw(`/reports/claims-summary${periodQuery(period)}`)) as any;
+    return parseOr(zClaimsCostView, {
+      period: period ?? { from: "", to: "" },
+      decided: Number(r?.decided ?? 0),
+      // `money()` rather than Number(): it is the one place in this client that refuses a value it cannot
+      // read as an amount, so a malformed total fails loudly instead of rendering as NaN in a currency field.
+      totalAllowed: money(r?.totalAllowed ?? 0, "claimsCost.totalAllowed"),
+      byOutcome: (r?.byOutcome ?? []).map((x: any) => ({ outcome: String(x.outcome ?? ""), count: Number(x.count ?? 0) })),
+      byServiceLine: (r?.byServiceLine ?? []).map((x: any) => ({
+        serviceLine: String(x.serviceLine ?? ""),
+        amount: money(x.amount ?? 0, "claimsCost.amount"),
+        count: Number(x.count ?? 0),
+      })),
+      topDenialReasons: (r?.topDenialReasons ?? []).map((x: any) => ({
+        reasonCode: String(x.reasonCode ?? ""), count: Number(x.count ?? 0),
+      })),
     });
   }
 
@@ -2638,7 +3003,7 @@ export class HttpApiClient implements ApiClient {
         title: neutral(t.title ?? t.description ?? ""),
         state: String(t.state ?? "todo").toLowerCase().replace(/inprogress/, "in_progress"),
         dueAt: t.dueAt ?? undefined,
-        status: "ok",
+        status: taskChip(t.state),
       }),
     );
   }
@@ -2652,7 +3017,9 @@ export class HttpApiClient implements ApiClient {
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
-        status: "ok",
+        // An escalation is by definition something that needed raising. `warn`, never the green chip the
+        // literal produced — and, as above, that literal threw before it could mislead anyone.
+        status: { kind: "warn" as const, label: { en: "Escalated", ar: "مُصعَّدة" } },
         raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
       }),
     );
@@ -2661,8 +3028,24 @@ export class HttpApiClient implements ApiClient {
   // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.
   // The service emits plain strings + numeric amounts; these adapters map to the bilingual + pre-formatted
   // contract shape (and compute share%), then validate the mapping.
-  async utilization() {
-    const r = (await getRaw(`/finance/utilization`)) as any;
+  //
+  // ============================================================================================================
+  // THE MAPPINGS BELOW ARE NOW TESTED (design 49 §1)
+  // ============================================================================================================
+  // Two of them used to write the literal string "ok" into a `status` field whose schema is `{ kind, label }`,
+  // so `parseOr` threw and EVERY settlement read and EVERY export failed against a real gateway. Nothing
+  // caught it because nothing ran it: the web tests construct `DevApiClient`, and this class only exists when
+  // there is a gateway on the other end. The Provider Settlements screen and the Exports screen were
+  // permanently in their error state in production and permanently green in CI.
+  //
+  // `test/http-client-contract.test.ts` now drives these methods over a stubbed `fetch` and validates what
+  // comes out against the real schemas. The HTTP adapter is code, and untested code is code that does not work.
+  async utilization(period?: Period) {
+    // `from`/`to` reach the server at last. The endpoint has accepted them since phase 10.2 and this screen
+    // sent neither, so finance saw the trailing month forever and could not close a prior one — the single
+    // most routine thing a finance function does. The screen even RENDERED the window it was given, which is
+    // the period rule honoured in the reading and broken in the asking.
+    const r = (await getRaw(`/finance/utilization${periodQuery(period)}`)) as any;
     return parseOr(zUtilizationView, {
       from: r?.from ?? "",
       to: r?.to ?? "",
@@ -2680,32 +3063,94 @@ export class HttpApiClient implements ApiClient {
       totalSpend: money(r?.totalSpend, "utilization.totalSpend"),
     });
   }
-  async settlements() {
-    const r = (await getRaw(`/finance/settlements`)) as any[];
-    return (r ?? []).map((s: any) =>
-      parseOr(zSettlement, {
-        id: s.id,
-        settlementNo: s.settlementNo,
-        providerRef: s.providerRef ?? s.providerId ?? "",
-        providerName: neutral(s.providerName ?? s.providerRef ?? ""),
-        periodStart: s.periodStart ?? "",
-        periodEnd: s.periodEnd ?? "",
-        currency: s.currency ?? "EGP",
-        total: money(s.total, "settlement.total"),
-        status: "ok",
-        state: String(s.state ?? s.status ?? "draft").toLowerCase(),
-        lines: (s.lines ?? []).map((l: any) => ({
-          serviceCode: l.serviceCode,
-          serviceLine: neutral(l.serviceLine),
-          deliveredQty: l.deliveredQty ?? 0,
-          agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
-          lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
-        })),
-      }),
-    );
+
+  /**
+   * The settlement list, with how many there ACTUALLY are.
+   *
+   * <p>The endpoint caps at 100 and reports the true count on `X-Total-Count`. It also accepts `providerId`
+   * and `status`, neither of which was ever sent — the screen pulled every settlement and filtered in the
+   * browser, which cannot see past the cap and so filtered a truncated set while presenting it as complete.</p>
+   */
+  async settlements(filter?: { providerId?: string; status?: string }) {
+    const params = new URLSearchParams();
+    if (filter?.providerId) params.set("providerId", filter.providerId);
+    if (filter?.status) params.set("status", filter.status);
+    const q = params.toString();
+    const { body, total } = await getRawCounted(`/finance/settlements${q ? `?${q}` : ""}`);
+    const rows = ((body as any[]) ?? []).map((s: any) => this.#settlement(s));
+    return parseOr(zSettlementPage, { rows, total: total ?? rows.length });
   }
-  async financialSummary(dimension: "serviceline" | "category" | "provider") {
-    const r = (await getRaw(`/finance/summaries?dimension=${dimension}`)) as any;
+
+  /**
+   * One settlement, from the service's `SettlementView`.
+   *
+   * <p>Private because four call sites need it — the list and the three lifecycle writes, each of which
+   * returns the settlement it just moved. A generate that returned a shape the list could not parse would be
+   * a screen that writes successfully and then cannot show what it wrote.</p>
+   */
+  #settlement(s: any) {
+    return {
+      id: s.settlementId ?? s.id,
+      settlementNo: s.settlementNo,
+      providerRef: s.providerRef ?? s.providerId ?? "",
+      providerName: neutral(s.providerName ?? s.providerRef ?? ""),
+      periodStart: s.periodStart ?? "",
+      periodEnd: s.periodEnd ?? "",
+      currency: s.currencyCode ?? s.currency ?? "EGP",
+      total: money(s.total, "settlement.total"),
+      // The REAL state, four ways. This was the literal "ok" — see `settlementChip`.
+      status: settlementChip(s.status ?? s.state),
+      state: String(s.status ?? s.state ?? "draft").toLowerCase(),
+      submittedBy: s.submittedBy ?? undefined,
+      approvedBy: s.approvedBy ?? undefined,
+      lines: (s.lines ?? []).map((l: any) => ({
+        serviceCode: l.serviceCode,
+        serviceLine: neutral(l.serviceLine),
+        deliveredQty: l.deliveredQty ?? 0,
+        agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
+        lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
+        // Projected by the service since phase 10.2 and dropped here, so a reviewer authorising a payment
+        // saw a contract tariff and an inferred floor rendered identically. `Contract` is the default only
+        // for a row written before the column existed; a value the enum does not know is not silently
+        // widened into one it does.
+        priceSource: l.priceSource === "ObservedFloor" ? "ObservedFloor" : "Contract",
+      })),
+    };
+  }
+
+  /**
+   * Generate a draft settlement for a provider and period.
+   *
+   * <p>The first of three writes the finance role has held the scopes for since phase 10.2 with no screen to
+   * use them. Idempotency-keyed because generating one mints a financial artifact and a retried request must
+   * return the settlement produced the first time rather than a second one.</p>
+   */
+  async generateSettlement(req: GenerateSettlementRequest) {
+    const r = (await postRaw(`/finance/settlements`, req, newIdempotencyKey())) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  /** Submit a draft for approval — the initiator half of the SoD split. */
+  async submitSettlement(id: string) {
+    const r = (await postRaw(`/finance/settlements/${encodeURIComponent(id)}/submit`, {})) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  /**
+   * Approve a submitted settlement — the release half.
+   *
+   * <p>The service refuses when the approver is the submitter (409 `urn:hbmp:sod-violation`), and that
+   * refusal stays: the client is not the authority on who may release a payment. The screen reads
+   * `submittedBy` and declines to offer the button in the first place, so the ordinary path no longer runs
+   * through a refusal.</p>
+   */
+  async approveSettlement(id: string) {
+    const r = (await postRaw(`/finance/settlements/${encodeURIComponent(id)}/approve`, {})) as any;
+    return parseOr(zSettlement, this.#settlement(r));
+  }
+
+  async financialSummary(dimension: "serviceline" | "category" | "provider", period?: Period) {
+    const r = (await getRaw(`/finance/summaries${periodQuery(period, { dimension })}`)) as any;
     const buckets: any[] = r?.buckets ?? [];
     const total = buckets.reduce((acc, b) => acc + Number(b.spend ?? 0), 0) || 1;
     return parseOr(zFinancialSummary, {
@@ -2719,21 +3164,55 @@ export class HttpApiClient implements ApiClient {
       totalSpend: money(r?.totalSpend ?? total, "financialSummary.totalSpend"),
     });
   }
+
+  /**
+   * Run an export and HAND OVER THE FILE.
+   *
+   * <p>This method used to `postRaw` — parse a `text/csv` response as JSON — and return a row count. There
+   * was no download anywhere in the application, so the one thing the Exports screen exists to do did not
+   * happen; and the filename it reported was built locally from the requested format, which is how it managed
+   * to name a file `.xlsx` that the server had always produced as CSV.</p>
+   *
+   * <p>The blob is saved through an object URL and an anchor click, and the URL is revoked afterwards —
+   * a blob held by a live URL is a copy of an audited financial extract kept alive in the page.</p>
+   */
   async exportReport(req: ExportRequest) {
-    const r = (await postRaw(`/finance/exports`, req)) as any;
+    const { blob, filename, rowCount } = await postForFile(`/finance/exports`, req);
+    // The server's name if it gave one — it knows what it produced. The local fallback is CSV-suffixed
+    // unconditionally, because CSV is the only thing this endpoint returns.
+    const name = filename ?? `${req.report}-${req.from}_${req.to}.csv`;
+    saveBlob(blob, name);
     return parseOr(zExportResult, {
-      report: r?.report ?? req.report,
-      format: r?.format ?? req.format,
-      rowCount: r?.rowCount ?? r?.rows ?? 0,
-      filename: r?.filename ?? `${req.report}-${req.from}_${req.to}.${req.format}`,
-      status: "ok",
+      report: req.report,
+      format: "csv",
+      // Null means the gateway has not been told to expose `X-Row-Count`, which is not the same fact as
+      // zero rows — but the schema wants a number and the file is already downloaded, so the honest
+      // fallback is the one the operator can check for themselves by opening it.
+      rowCount: rowCount ?? 0,
+      filename: name,
+      status: { kind: "ok" as const, label: { en: "Exported", ar: "تم التصدير" } },
     });
   }
 
   // Claims management (Phase 10b) — codes + amounts only, never a diagnosis. The service isolates provider
   // users to their own claims and audits every read; the portal maps status/bucket → non-color StatusKind chips.
-  async claimsWorklist(status?: string) {
-    const r = (await getRaw(`/claims/worklist${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
+  async claimsWorklist(status?: string, take?: number) {
+    /*
+      `/claims`, NOT `/claims/worklist`.
+
+      The old call went to the per-LINE adjudication queue: hard-filtered to UnderAdjudication + Pending, with
+      no `status` query parameter at all. ASP.NET bound nothing and answered 200, so all four segments of the
+      screen's status control returned identical rows — none of them in any of the statuses named. And the
+      payload is a LINE, so `origin`, `claimedAmount`, `netPayable` and `submittedAt` were all absent: every
+      money column on the claims worklist rendered zero or blank, on every row, always.
+
+      `GET /api/v1/claims` is the claim-level list. It parses `status` into a real ClaimStatus and returns the
+      amounts. The line queue still has a screen — `adjudicationQueue` below — because that is what it is for.
+    */
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    q.set("take", String(take ?? 200));
+    const r = (await getRaw(`/claims?${q.toString()}`)) as any[];
     return (r ?? []).map((c: any) =>
       parseOr(zClaimRow, {
         id: c.claimId ?? c.id,
@@ -2749,11 +3228,149 @@ export class HttpApiClient implements ApiClient {
     );
   }
 
-  async claimsReconciliation(bucket?: string) {
-    const r = (await getRaw(`/reconciliation${bucket ? `?bucket=${encodeURIComponent(bucket)}` : ""}`)) as any[];
+  async claimDetail(claimId: string) {
+    const c = (await getRaw(`/claims/${encodeURIComponent(claimId)}`)) as any;
+    return parseOr(zClaimDetail, {
+      id: c?.claimId ?? claimId,
+      claimNo: c?.claimNo ?? "",
+      origin: String(c?.origin ?? ""),
+      status: claimStatusChip(c?.status),
+      currency: c?.currencyCode ?? "EGP",
+      claimedAmount: Number(c?.claimedAmount ?? 0),
+      approvedAmount: c?.approvedAmount ?? null,
+      adjustedAmount: c?.adjustedAmount ?? null,
+      netPayable: c?.netPayable ?? null,
+      serviceDateFrom: String(c?.serviceDateFrom ?? ""),
+      submittedAt: c?.submittedAt ?? undefined,
+      lines: (c?.lines ?? []).map((l: any) => ({
+        claimLineId: l.claimLineId,
+        codeSystem: String(l.codeSystem ?? ""),
+        code: String(l.code ?? "—"),
+        description: l.description ?? null,
+        quantity: Number(l.quantity ?? 0),
+        billedAmount: Number(l.billedAmount ?? 0),
+        contractPrice: l.contractPrice ?? null,
+        allowedAmount: l.allowedAmount ?? null,
+        status: claimLineStatusChip(l.status),
+        reasonCodes: Array.isArray(l.reasonCodes) ? l.reasonCodes : [],
+      })),
+    });
+  }
+
+  async claimAdjustments(claimId: string) {
+    const r = (await getRaw(`/claims/${encodeURIComponent(claimId)}/adjustments`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zClaimAdjustment, {
+        adjustmentId: a.adjustmentId,
+        claimLineId: a.claimLineId ?? null,
+        type: String(a.type ?? a.adjustmentType ?? ""),
+        amountDelta: Number(a.amountDelta ?? 0),
+        beforeAmount: a.beforeAmount ?? null,
+        afterAmount: a.afterAmount ?? null,
+        reasonCode: a.reasonCode ?? null,
+        adjustedAt: a.adjustedAt ?? new Date().toISOString(),
+      }),
+    );
+  }
+
+  async adjudicationQueue(filter?: { recommendation?: string; reasonCode?: string; minValue?: number; maxValue?: number }) {
+    // The line queue, called with the parameters it actually accepts. Every one of these was served and
+    // unreachable: the only caller this endpoint ever had was passing it a `status` it does not take.
+    const q = new URLSearchParams();
+    if (filter?.recommendation) q.set("recommendation", filter.recommendation);
+    if (filter?.reasonCode) q.set("reasonCode", filter.reasonCode);
+    if (filter?.minValue !== undefined) q.set("minValue", String(filter.minValue));
+    if (filter?.maxValue !== undefined) q.set("maxValue", String(filter.maxValue));
+    const r = (await getRaw(`/claims/worklist${q.toString() ? `?${q.toString()}` : ""}`)) as any[];
+    return (r ?? []).map((l: any) =>
+      parseOr(zAdjudicationRow, {
+        claimId: l.claimId,
+        claimNo: l.claimNo ?? "",
+        claimLineId: l.claimLineId,
+        serviceDate: String(l.serviceDate ?? ""),
+        codeSystem: String(l.codeSystem ?? ""),
+        code: String(l.code ?? "—"),
+        description: l.description ?? null,
+        quantity: Number(l.quantity ?? 0),
+        billedAmount: Number(l.billedAmount ?? 0),
+        contractPrice: l.contractPrice ?? null,
+        allowedAmount: l.allowedAmount ?? null,
+        status: claimLineStatusChip(l.status),
+        systemRecommendation: l.systemRecommendation ?? null,
+        reasonCodes: Array.isArray(l.reasonCodes) ? l.reasonCodes : [],
+        authorizationId: l.authorizationId ?? null,
+        // A BOOLEAN, derived server-side from the fulfilment linkage. The officer confirms the service was
+        // rendered without reading what it found — the min-necessary boundary this whole portal rests on.
+        resultExists: !!l.resultExists,
+      }),
+    );
+  }
+
+  async decideClaimLine(req: ClaimDecisionRequest, idempotencyKey?: string) {
+    const r = (await postRaw(
+      `/claims/${encodeURIComponent(req.claimId)}/lines/${encodeURIComponent(req.claimLineId)}/decisions`,
+      {
+        decision: req.decision,
+        allowedAmount: req.allowedAmount ?? null,
+        reasonCodes: req.reasonCodes,
+        rationale: req.rationale,
+        confirmsDecisionId: req.confirmsDecisionId ?? null,
+      },
+      idempotencyKey ?? newIdempotencyKey(),
+    )) as any;
+    // 202 PendingSecondApproval comes back through the same success path — it is an OUTCOME, not a failure.
+    // The decision exceeded the dual-control threshold and waits for a second, distinct approver; showing it
+    // as an error would teach reviewers that the threshold is a malfunction.
+    return parseOr(zClaimDecisionResult, {
+      outcome: String(r?.outcome ?? "Recorded"),
+      decisionId: r?.decisionId ?? "",
+      lineStatus: r?.lineStatus ?? undefined,
+      claimStatus: r?.claimStatus ?? undefined,
+      allowedAmount: r?.allowedAmount ?? null,
+    });
+  }
+
+  async raiseClaimAdjustment(
+    input: { claimId: string; claimLineId: string; type: string; amountDelta: number; reasonCode?: string; rationale?: string },
+    idempotencyKey?: string,
+  ) {
+    const r = (await postRaw(
+      `/claims/${encodeURIComponent(input.claimId)}/lines/${encodeURIComponent(input.claimLineId)}/adjustments`,
+      {
+        type: input.type,
+        amountDelta: input.amountDelta,
+        reasonCode: input.reasonCode ?? null,
+        rationale: input.rationale ?? null,
+      },
+      idempotencyKey ?? newIdempotencyKey(),
+    )) as any;
+    return parseOr(zClaimAdjustment, {
+      adjustmentId: r?.adjustmentId ?? "",
+      claimLineId: input.claimLineId,
+      type: input.type,
+      amountDelta: input.amountDelta,
+      beforeAmount: r?.beforeAmount ?? null,
+      afterAmount: r?.afterAmount ?? null,
+      reasonCode: input.reasonCode ?? null,
+      adjustedAt: new Date().toISOString(),
+    });
+  }
+
+  async claimsReconciliation(bucket?: string, period?: Period) {
+    // The window now travels. This endpoint has always defaulted to the last 90 CAIRO days and the screen sent
+    // nothing and displayed nothing, so a reconciliation list silently ended 90 days back with no indication
+    // that anything preceded it.
+    const q = new URLSearchParams();
+    if (bucket) q.set("bucket", bucket);
+    if (period?.from) q.set("from", period.from);
+    if (period?.to) q.set("to", period.to);
+    const r = (await getRaw(`/reconciliation${q.toString() ? `?${q.toString()}` : ""}`)) as any[];
     return (r ?? []).map((l: any) =>
       parseOr(zReconciliationRow, {
         claimId: l.claimId,
+        // The row's real identity, which the server always sent and this mapper dropped. Keying on
+        // claimId + code collided for two lines of one claim on the same code — the QuantityVariance case.
+        claimLineId: l.claimLineId,
         claimNo: l.claimNo ?? "",
         origin: String(l.origin ?? ""),
         code: l.code ?? "—",
@@ -2766,8 +3383,11 @@ export class HttpApiClient implements ApiClient {
     );
   }
 
-  async claimsKpis() {
-    const r = (await getRaw(`/claims/kpis`)) as any;
+  async claimsKpis(period?: Period) {
+    const q = new URLSearchParams();
+    if (period?.from) q.set("from", period.from);
+    if (period?.to) q.set("to", period.to);
+    const r = (await getRaw(`/claims/kpis${q.toString() ? `?${q.toString()}` : ""}`)) as any;
     return parseOr(zClaimsKpis, {
       averageTatHours: Number(r?.averageTatHours ?? 0),
       approvalRate: Number(r?.approvalRate ?? 0),

@@ -136,7 +136,9 @@ public static class Worklist
         // by passing kind=Fulfilment. `kind=All` returns both for anyone who genuinely wants everything.
         v1.MapGet("/", async (
             string? status, string? priority, bool? slaBreached, bool? unassigned, string? kind,
-            ApprovalsDbContext db, ApprovalsGate gate, TimeProvider clock, CancellationToken ct) =>
+            string? assignedTo, HttpResponse http,
+            ApprovalsDbContext db, ApprovalsGate gate, IHbmpPrincipalAccessor me,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(ApprovalsPolicies.List, null, "worklist", ct);
             if (denied is not null) return denied;
@@ -152,6 +154,15 @@ public static class Worklist
             if (slaBreached == true) q = q.Where(a => a.SlaBreached);
             if (unassigned == true) q = q.Where(a => a.AssignedReviewerId == null);
 
+            // OWNERSHIP. `assignedTo=me` resolves to the caller; an explicit id is accepted for a supervisor
+            // asking after somebody's queue. This is the axis a SHARED queue is actually worked by — "mine"
+            // and "nobody has this yet" — and there was no way to ask either question: `unassigned` was
+            // served and never called, and the reviewer id was not on the projection at all.
+            var mine = string.Equals(assignedTo, "me", StringComparison.OrdinalIgnoreCase);
+            if (mine && Guid.TryParse(me.Principal?.Subject, out var myId)) q = q.Where(a => a.AssignedReviewerId == myId);
+            else if (mine) q = q.Where(a => false);          // a caller with no parseable subject owns nothing
+            else if (Guid.TryParse(assignedTo, out var who)) q = q.Where(a => a.AssignedReviewerId == who);
+
             var now = clock.GetUtcNow();
             // A work queue is read most-urgent-first; a register is read newest-first. Fulfilments carry no
             // SLA due date at all, so the review ordering would pile every one of them at the end in the
@@ -159,7 +170,14 @@ public static class Worklist
             var ordered = !all && wanted == AuthKind.Fulfilment
                 ? q.OrderByDescending(a => a.SubmittedAt)
                 : q.OrderBy(a => a.SlaDueAt ?? DateTimeOffset.MaxValue).ThenBy(a => a.SubmittedAt);
-            var rows = await ordered.Take(200).ToListAsync(ct);
+            const int Cap = 200;
+            var rows = await ordered.Take(Cap).ToListAsync(ct);
+            // THE CAP NOW SAYS SO. The client filtered these 200 rows in the browser and told the reviewer
+            // nothing, so a tenant with 300 pending requests narrowing to "breached" was narrowing a truncated
+            // list and reading the result as the whole answer. A header, not a body wrapper: every existing
+            // caller keeps the array shape it parses today.
+            var total = rows.Count < Cap ? rows.Count : await q.CountAsync(ct);
+            http.Headers["X-Total-Count"] = total.ToString();
             return Results.Ok(rows.Select(a => WorklistItemView.From(a, now)));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
         .Produces<IEnumerable<WorklistItemView>>();

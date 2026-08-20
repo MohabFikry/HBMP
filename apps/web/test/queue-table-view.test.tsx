@@ -164,6 +164,13 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/BranchRoster.tsx": "one branch's exceptions",
   "screens/BranchesOverview.tsx": "one row per branch",
   "screens/ClaimsPortal.tsx": "worklist and reconciliation migrated; the denial list is a top-N",
+  // 2026-08-11 — both genuinely bounded, and bounded on the SERVER rather than by hoping. Utilization is
+  // `top: 25` in ReportQueries; Claims & Cost is three outcome rows, a handful of service lines and a
+  // top-ten denial list. A pager over twenty-five ranked rows hides the tail that makes a ranking useful.
+  // The SLA-breach list on ReportView.tsx is NOT here: it can reach a hundred rows and is a worklist, so it
+  // is a DataTableView.
+  "screens/director/ServiceUse.tsx": "a server-capped top-25 ranking on one axis",
+  "screens/director/ClaimsCost.tsx": "outcome, cost and denial summaries — all server-capped top-N",
   "screens/LabQueue.tsx": "the result of an explicit search",
   "screens/MasterListAdmin.tsx": "an in-force code list",
   "screens/PharmacyDispense.tsx": "the result of an explicit search",

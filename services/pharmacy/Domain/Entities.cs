@@ -193,6 +193,37 @@ public sealed class PrescriptionLine
     public Guid? AmendedBy { get; set; }
     public DateTimeOffset? AmendedAt { get; set; }
 
+    // ---- 6.3 the shortage the counter reports (design 49 §5, pharmacy 0020) ------------------------------
+    //
+    // A fact about the PHARMACY, not about the prescription. None of these touch the accumulator or
+    // `Status`: the line stays dispensable and `QuantityRemaining` is unchanged, because stock arriving
+    // tomorrow must not require anything to be undone.
+    //
+    // The endpoint that writes them has existed since phase 6.3 — publishing to the prescriber, escalating
+    // to the pharmacy supervisor after eight hours, audited — and stored nothing, so before 0020 the flag
+    // the contract promised the screen could not survive a page reload and re-raising it notified again
+    // every time.
+
+    /// <summary>When the counter reported it could not fill this line, or NULL if it never has.</summary>
+    /// <remarks>NULL is "never reported", NOT "in stock". Whether a product is on a shelf is
+    /// inventory-service's fact; this table only knows what a counter said on a day.</remarks>
+    public DateTimeOffset? OutOfStockAt { get; set; }
+
+    /// <summary>The pharmacist who reported it. Present exactly when <see cref="OutOfStockAt"/> is, by CHECK.</summary>
+    public string? OutOfStockBy { get; set; }
+
+    /// <summary>How much could not be filled, in this line's <see cref="QuantityUnit"/>. NULL means the whole
+    /// remaining quantity — stored as absent rather than as a copy of <see cref="QuantityRemaining"/>, which
+    /// would go stale the moment a partial dispense landed.</summary>
+    public decimal? OutOfStockQty { get; set; }
+
+    /// <summary>The pharmacist's note to the prescriber. Never carried in the notification body — an inbox
+    /// line is read by whoever holds the device.</summary>
+    public string? OutOfStockNote { get; set; }
+
+    /// <summary>Reported short and not yet filled since.</summary>
+    public bool OutOfStock => OutOfStockAt is not null;
+
     public decimal QuantityRemaining => QuantityPrescribed - QuantityDispensed;
 
     /// <summary>The line is finished and nothing further can be dispensed against it.</summary>

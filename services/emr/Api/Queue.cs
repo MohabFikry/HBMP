@@ -60,6 +60,9 @@ public static class QueueModule
             await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
                 new
                 {
+                    // The reporting consumer binds RLS from the envelope and dead-letters what it cannot
+                    // attribute, so a check-in without this never became a fact.
+                    tenantId = me.Principal?.TenantId,
                     appointmentId = id, beneficiaryId = result.Appointment!.BeneficiaryId,
                     // The clinic, for the read model's per-clinic encounter counts.
                     locationId = result.Appointment!.LocationId,

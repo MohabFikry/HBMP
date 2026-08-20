@@ -1308,6 +1308,18 @@
           "quantityUnit": {
             "type": "string",
             "nullable": true
+          },
+          "outOfStock": {
+            "type": "boolean"
+          },
+          "outOfStockAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "outOfStockNote": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

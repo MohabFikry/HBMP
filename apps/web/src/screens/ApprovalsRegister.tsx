@@ -80,7 +80,9 @@ export function ApprovalsRegister() {
   const [filter, setFilter] = useState<Filter>("Fulfilment");
   const [selected, setSelected] = useState<ApprovalItem | null>(null);
 
-  const list = useAsync<ApprovalItem[]>(() => api.approvalWorklist(filter), [filter]);
+  // The endpoint now answers with a page and its total; the register wants only the rows, because it is a
+  // record rather than a work queue and nobody triages it against a cap.
+  const list = useAsync<ApprovalItem[]>(async () => (await api.approvalWorklist(filter)).rows, [filter]);
 
   const cols: Column<ApprovalItem>[] = [
     { key: "authNo", header: t(S.authNo), cell: (r) => <span className="tnum">{r.id}</span>, sortable: true, sortValue: (r) => r.id },

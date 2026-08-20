@@ -76,6 +76,24 @@ public static class ApprovalsPolicies
     /// </remarks>
     public const string RequestSubstitution = "auth:request-substitution";
 
+    /// <summary>
+    /// Complete the post-hoc review of a break-glass decision (US-061/062, 23-state-machines §5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT held by <c>medical_approval</c>, who hold <see cref="Manual"/>. Segregation of duties
+    /// on this control is enforced twice: per-person in the handler, which refuses a reviewer who is the
+    /// break-glass actor, and per-ROLE here. Without the second, the team that raises manual authorizations
+    /// would also be the class that signs them off — colleagues reviewing each other's overrides, which is the
+    /// arrangement this control exists to replace, only with a timestamp on it.
+    /// </para>
+    /// <para>
+    /// It carries no decision authority over the authorization itself. A review concluding NotJustified is a
+    /// FINDING; the care was already delivered and nothing here can unwind it.
+    /// </para>
+    /// </remarks>
+    public const string Retrospective = "auth:retrospective";
+
     public const string Resource = "authorization";
 
     public static IReadOnlyList<PolicyRule> Rules() =>
@@ -140,6 +158,16 @@ public static class ApprovalsPolicies
         {
             Action = Manual, ResourceType = Resource,
             Roles = Set("medical_approval", "medical_director"), Scopes = Set("auth:manual"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Completing the post-hoc review of a break-glass decision. Director + Super Admin, NOT the approval
+        // team who raise manual authorizations — see the note on Retrospective for why the role split matters
+        // on top of the per-person SoD the handler enforces.
+        new PolicyRule
+        {
+            Action = Retrospective, ResourceType = Resource,
+            Roles = Set("medical_director", "super_admin"), Scopes = Set("auth:retrospective"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },

@@ -124,8 +124,16 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
+    /// <summary>
+    /// The financial summary is built from SETTLED CLAIM LINES, and the money is what was allowed.
+    ///
+    /// <para>This test used to project <c>ServiceValued</c>, an event no service on the platform publishes —
+    /// so it proved the projector could handle a message that never arrived, while
+    /// <c>/reports/financial-summary</c> and the executive dashboard's financial widget returned zero in
+    /// production from the day they were written. The fixture was the only thing that ever fed that table.</para>
+    /// </summary>
     [SkippableFact]
-    public async Task Financial_summary_projects_from_service_valued_events_only()
+    public async Task Financial_summary_projects_from_settled_claim_lines()
     {
         Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
@@ -134,13 +142,65 @@ public class ProjectionTests
         {
             await using var db = new ReportingDbContext(Options());
             var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
-            await proj.ProjectAsync(Ev("ServiceValued", tenant, day, ("serviceLine", "Lab"), ("serviceCode", "80053"), ("amount", "150.00")));
-            await proj.ProjectAsync(Ev("ServiceValued", tenant, day, ("serviceLine", "Lab"), ("serviceCode", "80053"), ("amount", "50.00")));
+
+            // Two lab lines and one radiology line, as claims publishes them: the published name carries the
+            // `.v1` suffix and is translated by ProjectionMapping, so projecting the raw name here would
+            // exercise a path the queue never takes.
+            async Task LineAsync(string line, string code, string amount) =>
+                await proj.ProjectAsync(Ev(ProjectionMapping.ProjectorEventType("ClaimLineSettled.v1"), tenant, day,
+                    ("serviceLine", line), ("serviceCode", code), ("amount", amount)));
+
+            await LineAsync("Lab", "80053", "150.00");
+            await LineAsync("Lab", "80053", "50.00");
+            await LineAsync("Radiology", "71046", "400.00");
 
             var q = new ReportQueries(db, TimeProvider.System);
             var fin = await q.FinancialSummaryAsync(tenant, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31));
-            fin.TotalAmount.Should().Be(200.00m);
+
+            fin.TotalAmount.Should().Be(600.00m);
+            fin.ByServiceLine.Single(r => r.ServiceLine == "Lab").Amount.Should().Be(200.00m);
             fin.ByServiceLine.Single(r => r.ServiceLine == "Lab").Count.Should().Be(2);
+            fin.ByServiceLine.Single(r => r.ServiceLine == "Radiology").Amount.Should().Be(400.00m);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    /// <summary>
+    /// The claim-level settlement and the per-line settlement are different grains, and only one of them is
+    /// a financial fact.
+    /// </summary>
+    /// <remarks>
+    /// Both events fire for the same claim, in the same transaction, describing the same money.
+    /// <c>ClaimSettled</c> feeds <c>fact_cost</c> (one row per claim, with the payer/tier axes) and
+    /// <c>ClaimLineSettled</c> feeds <c>financial_fact</c> (one row per service line). If either projector
+    /// case ever learned the other's event, every settled claim would be counted twice and the financial
+    /// summary would quietly double — the kind of error that looks like growth.
+    /// </remarks>
+    [SkippableFact]
+    public async Task A_claim_level_settlement_is_not_also_a_service_line_fact()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
+        var day = new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero);
+        try
+        {
+            await using var db = new ReportingDbContext(Options());
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
+
+            await proj.ProjectAsync(Ev(ProjectionMapping.ProjectorEventType("ClaimApproved.v1"), tenant, day,
+                ("claimedAmount", "600.00"), ("approvedAmount", "600.00"), ("adjustedAmount", "0.00")));
+            await proj.ProjectAsync(Ev(ProjectionMapping.ProjectorEventType("ClaimLineSettled.v1"), tenant, day,
+                ("serviceLine", "Lab"), ("serviceCode", "80053"), ("amount", "600.00")));
+
+            var q = new ReportQueries(db, TimeProvider.System);
+            var fin = await q.FinancialSummaryAsync(tenant, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31));
+
+            fin.TotalAmount.Should().Be(600.00m, "the claim-level event is a cost fact, not a service-line fact");
+            fin.ByServiceLine.Should().HaveCount(1);
+
+            // And the claim-level event did land where it belongs, so this is not passing because nothing
+            // was projected at all.
+            (await db.CostFacts.AsNoTracking().CountAsync(c => c.TenantId == tenant)).Should().Be(1);
         }
         finally { await Cleanup(tenant); }
     }

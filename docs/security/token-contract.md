@@ -122,7 +122,7 @@ requested `OIDC.scope` for the live list) includes at least:
 ```
 admin:read admin:write admin:break-glass
 orders:read orders:consume orders:write  pharmacy:read pharmacy:dispense
-auth:read auth:review auth:decide auth:emergency auth:override auth:manual auth:ingest
+auth:read auth:review auth:decide auth:emergency auth:override auth:manual auth:ingest auth:retrospective
 reception:search  emr:read emr:write encounter:write rx:write patient:write  eligibility:check
 appointment:read appointment:write  document:write  case:read case:write case:manage
 finance:read finance:write finance:approve finance:export finance:project provider:finance

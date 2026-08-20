@@ -49,9 +49,14 @@ const ApprovalsRegister = lazy(() => import("./ApprovalsRegister").then((m) => (
 const ApprovalsManual = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsManual })));
 const ApprovalsEmergency = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsEmergency })));
 const ApprovalsSla = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsSla })));
+// The break-glass retrospective-review queue. Its own chunk: the director holds it and the approval team does
+// not, so folding it into the approvals bundle would ship the reviewer a screen their role cannot open.
+const ApprovalsRetrospective = lazy(() => import("./ApprovalsRetrospective").then((m) => ({ default: m.ApprovalsRetrospective })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
 // Director oversight / quality / escalations (Phase 8.3) — one generic report screen, parameterised.
 const DirectorReport = lazy(() => import("./ReportView").then((m) => ({ default: m.DirectorReport })));
+const ServiceUse = lazy(() => import("./director/ServiceUse").then((m) => ({ default: m.ServiceUse })));
+const ClaimsCost = lazy(() => import("./director/ClaimsCost").then((m) => ({ default: m.ClaimsCost })));
 // Provider network portal (Phase 2b) — directory / performance / contracts / locations / onboarding share one chunk.
 const NetworkDirectory = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkDirectory })));
 const NetworkPerformance = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkPerformance })));
@@ -78,6 +83,9 @@ const CallHistory = lazy(() => import("./CallCentre").then((m) => ({ default: m.
 const ClaimsWorklist = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsWorklist })));
 const ClaimsReconciliation = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsReconciliation })));
 const ClaimsInsights = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsInsights })));
+// The line-level decision workspace — its own chunk, because it is the only screen in this portal that WRITES
+// and it carries the reason-code catalogue and the decision form with it.
+const ClaimsAdjudication = lazy(() => import("./ClaimsAdjudication").then((m) => ({ default: m.ClaimsAdjudication })));
 // Cross-cutting inbox (Phase 8.1) — one chunk, mounted under every portal's `/…/notifications` route.
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 // Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
@@ -196,6 +204,14 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/director/engine": () => <ApprovalEngineAdmin />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
+  // 2026-08-11 audit — utilization on every axis, and claims/cost from the reporting financial zone.
+  "/director/utilization": () => <ServiceUse />,
+  "/director/claims-cost": () => <ClaimsCost />,
+  // The SLA board reached from the director's OWN nav. Same component as /approvals/sla — one board, two
+  // doors, because the reviewer who works the queue and the supervisor who answers for it both need it.
+  "/director/sla": () => <ApprovalsSla />,
+  // Same argument as the SLA board above: one queue, reached from the portal whose role holds the action.
+  "/director/break-glass": () => <ApprovalsRetrospective />,
   "/director/oversight": () => <DirectorReport section="oversight" />,
   "/director/quality": () => <DirectorReport section="quality" />,
   "/director/escalations": () => <DirectorReport section="escalations" />,
@@ -227,6 +243,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // 11. Claims (Phase 10b) — worklist / reconciliation / insights. Codes + amounts only; no clinical route exists.
   "/claims/worklist": () => <ClaimsWorklist />,
   "/claims/reconciliation": () => <ClaimsReconciliation />,
+  "/claims/adjudication": () => <ClaimsAdjudication />,
   "/claims/insights": () => <ClaimsInsights />,
   // 12. Policy administration (Phase 19.6) — the benefit product and the policy book. No clinical route.
   "/policy/payers": () => <PolicyPayers />,

@@ -416,6 +416,7 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("EncounterCompleted", "emr.events", new
             {
+                tenantId = me.Principal?.TenantId,
                 encounterId = encounter.EncounterId, encounter.EncounterNo,
                 beneficiaryId = encounter.BeneficiaryId, appointmentId = encounter.AppointmentId,
                 endedAt = now,
@@ -423,6 +424,7 @@ public static class ClinicalEndpoints
             if (appt is not null)
                 await outbox.EnqueueAsync("ApptCompleted", "emr.events", new
                 {
+                    tenantId = me.Principal?.TenantId,
                     appointmentId = appt.AppointmentId, beneficiaryId = appt.BeneficiaryId,
                     encounterId = encounter.EncounterId, locationId = appt.LocationId,
                 }, ct);
