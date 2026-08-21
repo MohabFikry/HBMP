@@ -91,15 +91,42 @@ other number is stale.**
 Written down because a handover that lists only achievements is how the next person rediscovers these the
 expensive way.
 
-- **GitHub Actions has not run since 2026-08-11: the account is billing-blocked.** Every job on every open
-  PR reported `FAILURE`, and not one of them started. The annotation is the same on all fifteen: *"The job
-  was not started because recent account payments have failed or your spending limit needs to be increased."*
-  This is worse than a red build and reads identically to one. A red check normally means a gate ran and
-  found something; here the scoreboard is red because there is no game. **Until billing is fixed, the local
-  gauntlet is the only verification that exists** — `./dotnet.sh test HbmpPlatform.sln -c Release --with-db`,
-  the `apps/web` suite, `tools/ci/check-openapi-drift.sh`, `tools/ci/apply-migrations.sh` and the scripts in
-  `tools/ci/`. Two of those cannot run locally at all (see `gate-freshness` below), so "green locally" is a
-  strictly smaller claim than "green in CI" and should be written as the smaller one.
+- ~~**GitHub Actions has not run since 2026-08-11: the account is billing-blocked.**~~
+  **CORRECTED 2026-08-21 — CI is running again, and it is red for a real reason.** The billing block was
+  genuine when this entry was written; it has since been lifted, and the entry was carried forward unchecked
+  through two passes. That is the same defect class every audit pass has been finding in the product — a
+  claim that outlives the thing it describes — and this one was load-bearing, because it told the reader that
+  a red check meant nothing. **Re-read the checks before you believe a claim about them.**
+
+  What CI actually says, on `master` and on every branch in the audit stack, identically:
+
+  | Gate | State |
+  |---|---|
+  | 18 of 21 backend gates | PASS |
+  | `tests` | **FAIL** — three masterdata tests (below) |
+  | `skipped-tests`, `coverage` | **FAIL**, downstream of `tests` producing no results |
+  | frontend `eslint` | ~~FAIL~~ fixed on the pass-7 branch |
+  | frontend `web`, `contracts`, `design-system`, `a11y-contrast` | PASS |
+
+  **The three failures are an environment gap, not a code defect, and they are older than the audit stack.**
+  CI never loads the master-data catalogue — nothing in `backend-ci.yml` runs `tools/masterdata-loader` — so:
+
+  - `DrugSearchTests.The_search_uses_its_trigram_indexes_rather_than_scanning_the_catalogue` asserts the query
+    plan uses `ix_drug_search_name`. Its own comment says *"a typeahead that table-scans 31,651 rows"* — with
+    a near-empty `masterdata.drug`, PostgreSQL correctly picks a `Seq Scan` and the assertion is meaningless
+    below the planner's crossover point. The precondition is real and undeclared.
+  - `MasterDataEndpointTests.Cpt_search_is_case_insensitive_…` and `…Cpt_sections_separate_imaging_from_…`
+    both fail on *"Expected collection not to be empty"*: there are no CPT rows to find.
+
+  Two honest fixes, and they are different for the two cases: the CPT tests should seed the handful of rows
+  they assert on, the way the rest of this suite creates its own data; the trigram test should declare its
+  scale precondition rather than assert a plan the planner is right to reject. **Neither is done.** They are
+  the first thing to pick up, because until they are, `tests` and `coverage` stay red on `master` and the
+  scoreboard goes on meaning nothing — which is exactly what the stale entry above cost.
+
+  Local verification is still the stronger claim for the DB-gated suites (CI has no seeded catalogue and
+  `gate-freshness` cannot run locally at all), so "green locally" and "green in CI" are both partial and
+  neither implies the other.
 
 - ~~**`tenant_id = ''` is down to 341 rows in ONE table, and the survivor may not be debt at all.**~~
   **CLOSED 2026-08-21 — and the survivor was never debt.** The question this entry posed — *is `role_scope`

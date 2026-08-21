@@ -130,9 +130,18 @@ const S = {
   actions: { en: "Actions", ar: "إجراءات" },
 } satisfies Record<string, Localized>;
 
-/** The three levels a tier assignment can attach to, in the resolver's own vocabulary. */
-const ASSIGNMENT_SCOPES = ["Provider", "Location", "ContractServiceLine"] as const;
-type AssignmentScope = (typeof ASSIGNMENT_SCOPES)[number];
+/**
+ * The three levels a tier assignment can attach to, in the resolver's own vocabulary.
+ *
+ * The picker below is built from this rather than restating it: `NetworkAssignmentScope` is a server enum
+ * and a list the client keeps in two places is one that eventually disagrees with itself.
+ */
+const ASSIGNMENT_SCOPES = [
+  { value: "Provider", label: () => S.scopeProvider },
+  { value: "Location", label: () => S.scopeLocation },
+  { value: "ContractServiceLine", label: () => S.scopeServiceLine },
+] as const;
+type AssignmentScope = (typeof ASSIGNMENT_SCOPES)[number]["value"];
 
 export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
@@ -496,11 +505,7 @@ function AssignToTier({
             label={t(S.scopeLevel)}
             value={scope}
             onChange={(v: string) => setScope(v as AssignmentScope)}
-            options={[
-              { value: "Provider", label: t(S.scopeProvider) },
-              { value: "Location", label: t(S.scopeLocation) },
-              { value: "ContractServiceLine", label: t(S.scopeServiceLine) },
-            ]}
+            options={ASSIGNMENT_SCOPES.map((x) => ({ value: x.value, label: t(x.label()) }))}
           />
           {scope !== "Provider" && (
             <InputField

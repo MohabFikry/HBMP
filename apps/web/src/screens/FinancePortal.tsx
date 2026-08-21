@@ -244,9 +244,22 @@ export function FinanceUtilization() {
   );
 }
 
-/** The four lifecycle states, plus "all". Real `SettlementStatus` members — the server parses them. */
-const STATES = ["", "Draft", "Submitted", "Approved", "Paid"] as const;
-type StateFilter = (typeof STATES)[number];
+/**
+ * The four lifecycle states, plus "all". Real `SettlementStatus` members — the server parses them.
+ *
+ * 33.7 — this used to be a `const` that nothing read: the segmented control below listed the same five
+ * values again as literals, so the constant documented an intent it did not enforce and eslint reported it
+ * as assigned-but-only-used-as-a-type. The labels hang off it now, which makes the two lists one list — the
+ * failure mode being a state added to the server and to the filter and not to the type, or the reverse.
+ */
+const STATES = [
+  { value: "", label: () => S.allStates },
+  { value: "Draft", label: () => S.draft },
+  { value: "Submitted", label: () => S.submitted },
+  { value: "Approved", label: () => S.approved },
+  { value: "Paid", label: () => S.paid },
+] as const;
+type StateFilter = (typeof STATES)[number]["value"];
 
 /**
  * Provider settlements — the list, the lifecycle, and the priced line detail.
@@ -352,13 +365,7 @@ export function FinanceSettlements() {
           aria-label={t(S.status)}
           value={stateFilter}
           onChange={setStateFilter}
-          segments={[
-            { value: "", label: t(S.allStates) },
-            { value: "Draft", label: t(S.draft) },
-            { value: "Submitted", label: t(S.submitted) },
-            { value: "Approved", label: t(S.approved) },
-            { value: "Paid", label: t(S.paid) },
-          ]}
+          segments={STATES.map((x) => ({ value: x.value, label: t(x.label()) }))}
         />
         {/* Invariant 31 — a list that caps its page says so, in the count. */}
         {total > rows.length && (
