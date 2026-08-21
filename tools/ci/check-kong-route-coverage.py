@@ -26,7 +26,20 @@ from __future__ import annotations
 import re, sys, glob, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-IGNORE_SEGMENTS = {"health", "metrics"}
+# 33.7 — "metrics" LEFT THIS SET, and it was hiding a real gap.
+#
+# The intent was to skip the operational endpoints: `/health/live` and the Prometheus scrape at `/metrics`.
+# Both of those are served UNVERSIONED, so neither starts with a public prefix and neither ever reached this
+# check — the set only ever did anything to `/api/v1/health/*` (which nothing serves) and `/api/v1/metrics`.
+#
+# provider-service serves `/api/v1/metrics`: the Network Team's network roll-up, RLS-scoped, refused with 403
+# to provider-scoped callers. It has no Kong route, so it has never been reachable from the SPA — and the
+# guard whose entire job is to catch an unrouted resource had been told to look away from that name. The
+# Performance screen computed the same four numbers in the browser instead, past the 403.
+#
+# Left as a set rather than deleted: a future `/api/v1/health/...` would still want skipping, and the
+# reasoning above is worth keeping next to the name that caused the trouble.
+IGNORE_SEGMENTS = {"health"}
 # Services intentionally NOT on the public gateway: audit-service is written via the internal audit
 # client and its read API is compliance-internal — it is not part of the single SPA origin.
 INTERNAL_SERVICES = {"audit"}

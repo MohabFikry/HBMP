@@ -529,7 +529,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderMetricsView"
+                }
+              }
+            }
           }
         }
       }
@@ -541,7 +548,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkMetricsView"
+                }
+              }
+            }
           }
         }
       }
@@ -1811,6 +1825,46 @@
         },
         "additionalProperties": false
       },
+      "CredentialCountsView": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "expiringSoon": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "expired": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "NetworkMetricsView": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "active": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "suspended": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "terminated": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
       "NetworkTierView": {
         "type": "object",
         "properties": {
@@ -1906,6 +1960,40 @@
           "daysUntilExpiry": {
             "type": "integer",
             "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProviderMetricsView": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "activeContracts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "servicesOffered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialCountsView"
+          },
+          "ordersFulfilled": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "avgTurnaroundHours": {
+            "type": "number",
+            "format": "double",
             "nullable": true
           }
         },

@@ -225,6 +225,11 @@ services:
           - /api/v1/branch-labels
           # 19.1b — network tiers + effective-dated tier assignment + the service-date resolver.
           - /api/v1/network-tiers
+          # 33.7 — the Network Team's network roll-up (2b.3). NOT the Prometheus scrape, which is the
+          # unversioned /metrics and stays off the gateway. This has been served since phase 2b and never
+          # routed, so the Performance screen counted the four numbers in the browser instead — past the 403
+          # this endpoint returns to provider-scoped callers.
+          - /api/v1/metrics
         strip_path: false
 
   # --- orders-service: investigation orders + lab/radiology fulfillment + report-access ---

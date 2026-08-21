@@ -22,6 +22,8 @@ import {
   zAutoDecisionSwitch,
   zSystemConfigEntry,
   zProviderSummary,
+  zNetworkMetrics,
+  zProviderMetrics,
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
@@ -4163,9 +4165,45 @@ export class HttpApiClient implements ApiClient {
       });
     });
   }
+  /**
+   * 33.7 — the network roll-up, ASKED of provider-service.
+   *
+   * <p>The comment that used to sit here read: "performance is derived client-side from the directory (the
+   * network roll-up /metrics is not routed at the gateway)". Both halves were true and the conclusion was
+   * the wrong one. The endpoint returns exactly these four fields; the missing gateway route was the defect,
+   * not a reason to compute them here — and the SPA's version counted a rendering label
+   * (<code>status.label.en === "Active"</code>) over the directory projection, past a 403 the service gives
+   * a provider-scoped caller.</p>
+   */
+  async networkMetrics() {
+    const r = (await getRaw(`/metrics`)) as any;
+    return parseOr(zNetworkMetrics, {
+      total: Number(r?.total ?? 0),
+      active: Number(r?.active ?? 0),
+      suspended: Number(r?.suspended ?? 0),
+      terminated: Number(r?.terminated ?? 0),
+    });
+  }
+  async providerMetrics(providerId: string) {
+    const r = (await getRaw(`/providers/${encodeURIComponent(providerId)}/metrics`)) as any;
+    return parseOr(zProviderMetrics, {
+      providerId: r?.providerId ?? providerId,
+      status: String(r?.status ?? ""),
+      activeContracts: Number(r?.activeContracts ?? 0),
+      servicesOffered: Number(r?.servicesOffered ?? 0),
+      credentials: {
+        valid: Number(r?.credentials?.valid ?? 0),
+        expiringSoon: Number(r?.credentials?.expiringSoon ?? 0),
+        expired: Number(r?.credentials?.expired ?? 0),
+      },
+      ordersFulfilled: Number(r?.ordersFulfilled ?? 0),
+      // NULL, not 0. "No orders yet" and "they all took no time" are different facts.
+      avgTurnaroundHours: r?.avgTurnaroundHours ?? null,
+    });
+  }
+
   // Provider network (Phase 2b, US-018..021) — the Network Team's tenant-scoped directory (never provider-scoped
-  // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads; performance is
-  // derived client-side from the directory (the network roll-up /metrics is not routed at the gateway).
+  // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads.
   async providerList() {
     const r = (await getRaw(`/providers`)) as any[];
     return (Array.isArray(r) ? r : []).map((p: any) =>

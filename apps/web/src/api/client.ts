@@ -74,6 +74,8 @@ import type {
   ManualAuthResult,
   MasterDataVersion,
   ProviderSummary,
+  NetworkMetrics,
+  ProviderMetrics,
   ProviderLocation,
   ProviderContract,
   CreateProviderInput,
@@ -1057,6 +1059,16 @@ export interface ApiClient {
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
   createProvider(input: CreateProviderInput, idempotencyKey?: string): Promise<ProviderSummary>;
+  /**
+   * The network roll-up, from the service that owns it.
+   *
+   * The Performance screen used to derive these four numbers by counting `status.label.en === "Active"` over
+   * the directory — a tally of a display string, computed past the 403 provider-service gives a
+   * provider-scoped caller. See `zNetworkMetrics`.
+   */
+  networkMetrics(): Promise<NetworkMetrics>;
+  /** One provider's counters: contracts in effect, services offered, and the state of its credentials. */
+  providerMetrics(providerId: string): Promise<ProviderMetrics>;
 
   // Practitioners (Phase 14.5, design 37 §4) — the clinical profile behind a user, with the specialty and
   // the clinics that the booking screen filters on.

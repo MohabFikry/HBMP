@@ -64,6 +64,8 @@ import {
   zAccessSession,
   zProgramEnablement,
   zProviderSummary,
+  zNetworkMetrics,
+  zProviderMetrics,
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
@@ -4066,6 +4068,34 @@ export class DevApiClient implements ApiClient {
         },
       ]),
       [],
+    );
+  }
+  networkMetrics() {
+    return this.gate(
+      // The same three providers the directory fixture carries, counted by the SERVICE's own definition:
+      // one suspended, none terminated. Kept in step deliberately — a roll-up that disagreed with the
+      // directory beside it would be a fixture that hides exactly the drift this endpoint exists to end.
+      () => ok(zNetworkMetrics, { total: 3, active: 2, suspended: 1, terminated: 0 }),
+      { total: 0, active: 0, suspended: 0, terminated: 0 },
+    );
+  }
+  providerMetrics(providerId: string) {
+    return this.gate(
+      () => ok(zProviderMetrics, {
+        providerId,
+        status: "Active",
+        activeContracts: 2,
+        servicesOffered: 41,
+        credentials: { valid: 5, expiringSoon: 1, expired: 0 },
+        // Null, not zero — the fulfillment events that populate it land in phases 5/6.
+        ordersFulfilled: 0,
+        avgTurnaroundHours: null,
+      }),
+      {
+        providerId, status: "", activeContracts: 0, servicesOffered: 0,
+        credentials: { valid: 0, expiringSoon: 0, expired: 0 },
+        ordersFulfilled: 0, avgTurnaroundHours: null,
+      },
     );
   }
   providerList() {

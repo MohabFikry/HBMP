@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
-import type { NetworkTierView, PolicyApi, TierAssignmentView, TierResolutionView } from "../api/policyApi";
+import type { NetworkTierView, PolicyApi, TierAssignmentView, TierProviderOption, TierResolutionView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
 
 /** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
@@ -12,7 +12,7 @@ const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
 import { useAuth } from "../auth/AuthProvider";
 import { mayAdministerTiers } from "../authz/permissions";
-import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { PageHeader, fillLocalized, useLoc, readErrorMessage } from "./_shared";
 import { ConfirmAction } from "./ConfirmAction";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
@@ -84,13 +84,61 @@ const S = {
     en: "The assignment can be re-created, but claims already priced are not repriced.",
     ar: "يمكن إعادة إنشاء الإسناد، لكن المطالبات المُسعَّرة سابقًا لا يُعاد تسعيرها.",
   },
+
+  // ---- 33.7 — creating the assignment the sentence above promised could be re-created ----
+  assign: { en: "Assign to this tier", ar: "إسناد إلى هذه الشريحة" },
+  assignHint: {
+    en: "Which tier a provider sits in decides the rate their claims price at, from the date you set here. An assignment is effective-dated and the most specific one wins — a location assignment beats a provider-wide one for services delivered there.",
+    ar: "تحدد شريحة مقدم الخدمة سعر تسعير مطالباته، اعتباراً من التاريخ الذي تحدده هنا. الإسناد مؤرَّخ السريان والأكثر تحديداً يسبق — فإسناد الموقع يسبق الإسناد على مستوى مقدم الخدمة للخدمات المقدَّمة فيه.",
+  },
+  provider: { en: "Provider", ar: "مقدم الخدمة" },
+  pickProvider: { en: "Select a provider", ar: "اختر مقدم خدمة" },
+  scopeLevel: { en: "Applies to", ar: "ينطبق على" },
+  scopeProvider: { en: "The whole provider", ar: "مقدم الخدمة بالكامل" },
+  scopeLocation: { en: "One location", ar: "موقع واحد" },
+  scopeServiceLine: { en: "One contract service line", ar: "بند خدمة في العقد" },
+  reference: { en: "Location or service-line id", ar: "معرّف الموقع أو بند الخدمة" },
+  referenceHint: {
+    en: "Copy it from the contract or the provider's locations. A provider-wide assignment needs no reference.",
+    ar: "انسخه من العقد أو من مواقع مقدم الخدمة. الإسناد على مستوى مقدم الخدمة لا يحتاج مرجعاً.",
+  },
+  from: { en: "In force from", ar: "سارٍ من" },
+  until: { en: "Until (optional, exclusive)", ar: "حتى (اختياري، غير شامل)" },
+  assignNeedsProvider: { en: "Choose a provider.", ar: "اختر مقدم خدمة." },
+  assignNeedsRef: {
+    en: "A location or service-line assignment needs the id it applies to.",
+    ar: "يحتاج إسناد الموقع أو بند الخدمة إلى المعرّف الذي ينطبق عليه.",
+  },
+  assigned: { en: "Assigned. Services from that date price at this tier.", ar: "تم الإسناد. تُسعَّر الخدمات من ذلك التاريخ عند هذه الشريحة." },
+  retiredNoAssign: {
+    en: "A retired tier takes no new assignments. Its existing ones stay readable, because claims priced against it must still render.",
+    ar: "الشريحة المتوقفة لا تقبل إسنادات جديدة. وتبقى إسناداتها السابقة قابلة للقراءة، لأن المطالبات المسعّرة عندها يجب أن تظل ظاهرة.",
+  },
+
+  // ---- 33.7 — editing what a tier is CALLED, which was create-only ----
+  edit: { en: "Rename this tier", ar: "إعادة تسمية الشريحة" },
+  save: { en: "Save", ar: "حفظ" },
+  saved: { en: "Tier updated.", ar: "تم تحديث الشريحة." },
+  editHint: {
+    en: "The name, rank and description can be corrected. The code and the out-of-network flag cannot — priced claims and benefit rules already refer to them.",
+    ar: "يمكن تصحيح الاسم والترتيب والوصف. أما الرمز وعلامة خارج الشبكة فلا — إذ تشير إليهما المطالبات المسعّرة وقواعد المنافع.",
+  },
+  description: { en: "Description", ar: "الوصف" },
+
+  // The actions column had NO header, which axe reports as `empty-table-header` and a screen-reader user
+  // hears as a nameless column. The same latent issue two other tables carried before 32.6.
+  actions: { en: "Actions", ar: "إجراءات" },
 } satisfies Record<string, Localized>;
+
+/** The three levels a tier assignment can attach to, in the resolver's own vocabulary. */
+const ASSIGNMENT_SCOPES = ["Provider", "Location", "ContractServiceLine"] as const;
+type AssignmentScope = (typeof ASSIGNMENT_SCOPES)[number];
 
 export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const { session } = useAuth();
-  const mayWrite = mayAdministerTiers(session?.role);
+  const mayWrite = mayAdministerTiers(session?.issuerRoles);
 
   const [tiers, setTiers] = useState<NetworkTierView[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -144,7 +192,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
             {
               key: "act",
-              header: "",
+              header: t(S.actions),
               cell: (r) =>
                 mayWrite && r.status === "Active" ? (
                   <Button
@@ -157,6 +205,12 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
                 ) : null,
             },
   ], [t, fmt, mayWrite]);
+
+  /** The row the assignment and rename panels act on — resolved once rather than looked up in three places. */
+  const selectedTier = useMemo(
+    () => (tiers ?? []).find((x) => x.networkTierId === selected) ?? null,
+    [tiers, selected],
+  );
 
   /** A tier accumulates assignments as the network grows; searched by the reference a contract cites. */
   const assignmentQuery = useTableQuery<TierAssignmentView>({
@@ -249,6 +303,30 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
         </Card>
       )}
 
+      {/*
+        33.7 — the assignment could be REVOKED and never created.
+
+        The revoke dialog's own consequence line says "The assignment can be re-created, but claims already
+        priced are not repriced", and there was nothing in the platform that could re-create one:
+        `assignTier` was implemented in policyApi and called by nobody, so this screen removed rows from a
+        table only some other, non-existent screen could ever fill. Both halves of the tier map — the tiers
+        and who is in them — are administered here, or neither is.
+      */}
+      {mayWrite && selectedTier && (
+        <AssignToTier
+          api={api}
+          tier={selectedTier}
+          onAssigned={async () => {
+            setAnnounce(t(S.assigned));
+            setAssignments(await api.tierAssignments(selectedTier.networkTierId));
+          }}
+        />
+      )}
+
+      {mayWrite && selectedTier && (
+        <RenameTier api={api} tier={selectedTier} onSaved={async () => { setAnnounce(t(S.saved)); await load(); }} />
+      )}
+
       <ConfirmAction
         open={revoking !== null}
         onOpenChange={(o) => !o && setRevoking(null)}
@@ -256,10 +334,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
         title={S.revokeTitle}
         description={S.revokeReversible}
         // The reference the row shows, so the dialog names the same thing the operator clicked beside.
-        body={{
-          en: S.revokeBody.en.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
-          ar: S.revokeBody.ar.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
-        }}
+        body={fillLocalized(S.revokeBody, revoking?.scopeRef.slice(0, 8) ?? "")}
         confirmLabel={S.revoke}
         onConfirm={async () => {
           if (!revoking || !selected) return;
@@ -329,6 +404,191 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
           </div>
         </dl>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Put a provider — or one of its locations, or one contract service line — into this tier.
+ *
+ * <p>The provider is PICKED, not typed. The resolver above takes a raw uuid because it is a read: getting it
+ * wrong wastes a lookup. Getting it wrong here reprices somebody's claims from a date, which is the same
+ * consequence the revoke dialog treats as worth a confirmation.</p>
+ *
+ * <p>A retired tier is refused here rather than at the server: it returns
+ * <code>409 TIER_RETIRED</code>, and offering the form so the operator can be told no is worse than saying
+ * why up front — retired tiers stay listed on purpose, because claims priced against them must still
+ * render.</p>
+ */
+function AssignToTier({
+  api,
+  tier,
+  onAssigned,
+}: {
+  api: PolicyApi;
+  tier: NetworkTierView;
+  onAssigned: () => Promise<void>;
+}) {
+  const t = useLoc();
+  const [providers, setProviders] = useState<TierProviderOption[]>([]);
+  const [providerId, setProviderId] = useState("");
+  const [scope, setScope] = useState<AssignmentScope>("Provider");
+  const [scopeRef, setScopeRef] = useState("");
+  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [until, setUntil] = useState("");
+  const [error, setError] = useState<Localized | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [assignKey, rotateAssignKey] = useIdempotencyKey();
+
+  useEffect(() => {
+    let live = true;
+    api.tierProviders()
+      .then((rows) => live && setProviders(rows))
+      // Degrades to an empty picker rather than taking the panel down: the tier list beside it is still
+      // useful, and a directory outage is not a reason to hide the tier map.
+      .catch((e) => live && setError(readErrorMessage(e)));
+    return () => { live = false; };
+  }, [api]);
+
+  const retired = tier.status !== "Active";
+
+  async function submit() {
+    setError(null);
+    if (providerId === "") { setError(S.assignNeedsProvider); return; }
+    // The scope ref for a provider-wide assignment IS the provider; for the other two it is an id the
+    // operator brings from the contract, and there is nothing sensible to default it to.
+    const ref = scope === "Provider" ? providerId : scopeRef.trim();
+    if (ref === "") { setError(S.assignNeedsRef); return; }
+    setBusy(true);
+    try {
+      await api.assignTier(
+        tier.networkTierId,
+        { scope, scopeRef: ref, effectiveFrom: from, effectiveTo: until || null },
+        assignKey,
+      );
+      rotateAssignKey();
+      setScopeRef("");
+      setUntil("");
+      await onAssigned();
+    } catch (e) {
+      setError(writeErrorMessage(e).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card data-testid="tier-assign">
+      <h2 className="panel-h">{t(S.assign)}</h2>
+      {retired ? (
+        <InlineAlert tone="info">{t(S.retiredNoAssign)}</InlineAlert>
+      ) : (
+        <>
+          <InlineAlert tone="info">{t(S.assignHint)}</InlineAlert>
+          <ComboboxField
+            label={t(S.provider)}
+            placeholder={t(S.pickProvider)}
+            value={providerId || null}
+            onChange={setProviderId}
+            options={providers.map((p) => ({ value: p.providerId, label: `${p.legalName} · ${p.providerCode}` }))}
+          />
+          <ComboboxField
+            label={t(S.scopeLevel)}
+            value={scope}
+            onChange={(v: string) => setScope(v as AssignmentScope)}
+            options={[
+              { value: "Provider", label: t(S.scopeProvider) },
+              { value: "Location", label: t(S.scopeLocation) },
+              { value: "ContractServiceLine", label: t(S.scopeServiceLine) },
+            ]}
+          />
+          {scope !== "Provider" && (
+            <InputField
+              label={t(S.reference)}
+              help={t(S.referenceHint)}
+              value={scopeRef}
+              onChange={(e) => setScopeRef(e.target.value)}
+            />
+          )}
+          <InputField type="date" label={t(S.from)} value={from} onChange={(e) => setFrom(e.target.value)} />
+          <InputField type="date" label={t(S.until)} value={until} onChange={(e) => setUntil(e.target.value)} />
+          <div aria-live="polite">
+            {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+          </div>
+          {/* No glyph. `plus` means "create a thing" and this creates a LINK between two things that
+              already exist — the icon policy's own rule (button-icon-policy.test.ts) is that a glyph either
+              means the action or is absent. */}
+          <Button variant="primary" loading={busy} onClick={() => void submit()}>
+            {t(S.assign)}
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Correct what a tier is CALLED.
+ *
+ * <p>`updateTier` was implemented in policyApi and called by nothing, so a tier created with a typo in its
+ * Arabic name was a tier that kept it — and the only remedy on offer was retiring it and creating another,
+ * which the create panel's own note recommends for the code and the out-of-network flag. That advice is
+ * right for those two, because priced claims refer to them. It is not right for a name.</p>
+ */
+function RenameTier({
+  api,
+  tier,
+  onSaved,
+}: {
+  api: PolicyApi;
+  tier: NetworkTierView;
+  onSaved: () => Promise<void>;
+}) {
+  const t = useLoc();
+  const [nameEn, setNameEn] = useState(tier.nameEn);
+  const [nameAr, setNameAr] = useState(tier.nameAr);
+  const [rank, setRank] = useState(String(tier.rank));
+  const [description, setDescription] = useState(tier.description ?? "");
+  const [error, setError] = useState<Localized | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Re-seed when the operator selects a different tier — without this the form keeps the previous tier's
+  // name and saving it would rename the newly-selected one to the old one's label.
+  useEffect(() => {
+    setNameEn(tier.nameEn);
+    setNameAr(tier.nameAr);
+    setRank(String(tier.rank));
+    setDescription(tier.description ?? "");
+    setError(null);
+  }, [tier]);
+
+  return (
+    <Card data-testid="tier-edit">
+      <h2 className="panel-h">{t(S.edit)}</h2>
+      <InlineAlert tone="info">{t(S.editHint)}</InlineAlert>
+      <InputField label={t(S.nameEn)} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+      <InputField label={t(S.nameAr)} value={nameAr} onChange={(e) => setNameAr(e.target.value)} />
+      <InputField label={t(S.rank)} value={rank} inputMode="numeric" onChange={(e) => setRank(e.target.value)} />
+      <InputField label={t(S.description)} value={description} onChange={(e) => setDescription(e.target.value)} />
+      <div aria-live="polite">
+        {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+      </div>
+      <Button variant="primary" leadingIcon={<Icon name="check2" />} loading={busy} onClick={async () => {
+        setError(null);
+        setBusy(true);
+        try {
+          await api.updateTier(tier.networkTierId, {
+            nameEn, nameAr, rank: Number(rank || "1"), description: description.trim() || null,
+          });
+          await onSaved();
+        } catch (e) {
+          setError(writeErrorMessage(e).message);
+        } finally {
+          setBusy(false);
+        }
+      }}>
+        {t(S.save)}
+      </Button>
     </Card>
   );
 }

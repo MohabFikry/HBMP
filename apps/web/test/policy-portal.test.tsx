@@ -78,6 +78,7 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     createTier: reject,
     updateTier: reject,
     tierAssignments: () => Promise.resolve([]),
+    tierProviders: () => Promise.resolve([]),
     assignTier: reject,
     revokeAssignment: () => Promise.resolve(),
     resolveTier: reject,
@@ -1005,11 +1006,26 @@ describe("Network tier administration", () => {
   });
 
   it("offers tier creation to the Network Team", async () => {
-    seedSession("provider_admin");
+    // 33.7 — the ISSUER role, not the portal name. This used to seed `provider_admin` and call it "the
+    // Network Team", which is the conflation the whole finding turns on: `ROLE_MAP` maps BOTH the issuer's
+    // `network_team` (tenant-wide) and its `provider_admin` (one provider's own administrator, T4,
+    // provider-scoped) onto the single portal role `provider_admin`. The server's `NetworkAdmin` rule has
+    // never named the latter, so the test passed while proving the opposite of its own name.
+    seedSession("provider_admin", [], undefined, ["network_team"]);
     renderNode(<NetworkTiers api={fakeApi()} />);
 
     expect(await screen.findByTestId("tier-create")).toBeInTheDocument();
     expect(screen.queryByTestId("tiers-read-only")).not.toBeInTheDocument();
+  });
+
+  it("offers none of it to a provider's own administrator, whom the server refuses", async () => {
+    // The counterpart the name above implied and nothing checked. See network-portal.test.tsx for the rest
+    // of this pair, and design 52 §5 for why the two roles still share a portal.
+    seedSession("provider_admin", [], undefined, ["provider_admin"]);
+    renderNode(<NetworkTiers api={fakeApi()} />);
+
+    expect(await screen.findByTestId("tiers-read-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("tier-create")).not.toBeInTheDocument();
   });
 });
 

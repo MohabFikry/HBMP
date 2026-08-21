@@ -3,9 +3,11 @@ import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiCard, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column, TableFilterSpec } from "@mersal/design-system";
-import type { CreateProviderInput, Localized, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
+import type { CreateProviderInput, Localized, NetworkMetrics, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
+import { useAuth } from "../auth/AuthProvider";
+import { mayReadTheNetworkRollup } from "../authz/permissions";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -48,6 +50,12 @@ const S = {
   create: { en: "Onboard provider", ar: "إضافة مقدم خدمة" },
   created: { en: "Provider created (Draft) — proceed to credentialing.", ar: "تم إنشاء مقدم الخدمة (مسودة)." },
   needFields: { en: "Code, legal name, and a valid type are required.", ar: "الرمز والاسم والنوع الصحيح مطلوبة." },
+
+  // 33.7 — the roll-up belongs to the Network Team, and this portal serves two roles (see below).
+  notYourNetwork: {
+    en: "This is the network-wide view, which belongs to Mersal's Network Team. A provider's own administrator sees their own organisation — its directory entry, contracts and locations are in the sections above.",
+    ar: "هذه نظرة على الشبكة بالكامل، وهي من اختصاص فريق الشبكة في مرسال. أما مسؤول مقدم الخدمة فيرى مؤسسته وحدها — بيانها في الدليل وعقودها ومواقعها في الأقسام أعلاه.",
+  },
 } satisfies Record<string, Localized>;
 
 // 18.D2 (U7): see useFormat — Africa/Cairo + the app locale, never the browser's.
@@ -137,26 +145,75 @@ export function NetworkDirectory() {
   );
 }
 
-/** Performance — network roll-up derived from the directory (active/suspended/terminated counts). */
+/**
+ * Performance — the network roll-up, from provider-service.
+ *
+ * ============================================================================================================
+ * 33.7 — THE FOUR NUMBERS THAT WERE COUNTED IN THE BROWSER
+ * ============================================================================================================
+ * This screen used to fetch the provider DIRECTORY and count it:
+ *
+ *   const by = (label: string) => rows.filter((r) => r.status.label.en === label).length;
+ *
+ * `status` is the `{kind, label}` chip this client assembles for RENDERING. So the roll-up was a tally of a
+ * piece of English prose, over whatever the directory projection happened to return, and it would have gone
+ * to four zeroes — silently, plausibly — the first time a status was relabelled or a new one was added that
+ * `providerStatusChip` did not recognise.
+ *
+ * `GET /api/v1/metrics` has returned exactly `{total, active, suspended, terminated}` since phase 2b,
+ * computed from the `ProviderStatus` enum over the tenant, excluding soft-deleted rows. It was never routed
+ * at the gateway — and the route-coverage guard whose whole job is to catch an unrouted resource had
+ * "metrics" in its ignore list, meant for the Prometheus scrape. Both are fixed; this asks the service.
+ *
+ * The authorization is the part that makes this more than tidiness. The endpoint answers a provider-scoped
+ * caller with 403: a provider must not learn the shape of the network it competes in. A count assembled from
+ * a list the caller can already read enforces none of that.
+ */
 export function NetworkPerformance() {
+  const t = useLoc();
+  const { session } = useAuth();
+  /*
+    TWO ROLES SHARE THIS PORTAL and only one of them may read this.
+
+    `ROLE_MAP` maps both the issuer's `network_team` (Mersal's Network Team — tenant-wide, T2) and its
+    `provider_admin` (one provider's own administrator — T4, bound to that provider by ABAC and RLS) onto the
+    single portal role `provider_admin`. provider-service answers this endpoint with 403 for the second, and
+    it is right to: a provider must not learn the shape of the network it competes in.
+
+    So the section says whose view it is rather than fetching and rendering the refusal as an error. Hiding
+    it outright would be better still — the org-admin portal drops the tenant registry for exactly this
+    reason (28.10) — and it cannot be done from a permission, because both roles carry the same portal
+    permissions by construction. The portal split that fixes it properly is design 52 §5.
+  */
+  if (!mayReadTheNetworkRollup(session?.issuerRoles)) {
+    return (
+      <>
+        <PageHeader title={t(S.perfTitle)} />
+        <Card as="section" style={{ padding: "var(--sp5)" }}>
+          <InlineAlert tone="info">{t(S.notYourNetwork)}</InlineAlert>
+        </Card>
+      </>
+    );
+  }
+  return <NetworkRollup />;
+}
+
+function NetworkRollup() {
   const api = useApi();
   const t = useLoc();
-  const state = useAsync<ProviderSummary[]>(() => api.providerList(), []);
+  const state = useAsync<NetworkMetrics>(() => api.networkMetrics(), []);
   return (
     <>
       <PageHeader title={t(S.perfTitle)} />
       <AsyncSection state={state} isEmpty={() => false} emptyLabel={S.dirEmpty}>
-        {(rows) => {
-          const by = (label: string) => rows.filter((r) => r.status.label.en === label).length;
-          return (
-            <div className="kpi-row">
-              <KpiCard label={t(S.total)} value={String(rows.length)} />
-              <KpiCard label={t(S.active)} value={String(by("Active"))} />
-              <KpiCard label={t(S.suspended)} value={String(by("Suspended"))} />
-              <KpiCard label={t(S.terminated)} value={String(by("Terminated"))} />
-            </div>
-          );
-        }}
+        {(m) => (
+          <div className="kpi-row">
+            <KpiCard label={t(S.total)} value={String(m.total)} />
+            <KpiCard label={t(S.active)} value={String(m.active)} />
+            <KpiCard label={t(S.suspended)} value={String(m.suspended)} />
+            <KpiCard label={t(S.terminated)} value={String(m.terminated)} />
+          </div>
+        )}
       </AsyncSection>
     </>
   );

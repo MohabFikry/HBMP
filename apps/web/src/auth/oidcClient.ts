@@ -241,6 +241,8 @@ function sessionFrom(token: string): Session {
     displayName: c.name ?? c.preferred_username ?? c.sub,
     role,
     roles,
+    // The issuer's own names, kept alongside the mapped portals — see `Session.issuerRoles`.
+    issuerRoles: claimed,
     // The UNION over every held role. Still derived from the token's own roles claim, so this cannot grant
     // anything the issuer did not — and the server re-authorizes every call regardless.
     permissions: unionPermissions(roles),

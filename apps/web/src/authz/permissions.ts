@@ -378,15 +378,55 @@ export function hasPermission(perms: ReadonlySet<Permission>, required: Permissi
 }
 
 /**
- * May this role CREATE or CHANGE a network tier, as opposed to reading one?
+ * The issuer roles `provider-service`'s `NetworkAdmin` rule names. One list, quoted from the server.
+ *
+ * ISSUER names, not portal names — see {@link mayAdministerTiers} for why that distinction is the whole
+ * point here.
+ */
+const TIER_ADMIN_ISSUER_ROLES: ReadonlySet<string> = new Set(["network_team", "org_admin", "super_admin"]);
+
+/**
+ * May this caller CREATE or CHANGE a network tier, as opposed to reading one?
  *
  * The Network Team owns the tier structure; policy administration prices benefits at a tier and must be able
- * to see the tiers it is pricing against, but not to invent one. Expressed as a capability over the role
- * rather than as a second permission so the read list and the write list cannot drift apart — the server's
- * `NetworkTierGate` draws exactly this line and returns 403 either way.
+ * to see the tiers it is pricing against, but not to invent one. Expressed as a capability rather than as a
+ * second permission so the read list and the write list cannot drift apart — the server's `NetworkTierGate`
+ * draws exactly this line and returns 403 either way.
+ *
+ * ## 33.7 — it takes ISSUER roles now, and that is a fix rather than a refactor
+ *
+ * This used to read `role === "provider_admin" || role === "org_admin" || role === "super_admin"` against
+ * the PORTAL role. `ROLE_MAP` maps two issuer roles onto that one portal name:
+ *
+ *     ["provider_admin", "provider_admin"],   // one provider's own administrator — T4, ABAC provider-bound
+ *     ["network_team",   "provider_admin"],   // Mersal's Network Team — T2, tenant-wide
+ *
+ * The server rule names `network_team`, `org_admin`, `super_admin` and has never named `provider_admin`. So
+ * the mirror answered YES for a provider's own administrator, who was shown Create tier, Revoke assignment
+ * and (from 33.7) Assign — every one refused with `urn:hbmp:network-tier-access-denied`. The doc comment
+ * claiming this "draws exactly this line" was the thing that made it hard to spot: it described the intent
+ * accurately and the code did something else.
+ *
+ * The two roles still share one portal, which is a wider problem than this function — design 07 FR-IAM-003
+ * lists them as separate portals and design 11 §3.3 gives them different rows. Recorded in design 52 §5.
  */
-export function mayAdministerTiers(role: Role | null | undefined): boolean {
-  return role === "provider_admin" || role === "org_admin" || role === "super_admin";
+export function mayAdministerTiers(issuerRoles: readonly string[] | null | undefined): boolean {
+  return (issuerRoles ?? []).some((r) => TIER_ADMIN_ISSUER_ROLES.has(r));
+}
+
+/**
+ * May this caller read the NETWORK-WIDE provider roll-up?
+ *
+ * `provider-service` answers `GET /api/v1/metrics` with 403 to any provider-scoped caller: a provider must
+ * not learn the shape of the network it competes in. `provider_admin` is provider-scoped
+ * (`HbmpPrincipal.ProviderScopedRoles`), and shares the Network Team's portal — so the Performance section
+ * has to ask whose portal this actually is, or it offers a section that can only refuse.
+ *
+ * The same issuer-role list as tier administration, and not a coincidence: both answer "is this the Network
+ * Team, or somebody who happens to land in their portal".
+ */
+export function mayReadTheNetworkRollup(issuerRoles: readonly string[] | null | undefined): boolean {
+  return mayAdministerTiers(issuerRoles);
 }
 
 /**

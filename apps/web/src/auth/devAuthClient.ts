@@ -1,5 +1,6 @@
 import { unionPermissions, type Role } from "../authz/permissions";
 import { SESSION_TTL, type AuthClient, type Session } from "./authClient";
+import { issuerRoleFor } from "../config";
 
 /**
  * The no-backend auth client — **fixture builds only**.
@@ -65,6 +66,12 @@ export class DevAuthClient implements AuthClient {
       displayName: DISPLAY_NAMES[primary],
       role: primary,
       roles: [...roles],
+      // The dev client signs in by PORTAL, so the issuer names are derived back from the portals with
+      // `issuerRoleFor` — the canonical issuer name for each. That is the right approximation and it has a
+      // limit worth stating: signing in as the "provider_admin" portal here always yields the issuer role
+      // `provider_admin` (the first ROLE_MAP row), never `network_team`. A live token distinguishes them and
+      // this fixture cannot, so a test about the difference has to seed `issuerRoles` explicitly.
+      issuerRoles: roles.map(issuerRoleFor),
       permissions: unionPermissions(roles),
       mfaSatisfied: true,
       expiresAt: Date.now() + SESSION_TTL,
@@ -86,7 +93,8 @@ export class DevAuthClient implements AuthClient {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as {
-        userId: string; displayName: string; role: Role; roles?: Role[]; expiresAt: number;
+        userId: string; displayName: string; role: Role; roles?: Role[];
+        issuerRoles?: string[]; expiresAt: number;
       };
       if (parsed.expiresAt <= Date.now()) {
         localStorage.removeItem(STORAGE_KEY);
@@ -100,6 +108,9 @@ export class DevAuthClient implements AuthClient {
         displayName: parsed.displayName,
         role: parsed.role,
         roles,
+        // Same forward-compatibility rule as `roles`: a session persisted before 33.7 has no issuerRoles,
+        // and re-deriving them beats signing the developer out.
+        issuerRoles: parsed.issuerRoles?.length ? parsed.issuerRoles : roles.map(issuerRoleFor),
         permissions: unionPermissions(roles),
         mfaSatisfied: true,
         expiresAt: parsed.expiresAt,
@@ -119,6 +130,7 @@ function persist(session: Session) {
         displayName: session.displayName,
         role: session.role,
         roles: session.roles,
+        issuerRoles: session.issuerRoles,
         expiresAt: session.expiresAt,
       }),
     );

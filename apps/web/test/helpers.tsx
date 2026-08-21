@@ -18,14 +18,29 @@ const DISPLAY: Record<string, string> = {};
  * for, and one no test could previously express because a session held exactly one role. `role` stays the
  * primary, matching what a real token's priority order would resolve to.
  */
-export function seedSession(role: Role, extraRoles: Role[] = [], ttlMs = 30 * 60 * 1000) {
+export function seedSession(
+  role: Role,
+  extraRoles: Role[] = [],
+  ttlMs = 30 * 60 * 1000,
+  /**
+   * The ISSUER's role names, when the test is about a distinction the portal name cannot carry.
+   *
+   * Left undefined for almost every test: `DevAuthClient.restore` derives them from the portals, which is
+   * right for the fourteen roles whose issuer name and portal key are identical. It is NOT right for the one
+   * pair that shares a portal — `network_team` and `provider_admin` — so a test about THAT difference has to
+   * say which one it means. See `Session.issuerRoles`.
+   */
+  issuerRoles?: string[],
+) {
+  const roles = [role, ...extraRoles.filter((r) => r !== role)];
   localStorage.setItem(
     "mersal-session",
     JSON.stringify({
       userId: `dev-${role}`,
       displayName: DISPLAY[role] ?? role,
       role,
-      roles: [role, ...extraRoles.filter((r) => r !== role)],
+      roles,
+      ...(issuerRoles ? { issuerRoles } : {}),
       expiresAt: Date.now() + ttlMs,
     }),
   );
