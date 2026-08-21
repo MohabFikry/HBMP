@@ -126,10 +126,13 @@ nav.mrs-rail {
   height: calc(100dvh - 60px);
   min-height: 0;
   overflow-y: auto;
-  /* The rail keeps the platform's own scrollbar — it is a primary scroller, and a thin bar on one is a real
-     ergonomic loss — but it must not hand its momentum to the page: scrolling past the last nav item used to
-     carry on and scroll the content pane, which moves the page out from under a user who was only looking
-     for a link. */
+  /* The rail wears `.mrs-scroll-primary` (see components.css): the house palette at the platform's own
+     width, because it is a scroller people DRAG and a thin bar on one is a real ergonomic loss. It kept the
+     raw OS scrollbar until then, which on Windows is a grey slab running the rail's full height.
+
+     Containment stays and is unrelated to the paint: the rail must not hand its momentum to the page, or
+     scrolling past the last nav item carries on and scrolls the content pane, moving the page out from
+     under a user who was only looking for a link. */
   overscroll-behavior: contain;
 }
 .app-main {

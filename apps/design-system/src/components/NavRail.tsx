@@ -44,7 +44,9 @@ export function NavRail({ items, current, onNavigate, className, header, ...aria
   }
 
   return (
-    <nav className={cx("mrs-rail", className)} aria-label={aria["aria-label"]}>
+    // `mrs-scroll-primary`, not `mrs-scroll`: the rail is one of the two surfaces a person drags rather than
+    // flicks, so it takes the house palette at the platform's own width instead of the thin overlay bar.
+    <nav className={cx("mrs-rail", "mrs-scroll-primary", className)} aria-label={aria["aria-label"]}>
       {header}
       {/* Keyed by POSITION, never by the group's display name. Two groups can legitimately share a name
           (the caller controls ordering), and the name is localized — so name-keys collide within a render

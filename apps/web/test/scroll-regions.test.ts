@@ -20,12 +20,18 @@ import { join, resolve } from "node:path";
  * they were not decisions, they were the rule not being applied, and nothing said so.
  *
  * ============================================================================================================
- * WHY THE EXCLUSIONS ARE A LIST AND NOT AN ABSENCE
+ * THE EXCLUSION LIST IS NOW EMPTY, AND THAT IS ALSO A DECISION
  * ============================================================================================================
- * Two regions keep the platform scrollbar ON PURPOSE — the nav rail and the page's own scroller — because a
- * thin bar on the primary scroller of a long worklist is a real ergonomic loss. That is a decision, and a
- * decision recorded as "we did not do it here" is indistinguishable from an oversight. Naming them means
- * removing one is a visible edit to this file with a reason attached.
+ * Two regions used to keep the OS scrollbar on purpose — the nav rail and the page's own scroller — because a
+ * thin bar on a surface a person drags all day is a real ergonomic loss. That reasoning was right about the
+ * SIZE and wrong about the conclusion: it treated "the OS default" as neutral, and on Windows it is a
+ * square-capped grey slab running the full height of the teal rail on every screen of every portal — the
+ * largest piece of unthemed furniture in the product. `.mrs-scroll-primary` takes the trade on the axis that
+ * was actually in question: the house palette at the platform's own WIDTH, so nothing about the drag target
+ * got smaller.
+ *
+ * The list stays in the file rather than being deleted with the entries. Adding one is a claim that some
+ * region should show the OS scrollbar, and it needs a better reason than these two turned out to have.
  */
 
 const CSS_FILES = [
@@ -35,17 +41,18 @@ const CSS_FILES = [
 const TSX_ROOTS = [resolve(__dirname, "../src"), resolve(__dirname, "../../design-system/src")];
 
 /**
- * Selectors that scroll and deliberately do NOT carry the house treatment.
- *
- * Removing an entry is a claim that the region should now be styled; ADDING one is a claim that a scrolling
- * region should keep the OS scrollbar, and it needs the same kind of reason these two have.
+ * Selectors that scroll and deliberately do NOT carry the house treatment. Empty, and kept: see above.
  */
-const EXCLUDED: Record<string, string> = {
-  "nav.mrs-rail":
-    "the navigation rail is a primary scroller; a thin bar on it is an ergonomic loss, not a gain",
-  ".app-main":
-    "the page's own scroller — the OS default is right for the surface the user scrolls most",
-};
+const EXCLUDED: Record<string, string> = {};
+
+/**
+ * The two class names that count as "wears the house scrollbar".
+ *
+ * `mrs-scroll` is the thin, overscroll-contained bar for overlays and in-card panes; `mrs-scroll-primary` is
+ * the same palette at the platform's own width, for the rail and the page pane. A region needs one of them,
+ * and which one is a judgement about the surface, not about the styling.
+ */
+const HOUSE = ["mrs-scroll", "mrs-scroll-primary"];
 
 /** Blank comments, keeping newlines, so prose about `overflow` is never read as a declaration. */
 const blank = (m: string) => m.replace(/[^\n]/g, " ");
@@ -102,7 +109,33 @@ describe("every in-page scroll region wears the house scrollbar", () => {
 
   it("finds the scroll regions — otherwise every assertion here is over an empty set", () => {
     expect(declared.length).toBeGreaterThan(15);
-    expect(declared.filter((r) => r.selector in EXCLUDED).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The two primary scrollers are STYLED, not excluded.
+   *
+   * Pinned by name because they are the ones the exclusion list used to hold: if either loses its treatment
+   * the class-pairing check below cannot say so — `nav.mrs-rail` is not a leaf class selector and never was,
+   * which is how it sat unstyled behind an exclusion entry rather than behind a failing assertion.
+   */
+  it("dresses the nav rail and the page pane, which used to be the exclusions", () => {
+    const rail = readFileSync(resolve(__dirname, "../../design-system/src/components/NavRail.tsx"), "utf8");
+    const shell = readFileSync(resolve(__dirname, "../src/shell/AppShell.tsx"), "utf8");
+    expect(rail).toMatch(/cx\("mrs-rail", "mrs-scroll-primary"/);
+    expect(shell).toMatch(/className="app-main mrs-scroll-primary"/);
+  });
+
+  /**
+   * `.mrs-scroll-primary` keeps the platform's WIDTH. That is the entire argument for having styled the two
+   * surfaces a person drags, so `thin` slipping in here would quietly reintroduce what the exclusion list
+   * existed to prevent.
+   */
+  it("keeps the primary bar at full width, which is why it could be styled at all", () => {
+    const css = readFileSync(resolve(__dirname, "../../design-system/src/styles/components.css"), "utf8");
+    const rule = /\.mrs-scroll-primary \{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, blank));
+    expect(rule, "`.mrs-scroll-primary` should exist").not.toBeNull();
+    expect(rule![1]).toMatch(/scrollbar-width:\s*auto/);
+    expect(rule![1]).not.toMatch(/scrollbar-width:\s*thin/);
   });
 
   /**
@@ -120,11 +153,11 @@ describe("every in-page scroll region wears the house scrollbar", () => {
       .filter((sel) => /^\.[\w-]+$/.test(sel))
       .filter((sel) => !(sel in EXCLUDED))
       .map((sel) => sel.slice(1))
-      .filter((cls) => cls !== "mrs-popup" && cls !== "mrs-scroll")
+      .filter((cls) => cls !== "mrs-popup" && !HOUSE.includes(cls))
       .filter((cls) => {
         const uses = sets.filter((s) => s.includes(cls));
         // A class with no call site is styled-but-unused; that is a different problem, not this one.
-        return uses.length > 0 && !uses.some((s) => s.includes("mrs-scroll"));
+        return uses.length > 0 && !uses.some((s) => s.some((c) => HOUSE.includes(c)));
       });
     expect(
       [...new Set(offenders)],
@@ -147,6 +180,11 @@ describe("every in-page scroll region wears the house scrollbar", () => {
    * (a list of buttons, a notification pane) or through the control that owns them (a listbox driven from its
    * own input). Those need no tab stop of their own and would be made worse by one: `.mrs-scroll`'s own
    * header says so. What is actually checkable is the pair.
+   *
+   * `tabIndex={0}` specifically, not any `tabIndex`. `-1` is the opposite claim — programmatically focusable
+   * and NOT in the tab order — and `.app-main` carries it because the skip link targets it. Matching the bare
+   * attribute conflated the two and demanded a tab-stop ring on the one element that is deliberately not a
+   * tab stop. Every pane the rule is actually about is written `tabIndex={0}`.
    */
   it("gives every scroll pane that is a tab stop a visible focus ring", () => {
     const offenders: string[] = [];
@@ -155,7 +193,7 @@ describe("every in-page scroll region wears the house scrollbar", () => {
         const src = readFileSync(f, "utf8");
         for (const m of src.matchAll(/<[A-Za-z][^>]*?mrs-scroll\b[^>]*?>/gs)) {
           const el = m[0];
-          if (!/\btabIndex\b/.test(el)) continue;
+          if (!/tabIndex=\{0\}/.test(el)) continue;
           if (/mrs-scroll-focusable/.test(el)) continue;
           offenders.push(`${f.slice(root.length + 1)}:${src.slice(0, m.index).split("\n").length}`);
         }
@@ -173,7 +211,7 @@ describe("every in-page scroll region wears the house scrollbar", () => {
     for (const root of TSX_ROOTS) {
       for (const f of tsxFiles(root)) {
         for (const m of readFileSync(f, "utf8").matchAll(/<[A-Za-z][^>]*?mrs-scroll\b[^>]*?>/gs)) {
-          if (/\btabIndex\b/.test(m[0])) stops++;
+          if (/tabIndex=\{0\}/.test(m[0])) stops++;
         }
       }
     }

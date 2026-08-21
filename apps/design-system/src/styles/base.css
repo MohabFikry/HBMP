@@ -28,6 +28,28 @@ html[lang="ar"] body {
   letter-spacing: 0;
 }
 
+/*
+ * Scrollbars belong to the theme.
+ *
+ * `scrollbar-color` and `scrollbar-width` are INHERITED properties, which is the whole point of setting them
+ * at the root: every scroller in every portal picks up the house palette without each one having to ask, and
+ * the two that want something else — `.mrs-scroll` (thin, for overlays and in-card panes) and
+ * `.mrs-scroll-primary` (the full-width bar the rail and page pane wear) — override it where they are used.
+ *
+ * `auto`, not `thin`. The root default has to suit the biggest scroller as well as the smallest, and a thin
+ * bar on the surface a person drags all day is a real ergonomic loss; the regions that can afford `thin` opt
+ * into it by name.
+ *
+ * This is the standard property only. Safari and Chromium before 121 read `::-webkit-scrollbar` instead, and
+ * those pseudo-elements do NOT inherit — so they are declared per-region in components.css rather than
+ * globally, where a single unqualified `::-webkit-scrollbar` rule would repaint every scroller in the
+ * document including ones this system does not own.
+ */
+html {
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: auto;
+}
+
 .mono {
   font-family: var(--font-mono);
   font-weight: 500;

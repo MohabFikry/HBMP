@@ -320,7 +320,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         header={<PortalSwitcher portal={portal} />}
       />
 
-      <main id="main" className="app-main" tabIndex={-1}>
+      {/* The page's own scroller — the house scrollbar at full width (see `.mrs-scroll-primary`). */}
+      <main id="main" className="app-main mrs-scroll-primary" tabIndex={-1}>
         {children}
       </main>
 

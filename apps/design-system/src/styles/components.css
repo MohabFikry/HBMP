@@ -558,9 +558,9 @@ html[dir="rtl"] .mrs-search input {
  * Chrome 121+); `::-webkit-scrollbar` is what Safari and older Chromium read. Neither alone covers the
  * browsers this runs on.
  *
- * NOT applied to the page's own scroller or the navigation rail: a thin bar on the primary scroller of a
- * long worklist is a real ergonomic loss, and the OS default is the right thing for the surface the user
- * scrolls most.
+ * NOT applied to the page's own scroller or the navigation rail — those wear `.mrs-scroll-primary` below,
+ * which is the same palette at a size you can still grab. Two things separate them: this one is 10px and
+ * contains overscroll, which is right for an overlay floating above the page and wrong for the page itself.
  */
 .mrs-scroll {
   overscroll-behavior: contain;
@@ -588,6 +588,56 @@ html[dir="rtl"] .mrs-search input {
 }
 /* Both axes meeting in the corner — without this it renders as an unstyled grey square. */
 .mrs-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
+ * The same bar, for a surface the user scrolls all day.
+ *
+ * <p>The navigation rail and the page pane were left on the OS default deliberately, and the reason was
+ * sound as far as it went: a 4px thread is a poor thing to drag, and these are the two scrollers a person
+ * actually drags. What that reasoning missed is that "the OS default" is not one thing. On Windows it is a
+ * square-capped light-grey slab that belongs to a different decade of software and sits, full height,
+ * against the teal rail — the single largest piece of unthemed furniture in the product, on every screen of
+ * every portal. Keeping it cost more than it bought.</p>
+ *
+ * <p>So the trade is taken on the axis that was really in question — SIZE, not colour. The track stays at
+ * the platform's own width, the thumb is inset rather than thinned, and the whole track remains the drag
+ * target: `background-clip: content-box` paints inside the transparent border, and the border is still part
+ * of the thumb's box, so a 14px target draws as a 6px pill. Nothing about the grab is smaller than it
+ * was.</p>
+ *
+ * <p><code>scrollbar-width: auto</code>, not <code>thin</code>, for the same reason — Firefox's `thin` is
+ * the ergonomic loss the exclusion was written about, and `scrollbar-color` alone themes the full-width bar
+ * there.</p>
+ *
+ * <p>No <code>overscroll-behavior</code> here. `.mrs-scroll` contains the chain because an overlay must not
+ * hand its momentum to the document underneath; a primary scroller IS the document, and containing it is
+ * what `.mrs-wl-scroll` had to undo. The rail sets its own containment for its own reason — it sits beside
+ * the page rather than above it.</p>
+ */
+.mrs-scroll-primary {
+  scrollbar-width: auto;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.mrs-scroll-primary::-webkit-scrollbar {
+  inline-size: 14px;
+  block-size: 14px;
+}
+.mrs-scroll-primary::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mrs-scroll-primary::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+.mrs-scroll-primary::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}
+.mrs-scroll-primary::-webkit-scrollbar-corner {
   background: transparent;
 }
 
