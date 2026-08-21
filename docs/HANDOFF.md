@@ -56,8 +56,11 @@ Infrastructure: `infra/compose` (Tier 1, single node). Postgres is published on 
 | Overall coverage | **68.6%** against an enforced floor of 45 — measured 2026-08-21 on a CLEARED `./coverage` |
 | Gate scripts in `tools/ci/` | 21 |
 
-**Pass 7 (administration and coordination, design doc `52-administration-and-coordination.md`) is stacked on
-pass 6** as `feat/admin-and-coordination-audit` → `feat/counter-portals-audit` → `feat/prescriber-portal-audit`.
+**Passes 5, 6 and 7 landed on `master` on 2026-08-21** — PRs #10, #11 and #12, merged bottom-up
+(`766eaee`, `4c8d416`, `634c7ea`). Nothing is stacked. The merged tree was byte-identical to the verified
+top of the stack, and the whole gauntlet was re-run on `master` after the merge: 38 assemblies / 3,928
+passed / 0 failed / 0 skipped, web 1,580 passed across 128 files, `eslint apps libs` clean, 18 static gates,
+OpenAPI drift, the isolation fuzzer and the stamping census all green.
 
 **All seven remaining roles are audited and the audit is complete.** Every portal in the catalog has now been
 through a client-vs-service pass. Pass 7's own generalisation — *an authority granted end to end in the token,
