@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Mersal.Authz;
+using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -164,27 +165,113 @@ public class TenantFeatureProjectionTests
     }
 
     /// <summary>
-    /// The backfill's promise: every tenant that already existed when this shipped has every module ON, so
-    /// wiring the gate changes nothing for them. If this is ever empty, deploying the gate takes live partner
-    /// organisations off modules they are using today.
+    /// The backfill's promise: a tenant that already existed when the feature gate shipped has every module
+    /// ON, so wiring the gate changes nothing for them. Get this wrong and deploying the gate takes live
+    /// partner organisations off modules they are using today.
     /// </summary>
+    /// <remarks>
+    /// <para><b>This test used to skip itself.</b> It read the tenants out of
+    /// <c>identity.tenant_membership</c> and answered <c>Skip.If(tenants.Count == 0, "no memberships in this
+    /// database")</c> — so it ran on a developer's seeded database and skipped in CI, where the membership
+    /// table is empty. A skip reports green having proven nothing, which is precisely what
+    /// <c>check-skipped-tests.py</c> exists to refuse, and this one had been failing that gate silently
+    /// behind a louder test failure.</para>
+    ///
+    /// <para><b>What it tests now.</b> Two claims, and only the second one needed data that might not be
+    /// there. The first — that migration 0015's backfill turns on all eleven modules for a tenant that has a
+    /// membership — is a property of the SQL, and it runs anywhere: seed a membership, execute the backfill
+    /// block <i>read out of the migration file itself</i>, assert. The SQL is not copied here, for the reason
+    /// <see cref="MembershipBackfillParityTests"/> gives about 0010: a test that restates a migration proves
+    /// the restatement.</para>
+    ///
+    /// <para>The second claim — that the tenants in THIS database all have their eleven — is then made over
+    /// whatever is present, and is simply vacuous when nothing is. That is the right shape: a deployment
+    /// check that finds nothing to check has not failed, and it is no longer standing in for the engineering
+    /// claim above.</para>
+    /// </remarks>
     [SkippableFact]
     public async Task Existing_tenants_were_backfilled_with_the_whole_catalogue_enabled()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
         await using var db = Ctx();
-
-        var tenants = await db.Database.SqlQueryRaw<string>(
-            """
-            SELECT DISTINCT tenant_id AS "Value" FROM identity.tenant_membership WHERE NOT is_deleted
-            """).ToListAsync();
-        Skip.If(tenants.Count == 0, "no memberships in this database — nothing was there to backfill.");
-
         var store = new TenantFeatureStore(db);
-        foreach (var tenant in tenants)
+        var seeded = NewTenant();
+
+        var userId = Guid.NewGuid();
+        try
         {
-            (await store.EnabledForAsync(tenant)).Should().HaveCount(
-                11, $"tenant {tenant} existed before the gate and must keep every module it already had");
+            // ---- The claim about the MIGRATION, which needs no pre-existing data ----------------------
+            // A membership needs a real user: `tenant_membership.user_id` is a foreign key, so a random uuid
+            // is refused (23503). Same shape as MembershipBackfillParityTests.SeedUser.
+            var uname = $"tf-{userId:N}";
+            db.Users.Add(new ApplicationUser
+            {
+                Id = userId,
+                UserName = uname,
+                NormalizedUserName = uname.ToUpperInvariant(),
+                TenantId = seeded,
+                DisplayName = "Tenant feature backfill",
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                SecurityStamp = Guid.NewGuid().ToString(),
+                ConcurrencyStamp = Guid.NewGuid().ToString(),
+            });
+            await db.SaveChangesAsync();
+
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO identity.tenant_membership (membership_id, tenant_id, user_id, status, created_by)
+                VALUES (gen_random_uuid(), {0}, {1}, 'Active', 'test');
+                """,
+                [seeded, userId]);
+
+            await db.Database.ExecuteSqlRawAsync(BackfillSql());
+
+            (await store.EnabledForAsync(seeded)).Should().HaveCount(
+                11, "a tenant holding a membership when the gate shipped keeps every module it already had");
+
+            // ---- The claim about THIS DATABASE, over whatever it holds --------------------------------
+            var tenants = await db.Database.SqlQueryRaw<string>(
+                """
+                SELECT DISTINCT tenant_id AS "Value" FROM identity.tenant_membership WHERE NOT is_deleted
+                """).ToListAsync();
+
+            foreach (var tenant in tenants)
+            {
+                (await store.EnabledForAsync(tenant)).Should().HaveCount(
+                    11, $"tenant {tenant} existed before the gate and must keep every module it already had");
+            }
         }
+        finally
+        {
+            // FK order: the membership references the user, so it goes first.
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM identity.tenant_feature WHERE tenant_id = {0}; " +
+                "DELETE FROM identity.tenant_membership WHERE tenant_id = {0}; " +
+                "DELETE FROM identity.user_role WHERE user_id = {1}; " +
+                "DELETE FROM identity.\"user\" WHERE id = {1};", [seeded, userId]);
+        }
+    }
+
+    /// <summary>
+    /// Migration 0015's backfill statement, read from the migration itself.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent by construction (<c>ON CONFLICT DO NOTHING</c>), which is what makes re-running it inside a
+    /// test safe against a database where it has already been applied.
+    /// </remarks>
+    private static string BackfillSql()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Migrations", "0015_tenant_feature_projection.sql");
+        File.Exists(path).Should().BeTrue($"0015 must be copied to the test output ({path})");
+        var sql = File.ReadAllText(path);
+
+        var start = sql.IndexOf("INSERT INTO identity.tenant_feature (", StringComparison.Ordinal);
+        start.Should().BeGreaterThan(
+            0, "the backfill block must be findable — if 0015 was restructured, fix this test with it");
+        var end = sql.IndexOf(';', start);
+        end.Should().BeGreaterThan(start);
+
+        return sql[start..(end + 1)];
     }
 }
