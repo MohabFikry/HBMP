@@ -38,11 +38,28 @@ public sealed record ReceptionResultCard(
 }
 
 /// <summary>The reception search response — result cards, or an empty state with guidance.</summary>
+/// <param name="Count">How many cards are IN THIS RESPONSE. Not how many matched — see
+/// <paramref name="Truncated"/>.</param>
+/// <param name="Truncated">
+/// True when the search matched more than the page holds.
+/// </param>
+/// <remarks>
+/// <para><b>Why the flag exists.</b> The search takes the first 25 rows and reported <c>Count</c> as the
+/// length of that page, so a term matching forty people answered "25 matches" and said nothing about the
+/// other fifteen. An operator picking a patient from that list is choosing from a truncated set presented as
+/// the complete one — and the person they are looking for may simply not be on it, with nothing on screen to
+/// suggest looking further.</para>
+///
+/// <para>A COUNT of the full match set is deliberately not returned. It would cost a second query on every
+/// keystroke-driven search for a number nobody acts on: the answer to "too many" is always to narrow the
+/// term, and "more than 25" says that as well as "137" does.</para>
+/// </remarks>
 public sealed record ReceptionSearchResponse(
     string Query,
     int Count,
     IReadOnlyList<ReceptionResultCard> Results,
-    string? EmptyStateHint);
+    string? EmptyStateHint,
+    bool Truncated = false);
 
 // ================================================================ VERIFIED LOOKUP (33.9)
 //

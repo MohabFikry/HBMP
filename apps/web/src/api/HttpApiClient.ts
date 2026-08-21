@@ -49,6 +49,7 @@ import {
   zOrderPricing,
   zBeneficiaryVerification,
   zEligibilityHit,
+  zEligibilitySearch,
   zEligibilityResult,
   zEncounter,
   zEncounterDiagnosis,
@@ -920,7 +921,7 @@ export class HttpApiClient implements ApiClient {
     const cards: any[] = r?.results ?? [];
     receptionCards.clear();
     for (const c of cards) receptionCards.set(String(c.identity?.beneficiaryId), c);
-    return cards.map((c: any) => {
+    const hits = cards.map((c: any) => {
       // The card has always carried this; the mapping used to drop it, so a search result could not tell a
       // suspended member from an active one and the desk discovered it only when the booking was refused.
       const raw = c.identity?.status;
@@ -937,6 +938,10 @@ export class HttpApiClient implements ApiClient {
         bookable: String(raw ?? "") === "Active",
       });
     });
+    // `truncated` absent ⇒ false, which is the honest default only because the server now always sends it;
+    // an older service returning a full page would read as complete, and that is the pre-33.9 behaviour
+    // rather than a new claim.
+    return parseOr(zEligibilitySearch, { hits, truncated: r?.truncated === true });
   }
   /**
    * 33.9 — the verified lookup that replaced "search, then take the first hit".

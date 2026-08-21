@@ -98,8 +98,8 @@ import type {
   DispenseResult,
   OutOfStockResult,
   BeneficiaryVerification,
-  EligibilityHit,
   EligibilityResult,
+  EligibilitySearch,
   Encounter,
   DiagnosisRank,
   EncounterDiagnosis,
@@ -262,7 +262,16 @@ export interface ApiClient {
   completeWaiting(queueId: string): Promise<void>;
 
   // Reception — eligibility (Phase 2)
-  searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
+  /**
+   * The search behind booking and the call centre — broad on purpose, and honest about being cut.
+   *
+   * <p>Returns the PAGE plus `truncated`, not a bare array. The server takes 25 rows, and a caller handed
+   * only the array could not tell a complete result from a capped one: a term matching forty people gave
+   * twenty-five, and an operator picked a patient from a truncated set presented as the whole of it.</p>
+   *
+   * <p>Not the way to answer "is THIS person covered" — see {@link verifyBeneficiary}.</p>
+   */
+  searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilitySearch>;
   /**
    * 33.9 — resolve ONE beneficiary from what they presented, corroborated by part of their name.
    *

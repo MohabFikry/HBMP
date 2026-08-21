@@ -197,6 +197,72 @@ public class ReceptionVerifyTests
         finally { await CleanupAsync(app, id); }
     }
 
+    /// <summary>
+    /// 33.9 — a page that was cut says so.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>Count</c> used to be the length of the PAGE and was the only quantity in the response, so a
+    /// term matching forty people answered "25 matches" and said nothing about the other fifteen. A desk
+    /// picking a patient from that list is choosing from a truncated set presented as the complete one — and
+    /// the person they want may be among the rows that were never sent.</para>
+    ///
+    /// <para>Twenty-six seeded, deliberately: the page is 25, and the cheapest correct implementation asks
+    /// for one more row than it means to return. A test with exactly 25 would pass against a service that
+    /// never sets the flag at all.</para>
+    /// </remarks>
+    [SkippableFact]
+    public async Task A_search_that_filled_the_page_says_there_were_more()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        var ids = new List<Guid>();
+        try
+        {
+            var family = "Trunc" + Guid.NewGuid().ToString("N")[..6];
+            for (var i = 0; i < 26; i++)
+            {
+                var id = Guid.NewGuid();
+                ids.Add(id);
+                await SeedAsync(app, id, $"MRS-M-TRUNC-{i:D2}", "Ahmed", family, $"2900101000{i:D4}");
+            }
+
+            using var desk = Desk(app);
+            var r = await desk.GetAsync(new Uri($"/api/v1/reception/search?q={family}", UriKind.Relative));
+            var body = await r.Content.ReadFromJsonAsync<JsonElement>();
+
+            body.GetProperty("count").GetInt32().Should().Be(25, "the page is 25 rows");
+            body.GetProperty("results").GetArrayLength().Should().Be(25, "and never more than it says");
+            // THE assertion. Without it, 25-of-26 and 25-of-25 are the same response.
+            body.GetProperty("truncated").GetBoolean().Should().BeTrue();
+            body.GetProperty("emptyStateHint").GetString().Should().Contain("may not be listed");
+        }
+        finally { foreach (var id in ids) await CleanupAsync(app, id); }
+    }
+
+    [SkippableFact]
+    public async Task A_search_that_fits_does_not_claim_to_have_been_cut()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        var id = Guid.NewGuid();
+        try
+        {
+            var family = "Fits" + Guid.NewGuid().ToString("N")[..6];
+            await SeedAsync(app, id, "MRS-M-FITS-01", "Amal", family, "29001019876547");
+
+            using var desk = Desk(app);
+            var body = await (await desk.GetAsync(new Uri($"/api/v1/reception/search?q={family}", UriKind.Relative)))
+                .Content.ReadFromJsonAsync<JsonElement>();
+
+            body.GetProperty("count").GetInt32().Should().Be(1);
+            body.GetProperty("truncated").GetBoolean().Should().BeFalse();
+            // A warning on a complete list is the same failure in the other direction: an operator who is
+            // told to narrow a one-row result learns to ignore the message.
+            body.GetProperty("emptyStateHint").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        finally { await CleanupAsync(app, id); }
+    }
+
     private static async Task SeedAsync(
         EligibilityApiFactory app, Guid id, string memberNo, string given, string family, string nationalId)
     {

@@ -29,6 +29,20 @@ const S = {
     ar: "أكثر من مستفيد مطابق. اختر الصحيح للمتابعة.",
   },
   matchesCount: { en: "matches", ar: "نتائج" },
+  /**
+   * 33.9 — the page was cut, and the person they want may not be on it.
+   *
+   * The search returns 25 rows and does not say how many matched, so a term matching forty people gave
+   * twenty-five with nothing to distinguish that from a complete answer. The instruction is the point:
+   * "narrow it" is the only thing an operator can do, and an identifier is what narrows it to one.
+   */
+  tooMany: {
+    en: "More than 25 beneficiaries match. The person you are looking for may not be in this list — add a "
+      + "card or ID number to narrow it.",
+    ar: "أكثر من ٢٥ مستفيداً مطابقاً. قد لا يكون الشخص المطلوب ضمن هذه القائمة — أضف رقم البطاقة أو الهوية "
+      + "لتضييق البحث.",
+  },
+  matchesTruncated: { en: "More than 25 match", ar: "أكثر من ٢٥ نتيجة" },
   cancelPick: { en: "Cancel", ar: "إلغاء" },
   book: { en: "Book appointment", ar: "احجز الموعد" },
   booked: { en: "Appointment booked", ar: "تم حجز الموعد" },
@@ -121,6 +135,9 @@ export function ReceptionBooking() {
   // Step 1 — patient
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<EligibilityHit[] | null>(null);
+  /** The page was cut. See `runSearch` — the operator has to be told, because the person they want may not
+   *  be on the list they are about to pick from. */
+  const [truncated, setTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<Localized | null>(null);
   const [patient, setPatient] = useState<EligibilityHit | null>(null);
@@ -149,15 +166,21 @@ export function ReceptionBooking() {
     setSearchError(null);
     try {
       const found = await api.searchEligibility(term);
-      setHits(found);
+      setHits(found.hits);
+      // 33.9 — the page is 25 rows and the search does not say how many matched. A term matching forty
+      // people used to give twenty-five with nothing to say the list had been cut, so the operator picked
+      // from a truncated set presented as the complete one — and the patient they wanted could be among the
+      // fifteen that were never sent.
+      setTruncated(found.truncated);
       // Ambiguity is what the dialog is FOR. One match answers the question on the spot and stays inline;
       // several is a decision, and a decision made against a list wedged between the search box and the next
       // step of the form is one made in the wrong place.
-      setPicking(found.length > 1);
+      setPicking(found.hits.length > 1);
     } catch (err) {
       // 401/403 read differently from "nothing found" — say which one happened.
       setSearchError(readErrorMessage(err));
       setHits(null);
+      setTruncated(false);
     } finally {
       setSearching(false);
     }
@@ -211,6 +234,7 @@ export function ReceptionBooking() {
     setAttempted(false);
     setPatient(null);
     setHits(null);
+    setTruncated(false);
     setQuery("");
     setFormKey((k) => k + 1);
   }
@@ -266,6 +290,9 @@ export function ReceptionBooking() {
             </form>
             {searchError && <InlineAlert tone="bad">{t(searchError)}</InlineAlert>}
             {hits && hits.length === 0 && <p role="status">{t(S.noMatches)}</p>}
+            {/* Said BEFORE the list, not after it: an operator who has already found a plausible name will
+                not read a footnote telling them there were others. */}
+            {truncated && <InlineAlert tone="warn" data-testid="book-truncated">{t(S.tooMany)}</InlineAlert>}
             {/* Exactly one match stays inline: it is an answer, not a decision, and a dialog to confirm the
                 only possible choice is a click that buys nothing. Several open the picker below. */}
             {hits && hits.length === 1 && (
@@ -278,7 +305,9 @@ export function ReceptionBooking() {
                 open={picking}
                 onOpenChange={setPicking}
                 title={t(S.matchesTitle)}
-                description={`${hits.length} ${t(S.matchesCount)} — ${t(S.matchesSub)}`}
+                description={truncated
+                  ? `${t(S.matchesTruncated)} — ${t(S.matchesSub)}`
+                  : `${hits.length} ${t(S.matchesCount)} — ${t(S.matchesSub)}`}
                 footer={<Button variant="secondary" onClick={() => setPicking(false)}>{t(S.cancelPick)}</Button>}
               >
                 <ul className="book-hits book-hits--picker">
@@ -296,7 +325,9 @@ export function ReceptionBooking() {
             {/* Reopening costs one click rather than re-running the search — the results are still here. */}
             {hits && hits.length > 1 && !picking && (
               <Button variant="secondary" size="sm" onClick={() => setPicking(true)}>
-                {`${t(S.matchesTitle)} (${hits.length})`}
+                {/* "(25)" on a capped page is a count of what was SENT, and it reads as a count of what
+                    matched. "(25+)" is the only honest label available without a second query. */}
+                {`${t(S.matchesTitle)} (${hits.length}${truncated ? "+" : ""})`}
               </Button>
             )}
           </>

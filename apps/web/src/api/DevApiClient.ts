@@ -13,7 +13,7 @@ import {
   zDecisionResult,
   zDispenseResult,
   zBeneficiaryVerification,
-  zEligibilityHit,
+  zEligibilitySearch,
   zEligibilityResult,
   zEncounter,
   zEncounterDiagnosis,
@@ -698,7 +698,10 @@ export class DevApiClient implements ApiClient {
 
   // ---- Eligibility -------------------------------------------------------
   searchEligibility(query: string) {
-    return this.gate<ReturnType<typeof this.buildHits>>(() => this.buildHits(query), []);
+    return this.gate<ReturnType<typeof this.buildHits>>(
+      () => this.buildHits(query),
+      ok(zEligibilitySearch, { hits: [], truncated: false }),
+    );
   }
   private buildHits(query: string) {
     // One ACTIVE and one SUSPENDED member, on purpose. The eligibility gate's whole job is to stop the second
@@ -715,10 +718,13 @@ export class DevApiClient implements ApiClient {
       },
     ];
     const q = query.toLowerCase();
-    return ok(
-      z.array(zEligibilityHit),
-      all.filter((h) => h.name.en.toLowerCase().includes(q) || h.id.toLowerCase().includes(q) || q.length >= 2),
-    );
+    return ok(zEligibilitySearch, {
+      hits: all.filter((h) => h.name.en.toLowerCase().includes(q) || h.id.toLowerCase().includes(q) || q.length >= 2),
+      // The fixture holds two members, so it can never fill a 25-row page. Pinned false rather than left
+      // out: a fixture that reported `truncated` on a two-row list would exercise the warning banner and
+      // teach the dev portal a behaviour the service does not have.
+      truncated: false,
+    });
   }
   /**
    * 33.9 — the fixture's members as the desk meets them: an identifier they carry, and a name.

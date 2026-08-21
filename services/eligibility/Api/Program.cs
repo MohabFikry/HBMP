@@ -267,19 +267,32 @@ reception.MapGet("/search", async (
     if (string.IsNullOrWhiteSpace(q))
         return Results.Problem(statusCode: 400, title: "q is required (NationalID / Passport / Card / Policy / Phone / name)");
 
-    var hits = await index.SearchAsync(q, limit: 25, ct);
-    var cards = hits.Select(ReceptionResultCard.From).ToList();
+    // ONE MORE than the page, so "there are more" is a fact rather than an inference. The page used to be
+    // taken with `Take(25)` and its length returned as the match count, so a term matching forty people
+    // answered "25 matches" and said nothing about the other fifteen — an operator choosing a patient from
+    // that list is choosing from a truncated set presented as the complete one.
+    const int PageSize = 25;
+    var hits = await index.SearchAsync(q, limit: PageSize + 1, ct);
+    var truncated = hits.Count > PageSize;
+    var cards = hits.Take(PageSize).Select(ReceptionResultCard.From).ToList();
 
     // Every reception search is an audited PHI read.
     await audit.EmitAsync(new AuditEventDraft
     {
         EntityType = "reception_search", EntityId = q,
         Action = AuditAction.Read, ActorUserId = me.Principal?.Subject,
-        DecisionOutcome = $"{cards.Count} match(es)", FieldClasses = ["identity", "coverage"],
+        // "25+" where the page was capped. An audit row claiming exactly 25 would be the same untruth the
+        // screen was telling, preserved in the one record that is supposed to settle what happened.
+        DecisionOutcome = truncated ? $"{cards.Count}+ match(es)" : $"{cards.Count} match(es)",
+        FieldClasses = ["identity", "coverage"],
     }, ct);
 
-    var hint = cards.Count == 0 ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary." : null;
-    return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
+    var hint = cards.Count == 0
+        ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary."
+        : truncated
+            ? $"More than {PageSize} match — the person you want may not be listed. Add a card or ID number."
+            : null;
+    return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint, truncated));
 })
         .Produces<ReceptionSearchResponse>();
 

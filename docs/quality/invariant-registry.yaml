@@ -2790,3 +2790,18 @@ invariants:
       - Mersal.Eligibility.Tests.ReceptionVerifyTests.An_unknown_identifier_is_told_apart_from_a_wrong_name
       - apps/web/test/reception-eligibility-verified.test.tsx::does not show the name on file — the service does not send it and the screen has none
       - apps/web/test/reception-eligibility-verified.test.tsx::tells a name mismatch apart from an unknown number, because they need different actions
+
+  - id: INV-A-CAPPED-LIST-SAYS-IT-WAS-CAPPED
+    statement: >-
+      A search that returned fewer rows than matched says so, and never reports its page length as the number
+      of matches. An operator choosing a patient from a truncated list presented as the complete one may be
+      choosing from a set the person they want is not in — and nothing on screen would suggest looking
+      further.
+    source: 13-ux-flows.md §2; 21-accessibility-checklist.md; doc 54 §5
+    severity: High
+    tests:
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.A_search_that_filled_the_page_says_there_were_more
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.A_search_that_fits_does_not_claim_to_have_been_cut
+      - apps/web/test/reception-booking.test.tsx::says the list was cut, before the operator picks from it
+      - apps/web/test/reception-booking.test.tsx::labels the reopen control 25+ rather than claiming exactly 25 matched
+      - apps/web/test/reception-booking.test.tsx::does not cry truncation on a complete list

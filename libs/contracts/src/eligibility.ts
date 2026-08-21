@@ -115,6 +115,23 @@ export const zEligibilityHit = z.object({
 export type EligibilityHit = z.infer<typeof zEligibilityHit>;
 
 /**
+ * A reception search — the page of hits, and whether there were more (33.9).
+ *
+ * `searchEligibility` used to return a bare array, so the one thing a caller could not learn was that the
+ * list had been cut. The server takes 25 rows; a term matching forty people produced twenty-five, and the
+ * operator picked a patient from a truncated set presented as the complete one — with the person they wanted
+ * possibly not on it and nothing on screen to suggest looking further.
+ *
+ * There is deliberately no total. "More than 25" is what an operator acts on; the action is always to narrow
+ * the term, and a full count would cost a second query per search to say the same thing.
+ */
+export const zEligibilitySearch = z.object({
+  hits: z.array(zEligibilityHit),
+  truncated: z.boolean(),
+});
+export type EligibilitySearch = z.infer<typeof zEligibilitySearch>;
+
+/**
  * The answer to "does this identifier, corroborated by this name, resolve to one member?" (33.9)
  *
  * The eligibility screen used to run a free-text search and check the FIRST hit, so a partial name was

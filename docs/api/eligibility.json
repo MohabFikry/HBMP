@@ -440,6 +440,9 @@
           "emptyStateHint": {
             "type": "string",
             "nullable": true
+          },
+          "truncated": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

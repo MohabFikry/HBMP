@@ -19,11 +19,14 @@ class BookingApi extends DevApiClient {
   slotCalls = 0;
   bookImpl: ((i: BookingRequest) => Promise<any>) | null = null;
 
+  /** Overridden per test where the list matters; one unambiguous hit by default. */
+  searchImpl: ((q: string) => Promise<any>) | null = null;
   override searchEligibility(q: string) {
-    void q;
-    return Promise.resolve([
-      { id: "ben-7", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882" },
-    ]);
+    if (this.searchImpl) return this.searchImpl(q);
+    return Promise.resolve({
+      hits: [{ id: "ben-7", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882" }],
+      truncated: false,
+    });
   }
   clinicsImpl: (() => Promise<any>) | null = null;
   override bookableClinics() {
@@ -91,16 +94,19 @@ describe("Reception booking (US-020) — eligibility gate", () => {
   /** A search returning one active and one suspended member. */
   class MixedStatusApi extends BookingApi {
     override searchEligibility() {
-      return Promise.resolve([
-        {
-          id: "ben-active", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882",
-          status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } }, bookable: true,
-        },
-        {
-          id: "ben-suspended", name: { en: "Yusuf Haddad", ar: "يوسف حداد" }, cardNumber: "MRS-M-017702",
-          status: { kind: "warn" as const, label: { en: "Suspended", ar: "موقوف" } }, bookable: false,
-        },
-      ]);
+      return Promise.resolve({
+        hits: [
+          {
+            id: "ben-active", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882",
+            status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } }, bookable: true,
+          },
+          {
+            id: "ben-suspended", name: { en: "Yusuf Haddad", ar: "يوسف حداد" }, cardNumber: "MRS-M-017702",
+            status: { kind: "warn" as const, label: { en: "Suspended", ar: "موقوف" } }, bookable: false,
+          },
+        ],
+        truncated: false,
+      });
     }
   }
 
@@ -157,14 +163,87 @@ describe("Reception booking (US-020) — eligibility gate", () => {
     expect(within(active).getByRole("button", { name: /omar khalil/i })).toBeInTheDocument();
   });
 
+  /**
+   * 33.9 — a cut list must say it was cut.
+   *
+   * <p>The search returns 25 rows and reported the length of that page as the match count, so a term
+   * matching forty people produced twenty-five with nothing to distinguish that from a complete answer.
+   * The operator then picks a patient from a truncated set presented as the whole of it — and the person
+   * they are looking for may be among the fifteen that were never sent.</p>
+   *
+   * <p>Booking never took `hits[0]` and never did: one match is a row you click, several open a picker. The
+   * defect here is not a silent choice, it is a silent OMISSION — and it is the harder one to notice,
+   * because a plausible name in the list looks like the right answer.</p>
+   */
+  it("says the list was cut, before the operator picks from it", async () => {
+    const user = userEvent.setup();
+    class TruncatedApi extends BookingApi {
+      override searchEligibility() {
+        return Promise.resolve({
+          hits: Array.from({ length: 25 }, (_, i) => ({
+            id: `ben-${i}`, name: { en: `Ahmed Hassan ${i}`, ar: `أحمد حسن ${i}` },
+            cardNumber: `MRS-M-0000${i}`,
+            status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } }, bookable: true,
+          })),
+          truncated: true,
+        });
+      }
+    }
+    renderNode(<ReceptionBooking />, new TruncatedApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "Ahmed");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    const warned = await screen.findByTestId("book-truncated");
+    expect(warned.textContent).toMatch(/may not be in this list/i);
+    // The instruction is the point: narrowing is the only thing the operator can do about it.
+    expect(warned.textContent).toMatch(/card or ID number/i);
+  });
+
+  it("labels the reopen control 25+ rather than claiming exactly 25 matched", async () => {
+    const user = userEvent.setup();
+    class TruncatedApi extends BookingApi {
+      override searchEligibility() {
+        return Promise.resolve({
+          hits: Array.from({ length: 25 }, (_, i) => ({
+            id: `ben-${i}`, name: { en: `Ahmed Hassan ${i}`, ar: `أحمد حسن ${i}` },
+            cardNumber: `MRS-M-0000${i}`, bookable: true,
+            status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } },
+          })),
+          truncated: true,
+        });
+      }
+    }
+    renderNode(<ReceptionBooking />, new TruncatedApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "Ahmed");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    // Close the picker to reveal the reopen button.
+    await user.click(await screen.findByRole("button", { name: /^cancel$/i }));
+    // "(25)" is a count of what was SENT and reads as a count of what matched.
+    expect(await screen.findByRole("button", { name: /choose a patient \(25\+\)/i })).toBeInTheDocument();
+  });
+
+  it("does not cry truncation on a complete list", async () => {
+    const user = userEvent.setup();
+    renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "Omar");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    await screen.findByText("Omar Khalil");
+    expect(screen.queryByTestId("book-truncated")).toBeNull();
+  });
+
   it("treats an ABSENT status as not bookable — default-deny, not default-allow", async () => {
     const user = userEvent.setup();
     class NoStatusApi extends BookingApi {
       override searchEligibility() {
         // An older service, or a fixture that never set it. "Not stated" must not render as "fine".
-        return Promise.resolve([
-          { id: "ben-x", name: { en: "Unknown Status", ar: "غير معروف" }, cardNumber: "MRS-M-1", bookable: false },
-        ]);
+        return Promise.resolve({
+          hits: [
+            { id: "ben-x", name: { en: "Unknown Status", ar: "غير معروف" }, cardNumber: "MRS-M-1", bookable: false },
+          ],
+          truncated: false,
+        });
       }
     }
     renderNode(<ReceptionBooking />, new NoStatusApi({ latencyMs: 0 }) as unknown as ApiClient);

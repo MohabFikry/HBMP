@@ -141,7 +141,36 @@ dotless-i rule would stop an English name matching itself under a `tr-TR` reques
 
 ---
 
-## 5. What this is NOT
+## 5. Booking: the other list, and the omission in it
+
+`ReceptionBooking` calls the same search, and it was **not** making the same mistake. It has never taken
+`found[0]`: one match renders as a row the operator clicks, several open a picker, and a non-bookable member
+is refused at the moment they are found rather than at submit. The choice is made by a person, against names
+they can see.
+
+What it had was the other failure — not a silent choice but a **silent omission**.
+
+`/reception/search` takes 25 rows and reported the length of that page as `count`. A term matching forty
+people produced twenty-five, and nothing in the response distinguished that from a complete answer. The
+operator picks from a truncated set presented as the whole of it, and the patient they are looking for may be
+among the fifteen that were never sent.
+
+That is the harder one to notice. A silent choice at least shows you *a* patient; a silent omission shows you
+a plausible list, and a plausible name in it looks like the right answer.
+
+The search now asks for **one row more than the page** — so "there are more" is a fact rather than an
+inference — and returns `truncated`. The screen says so **before** the list, because an operator who has
+already found a plausible name will not read a footnote; the reopen control reads `(25+)` rather than `(25)`,
+which is a count of what was sent masquerading as a count of what matched; and the audit row records `25+`
+for the same reason, since a record claiming exactly 25 preserves the untruth in the one place meant to
+settle what happened.
+
+No total is returned. The only thing an operator can do about "too many" is narrow the term, and "more than
+25" says that as well as "137" does — at the cost of one query instead of two on every search.
+
+---
+
+## 6. What this is NOT
 
 **Corroboration, not authentication.** It stops the wrong *record* being opened. It does not prove the person
 at the desk is the person on the card, and nothing downstream may lean on it as though it did. Somebody
@@ -153,19 +182,21 @@ weight it was never built to carry — a later decision leans on it, and the gap
 
 ---
 
-## 6. Left undone, deliberately
+## 7. Left undone, deliberately
 
-**`/reception/search` is unchanged.** Booking, the call centre and the member directory search by name, phone
-and partial identifier, and that is what those surfaces are for. What the eligibility screen needed was never
-a search.
+**`/reception/search` still matches names, phones and partial identifiers.** Booking, the call centre and the
+member directory need exactly that, and the operator there chooses from what comes back. What the eligibility
+screen needed was never a search. The only change to that endpoint is that it now admits when its page was
+cut (§5).
 
-**Booking still takes `found[0]`.** `ReceptionBooking` calls `searchEligibility` and uses the first hit the
-same way this screen did. It is the same shape of defect on a screen that then shows the member's name before
-anything is committed, so it is visible in a way the eligibility card was not — but it is not fixed here, and
-it should be.
+**Two people with the same name are told apart by member number and nothing else.** The reception card carries
+no date of birth by design (min-necessary), so a picker showing two `Ahmed Hassan` rows distinguishes them by
+a number the operator may not be holding. Adding a corroborating field to that projection is a
+minimum-necessary decision, not a code one.
 
-**No date-of-birth check.** A second corroborating field is the natural next tightening and it is a policy
-question — whether a desk may be blocked when a member does not know their recorded DOB — not a code one.
+**No date-of-birth check on verify.** A second corroborating field is the natural next tightening, and it is a
+policy question — whether a desk may be blocked when a member does not know their recorded DOB — not a code
+one.
 
 **The audit row for a miss carries the identifier offered.** That is a deliberate trade (§3), and it means a
 mistyped national ID is stored in the audit trail. It is the same class of record `/reception/search` already
