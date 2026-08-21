@@ -70,7 +70,13 @@ export type Permission =
   | "beneficiary.approvals"
   // Case management
   | "case.read"
-  | "case.beneficiary360"
+  /*
+   * 33.7 — `case.beneficiary360` was RETIRED. Its section routed to `<MyCases />`, the same component the
+   * "My Cases" section routes to, so the rail offered one screen twice under two names — the duplication the
+   * lab and pharmacy portals both had removed by 32.6. The 360 itself is not gone: it is the detail panel
+   * that opens beside the list when a case is selected, which is where it always rendered.
+   */
+  | "case.coordinate"
   | "case.escalations"
   // Patient profile (Phase 20). `profile.read` is held by every role the design-39 §4 matrix names — the
   // COARSE gate only; what each of them receives is decided per section on the SERVER. `profile.export` is
@@ -267,7 +273,22 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.bulk",
     "policy.analytics",
   ],
-  case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
+  /*
+   * 33.7 — THE ROLE HELD THREE READ PERMISSIONS AND THE TOKEN HELD THREE SCOPES.
+   *
+   * The 0001 seed grants `case_manager` `case:read`, `case:write` AND `case:manage`. Design 11 §3.3 gives
+   * the role `C🟠ASG R🟠ASG U🟠ASG` on `approval_case`, and design 10 §3.11 lists "open/track cases;
+   * coordinate referrals; manage care plans" among its key capabilities. case-service implements nine write
+   * endpoints against those scopes.
+   *
+   * The SPA reached none of them. A coordination task could be listed and never completed, an escalation
+   * could be read and never raised or resolved, and a case could never be closed — so a caseworker's list
+   * only ever grew. `case.coordinate` is the permission behind the affordances that close that loop.
+   *
+   * Assignment (`case:manage`, POST /assign and /unassign) is deliberately still absent: who holds a case is
+   * a supervisor's decision and there is no supervisor surface here to make it from. Design 52 §5.
+   */
+  case_manager: ["case.read", "case.coordinate", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
   // `appointments.book` — RESERVE only. The call centre holds appointment:reserve, not appointment:write, so
   // it can hold and move a time but cannot record an arrival; `checkin.write` is deliberately absent and the

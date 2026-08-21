@@ -92,6 +92,9 @@ import {
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
+  type EscalationState,
+  type CaseState,
+  type TaskState,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -322,6 +325,44 @@ const caseStatus = (s: unknown) =>
   ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[
     String(s ?? "open").toLowerCase()
   ] ?? "open";
+/** The same mapping as {@link caseStatus}, typed as the contract's enum so a write can be built from it. */
+const caseState = (s: unknown): CaseState =>
+  (({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" }) as
+    Record<string, CaseState>)[String(s ?? "open").toLowerCase()] ?? "open";
+
+/**
+ * The contract's enums → the names case-service's request bodies expect.
+ *
+ * Declared as tables rather than composed with a `replace` because these are two vocabularies that happen to
+ * look alike: the wire uses .NET enum names (`OnHold`, `InProgress`) and the contract uses snake_case, and a
+ * string transform between them is a rule that silently stops holding the first time either side adds a
+ * value the pattern does not cover.
+ */
+const CASE_STATE_TO_SERVER: Record<CaseState, string> = {
+  open: "Open", active: "Active", on_hold: "OnHold", resolved: "Resolved", closed: "Closed",
+};
+const TASK_STATE_TO_SERVER: Record<TaskState, string> = {
+  todo: "Todo", in_progress: "InProgress", done: "Done", cancelled: "Cancelled",
+};
+const ESCALATION_STATE_TO_SERVER: Record<EscalationState, string> = {
+  raised: "Raised", acknowledged: "Acknowledged", resolved: "Resolved",
+};
+
+/** A service escalation status → the contract's enum. Default-RAISED: an unreadable state must not read as
+ *  closed, because a closed one is the one nobody looks at again. */
+const escalationState = (s: unknown): EscalationState => {
+  const k = String(s ?? "").toLowerCase();
+  if (k === "resolved") return "resolved";
+  if (k === "acknowledged") return "acknowledged";
+  return "raised";
+};
+
+/** The escalation's own state → its chip. Three states, three cues — see `escalations()` for what this replaced. */
+const escalationChip = (state: EscalationState): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } =>
+  state === "resolved" ? { kind: "ok", label: { en: "Resolved", ar: "مُغلقة" } }
+    : state === "acknowledged" ? { kind: "info", label: { en: "Acknowledged", ar: "مُستلَمة" } }
+      : { kind: "warn", label: { en: "Escalated", ar: "مُصعَّدة" } };
+
 /** A masked, min-necessary display token for a case row (never a beneficiary name). */
 const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? "").slice(-4)}`;
 
@@ -3404,6 +3445,7 @@ export class HttpApiClient implements ApiClient {
         category: String(c.category ?? "complex").toLowerCase(),
         priority: String(c.priority ?? "normal").toLowerCase(),
         status: caseStatus(c.status),
+        state: caseState(c.status),
         openedAt: c.openedAt ?? new Date().toISOString(),
         summary: c.summary ? neutral(c.summary) : undefined,
       }),
@@ -3476,19 +3518,53 @@ export class HttpApiClient implements ApiClient {
   async escalations() {
     const r = (await getRaw(`/cases/escalations`)) as any;
     const items: any[] = Array.isArray(r) ? r : (r?.items ?? []);
-    return items.map((e: any) =>
-      parseOr(zEscalation, {
+    return items.map((e: any) => {
+      const state = escalationState(e.status);
+      return parseOr(zEscalation, {
         id: e.escalationId ?? e.id,
         caseId: required(e.caseId, "caseEvent.caseId"),
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
-        // An escalation is by definition something that needed raising. `warn`, never the green chip the
-        // literal produced — and, as above, that literal threw before it could mislead anyone.
-        status: { kind: "warn" as const, label: { en: "Escalated", ar: "مُصعَّدة" } },
+        state,
+        // 33.7 — THE SERVER'S STATE, not a constant.
+        //
+        // This used to be the literal `{ kind: "warn", label: "Escalated" }` for every row, with the
+        // reasoning "an escalation is by definition something that needed raising". True of the act and not
+        // of the record: case-service tracks Raised → Acknowledged → Resolved, and rendering all three the
+        // same amber chip meant a register whose whole purpose is showing what is still outstanding showed
+        // everything as outstanding forever. A caseworker could not tell a resolved escalation from a new
+        // one, and nothing in the platform could resolve one anyway.
+        status: escalationChip(state),
         raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
-      }),
-    );
+        resolvedAt: e.resolvedAt ?? null,
+        resolutionNote: e.resolutionNote ?? null,
+      });
+    });
+  }
+
+  /**
+   * 33.7 — the coordination writes. `case_manager` has held `case:read`, `case:write` AND `case:manage` in
+   * the 0001 seed since it existed, and the SPA reached none of the nine endpoints behind them: a task could
+   * be listed and never completed, an escalation read and never raised or resolved, a case never closed.
+   */
+  async updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/tasks/${encodeURIComponent(taskId)}`, {
+      status: TASK_STATE_TO_SERVER[state],
+      outcomeNote: outcomeNote ?? null,
+    });
+  }
+  async raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string) {
+    await postRaw(`/cases/${encodeURIComponent(caseId)}/escalate`, { raisedToRole, reason }, idempotencyKey);
+  }
+  async updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/escalations/${encodeURIComponent(escalationId)}`, {
+      status: ESCALATION_STATE_TO_SERVER[state],
+      resolutionNote: resolutionNote ?? null,
+    });
+  }
+  async setCaseState(caseId: string, state: CaseState) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/status`, { status: CASE_STATE_TO_SERVER[state] });
   }
 
   // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.

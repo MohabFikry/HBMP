@@ -32,6 +32,9 @@ import {
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
+  type EscalationState,
+  type CaseState,
+  type TaskState,
   zNotification,
   zMarkAllReadResult,
   zMarkReadResult,
@@ -3488,6 +3491,7 @@ export class DevApiClient implements ApiClient {
             category: "chronic",
             priority: "high",
             status: { kind: "warn", label: loc("Active", "نشطة") },
+            state: "active",
             openedAt: "2026-07-10T09:00:00Z",
             summary: loc("Diabetes care coordination", "تنسيق رعاية السكري"),
           },
@@ -3498,6 +3502,7 @@ export class DevApiClient implements ApiClient {
             category: "vulnerable",
             priority: "urgent",
             status: { kind: "info", label: loc("Open", "مفتوحة") },
+            state: "open",
             openedAt: "2026-07-18T11:30:00Z",
             summary: loc("Post-surgery follow-up", "متابعة بعد الجراحة"),
           },
@@ -3566,12 +3571,57 @@ export class DevApiClient implements ApiClient {
             caseNo: "CASE-2026-000051",
             raisedToRole: loc("Medical Approval", "الموافقة الطبية"),
             reason: "Urgent authorization for post-surgical imaging pending > 24h.",
-            status: { kind: "warn", label: loc("Raised", "مُصعّدة") },
+            state: "raised",
+            status: { kind: "warn", label: loc("Escalated", "مُصعَّدة") },
             raisedAt: "2026-07-20T08:00:00Z",
+            resolvedAt: null,
+            resolutionNote: null,
+          },
+          {
+            id: "ESC-2",
+            caseId: "CASE-2026-000042",
+            caseNo: "CASE-2026-000042",
+            raisedToRole: loc("Medical Director", "المدير الطبي"),
+            reason: "Repeat refusal of the same imaging request — needs a policy read.",
+            state: "acknowledged",
+            status: { kind: "info", label: loc("Acknowledged", "مُستلَمة") },
+            raisedAt: "2026-07-19T13:20:00Z",
+            resolvedAt: null,
+            resolutionNote: null,
+          },
+          {
+            // Three states, three chips. Every row used to render the same amber "Escalated", so a register
+            // whose purpose is showing what is outstanding showed everything as outstanding forever.
+            id: "ESC-3",
+            caseId: "CASE-2026-000042",
+            caseNo: "CASE-2026-000042",
+            raisedToRole: loc("Medical Approval", "الموافقة الطبية"),
+            reason: "Pharmacy substitution disputed by the prescriber.",
+            state: "resolved",
+            status: { kind: "ok", label: loc("Resolved", "مُغلقة") },
+            raisedAt: "2026-07-11T10:05:00Z",
+            resolvedAt: "2026-07-12T09:40:00Z",
+            resolutionNote: "Prescriber accepted the substitution after the formulary note.",
           },
         ]),
       [],
     );
+  }
+  updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string) {
+    void caseId; void taskId; void state; void outcomeNote;
+    return this.gate(() => undefined, undefined);
+  }
+  raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string) {
+    void caseId; void raisedToRole; void reason; void idempotencyKey;
+    return this.gate(() => undefined, undefined);
+  }
+  updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string) {
+    void caseId; void escalationId; void state; void resolutionNote;
+    return this.gate(() => undefined, undefined);
+  }
+  setCaseState(caseId: string, state: CaseState) {
+    void caseId; void state;
+    return this.gate(() => undefined, undefined);
   }
 
   // ---- Finance (Phase 10.2) — billing codes + amounts only, no diagnosis --------------------------------

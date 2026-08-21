@@ -425,7 +425,16 @@ export const PORTALS: PortalDef[] = [
     },
     sections: [
       { key: "cases", path: "my-cases", label: { en: "My Cases", ar: "حالاتي" }, group: G.cases, icon: "doc", permission: "case.read" },
-      { key: "beneficiary360", path: "beneficiary-360", label: { en: "Beneficiary 360", ar: "المستفيد 360" }, group: G.cases, icon: "user", permission: "case.beneficiary360" },
+      /*
+        33.7 — "Beneficiary 360" was REMOVED, not renamed.
+
+        It and "My Cases" both routed to the SAME component (`registry.tsx` mapped `/cases/beneficiary-360`
+        and `/cases/my-cases` to `<MyCases />`), so the rail offered one screen twice under two names. The
+        360 is the detail panel that opens beside the list when a case is selected — it has never been a
+        separate screen, and a second nav entry claiming it was is how somebody comes to believe there is a
+        beneficiary-first view they cannot find. Same duplication the lab and pharmacy portals removed by
+        32.6, and the same fix.
+      */
       { key: "escalations", path: "escalations", label: { en: "Escalations", ar: "التصعيدات" }, group: G.cases, icon: "triangle", permission: "case.escalations" },
     ],
   },

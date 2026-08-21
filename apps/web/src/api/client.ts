@@ -105,6 +105,9 @@ import type {
   IcdRef,
   Soap,
   Escalation,
+  EscalationState,
+  CaseState,
+  TaskState,
   ExecutiveDashboard,
   ExportRequest,
   ExportResult,
@@ -818,6 +821,20 @@ export interface ApiClient {
   // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
   myCases(): Promise<CaseListItem[]>;
   beneficiary360(caseId: string): Promise<Beneficiary360>;
+  /**
+   * 33.7 — the coordination WRITES.
+   *
+   * `case_manager` has held `case:read`, `case:write` and `case:manage` since the 0001 seed, and design 11
+   * §3.3 gives the role `C🟠ASG R🟠ASG U🟠ASG` on `approval_case`. case-service implements nine endpoints
+   * against those scopes and the SPA reached none of them, so a caseworker's list only ever grew.
+   */
+  updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string): Promise<void>;
+  /** Raise an escalation. Both the target role and the reason are required — the server refuses either blank. */
+  raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string): Promise<void>;
+  /** Acknowledge or resolve one. `Resolved` is terminal and the note is what closing it was for. */
+  updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string): Promise<void>;
+  /** Move a case through its lifecycle. The server refuses any transition its state machine does not allow. */
+  setCaseState(caseId: string, state: CaseState): Promise<void>;
   caseTasks(caseId: string): Promise<CoordinationTask[]>;
   escalations(): Promise<Escalation[]>;
 
