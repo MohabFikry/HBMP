@@ -113,3 +113,40 @@ export const zEligibilityHit = z.object({
   bookable: z.boolean().optional(),
 });
 export type EligibilityHit = z.infer<typeof zEligibilityHit>;
+
+/**
+ * The answer to "does this identifier, corroborated by this name, resolve to one member?" (33.9)
+ *
+ * The eligibility screen used to run a free-text search and check the FIRST hit, so a partial name was
+ * enough to open somebody's coverage — and which somebody depended on the database's ordering. A verified
+ * lookup takes an identifier the beneficiary can present and part of the name, and the SERVICE decides
+ * whether the two agree.
+ *
+ * Discriminated on `verified`, so a client reads one field to know which answer it has. The refusal
+ * deliberately carries no identity at all — not the name on file, not the member number, not the membership
+ * status — because an endpoint that said "that card belongs to someone else called X" would hand out the
+ * name behind any card number to whoever holds one.
+ *
+ * `reason` is a machine code and never a sentence: the wording belongs to the screen, in both locales, and a
+ * server-authored string cannot be translated.
+ */
+export const zVerificationRefusal = z.object({
+  verified: z.literal(false),
+  /**
+   * - `not-found` — nothing on file matches that identifier.
+   * - `name-mismatch` — the identifier resolves, and the name given does not agree with the record.
+   * - `name-too-short` — the fragment offered narrows nothing; type more of the name.
+   */
+  reason: z.enum(["not-found", "name-mismatch", "name-too-short"]),
+});
+
+export const zVerifiedBeneficiary = z.object({
+  verified: z.literal(true),
+  hit: zEligibilityHit,
+});
+
+export const zBeneficiaryVerification = z.discriminatedUnion("verified", [
+  zVerifiedBeneficiary,
+  zVerificationRefusal,
+]);
+export type BeneficiaryVerification = z.infer<typeof zBeneficiaryVerification>;

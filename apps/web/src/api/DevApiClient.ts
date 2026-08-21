@@ -12,6 +12,7 @@ import {
   zConsumeResult,
   zDecisionResult,
   zDispenseResult,
+  zBeneficiaryVerification,
   zEligibilityHit,
   zEligibilityResult,
   zEncounter,
@@ -719,6 +720,48 @@ export class DevApiClient implements ApiClient {
       all.filter((h) => h.name.en.toLowerCase().includes(q) || h.id.toLowerCase().includes(q) || q.length >= 2),
     );
   }
+  /**
+   * 33.9 — the fixture's members as the desk meets them: an identifier they carry, and a name.
+   *
+   * <p>`buildHits` above returns EVERYTHING for any two-character query, which is the defect this replaces
+   * written down as a fixture — and it is left alone, because the search surface it feeds (booking, the call
+   * centre) is a search and is meant to be broad. What the eligibility screen needed was never a search.</p>
+   */
+  private static readonly VERIFIABLE = [
+    {
+      id: "MRS-M-10231", given: "Amal", family: "Hassan", name: loc("Amal Hassan", "أمل حسن"),
+      identifiers: ["MRS-M-10231", "29801011234567", "UNHCR-284-11902"], cardNumber: "MRS-M-10231",
+      status: { kind: "ok" as const, label: loc("Active", "نشط") }, bookable: true,
+    },
+    {
+      id: "MRS-M-10555", given: "Yusuf", family: "Haddad", name: loc("Yusuf Haddad", "يوسف حداد"),
+      identifiers: ["MRS-M-10555", "29505200098765"], cardNumber: "MRS-M-10555",
+      status: { kind: "warn" as const, label: loc("Suspended", "موقوف") }, bookable: false,
+    },
+  ];
+
+  verifyBeneficiary(identifier: string, name: string) {
+    return this.gate(() => {
+      const id = identifier.trim();
+      const terms = name.trim().toLowerCase().split(/[\s-]+/).filter(Boolean);
+      // Mirrors the service: at least two characters per term, and EVERY term must prefix a name token.
+      if (terms.length === 0 || terms.some((t) => t.length < 2))
+        return ok(zBeneficiaryVerification, { verified: false, reason: "name-too-short" });
+
+      const m = DevApiClient.VERIFIABLE.find((v) => v.identifiers.includes(id));
+      if (!m) return ok(zBeneficiaryVerification, { verified: false, reason: "not-found" });
+
+      const tokens = `${m.given} ${m.family}`.toLowerCase().split(/[\s-]+/).filter(Boolean);
+      const agrees = terms.every((t) => tokens.some((k) => k.startsWith(t)));
+      return agrees
+        ? ok(zBeneficiaryVerification, {
+            verified: true,
+            hit: { id: m.id, name: m.name, cardNumber: m.cardNumber, status: m.status, bookable: m.bookable },
+          })
+        : ok(zBeneficiaryVerification, { verified: false, reason: "name-mismatch" });
+    });
+  }
+
   /**
    * 32.6 — the two scopes, both present in the fixture.
    *

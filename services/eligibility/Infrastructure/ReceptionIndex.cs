@@ -36,6 +36,23 @@ public sealed record RemainingLimit(string Category, string LimitType, decimal R
 public interface IReceptionIndex
 {
     Task<IReadOnlyList<ReceptionDocument>> SearchAsync(string q, int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolve ONE member from something a beneficiary can physically present. Null when nothing matches.
+    /// </summary>
+    /// <remarks>
+    /// <para>Deliberately not <see cref="SearchAsync"/> with a limit of one. That method matches names with
+    /// ILIKE and returns whatever the database happened to order first — which is exactly how the eligibility
+    /// screen came to check the wrong Ahmed. This one is an EXACT match on a unique identifier: it returns
+    /// the member or it returns nothing, and there is no first-of-several to pick.</para>
+    ///
+    /// <para><b>Phone is not on the list.</b> A household shares one number, so a phone identifies a family
+    /// and not a person — the one thing this method exists to do. Nor is a beneficiary GUID: it is a system
+    /// key, not something anyone carries to a desk, and admitting it would make "verified against the card
+    /// they presented" untrue for that path.</para>
+    /// </remarks>
+    Task<ReceptionDocument?> FindByPresentedIdentifierAsync(string identifier, CancellationToken ct = default);
+
     Task UpsertAsync(ReceptionDocument doc, CancellationToken ct = default);
 }
 
@@ -95,6 +112,39 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
         return results;
     }
 
+    public async Task<ReceptionDocument?> FindByPresentedIdentifierAsync(string identifier, CancellationToken ct = default)
+    {
+        var id = identifier.Trim();
+        if (id.Length == 0) return null;
+
+        // Equality on every column, no ILIKE and no wildcard: a partial card number must not resolve a member.
+        // Take(2) and insist on exactly one, rather than FirstOrDefault. These columns are unique in a clean
+        // database and the check costs a row — but if two records ever DO share an identifier, taking whichever
+        // the planner returned first is the failure this whole endpoint replaces, and it would reappear here
+        // in the one place nobody would look for it.
+        var candidates = await db.Members.AsNoTracking().Where(x =>
+            x.MemberNo == id || x.NationalId == id || x.Passport == id
+            || x.RefugeeId == id || x.UnhcrNo == id).Take(2).ToListAsync(ct);
+        if (candidates.Count > 1) return null;
+        var m = candidates.FirstOrDefault();
+        if (m is null)
+        {
+            // The policy number lives on the coverage row rather than the member, and a beneficiary who is
+            // handed a policy card has nothing else to type. Resolved through its member so the same card
+            // comes back either way.
+            var byPolicy = await db.Coverages.AsNoTracking().Where(c => c.PolicyNo == id)
+                .Select(c => c.BeneficiaryId).Distinct().Take(2).ToListAsync(ct);
+            // A policy covering a whole household is not an individual identifier. Refusing the ambiguous
+            // case is the point: silently taking the first is the defect this endpoint replaces.
+            if (byPolicy.Count != 1) return null;
+            m = await db.Members.AsNoTracking().FirstOrDefaultAsync(x => x.BeneficiaryId == byPolicy[0], ct);
+            if (m is null) return null;
+        }
+
+        var covs = await db.Coverages.AsNoTracking().Where(c => c.BeneficiaryId == m.BeneficiaryId).ToListAsync(ct);
+        return Compose(m, covs);
+    }
+
     public Task UpsertAsync(ReceptionDocument doc, CancellationToken ct = default) => Task.CompletedTask; // reads live
 
     public static ReceptionDocument Compose(MemberProjection m, IReadOnlyList<CoverageProjection> covs)
@@ -138,6 +188,20 @@ public sealed class InMemoryReceptionIndex : IReceptionIndex
             || d.GivenName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || d.FamilyName.Contains(term, StringComparison.OrdinalIgnoreCase);
         return Task.FromResult<IReadOnlyList<ReceptionDocument>>(_docs.Values.Where(Match).Take(limit).ToList());
+    }
+
+    public Task<ReceptionDocument?> FindByPresentedIdentifierAsync(string identifier, CancellationToken ct = default)
+    {
+        var id = identifier.Trim();
+        if (id.Length == 0) return Task.FromResult<ReceptionDocument?>(null);
+        bool Exact(ReceptionDocument d) =>
+            d.MemberNo == id || d.NationalId == id || d.Passport == id || d.RefugeeId == id || d.UnhcrNo == id;
+        var hit = _docs.Values.Where(Exact).Take(2).ToList();
+        if (hit.Count == 1) return Task.FromResult<ReceptionDocument?>(hit[0]);
+        if (hit.Count > 1) return Task.FromResult<ReceptionDocument?>(null);
+        // Policy last, and only when it names exactly one person — see the interface.
+        var byPolicy = _docs.Values.Where(d => d.PolicyNo == id).Take(2).ToList();
+        return Task.FromResult(byPolicy.Count == 1 ? byPolicy[0] : null);
     }
 
     public Task UpsertAsync(ReceptionDocument doc, CancellationToken ct = default)

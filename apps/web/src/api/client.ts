@@ -97,6 +97,7 @@ import type {
   DispenseRequest,
   DispenseResult,
   OutOfStockResult,
+  BeneficiaryVerification,
   EligibilityHit,
   EligibilityResult,
   Encounter,
@@ -262,6 +263,20 @@ export interface ApiClient {
 
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
+  /**
+   * 33.9 — resolve ONE beneficiary from what they presented, corroborated by part of their name.
+   *
+   * <p>The eligibility screen used to call {@link searchEligibility} and check `hits[0]`. A partial name was
+   * enough, and which member came back depended on the database's ordering — so the plan, remaining cap and
+   * visit verdict on screen could belong to a person nobody had picked, with nothing on the card to say
+   * there had been others.</p>
+   *
+   * <p>The service decides whether the identifier and the name agree, and the refusal it returns carries no
+   * identity: a client cannot learn the name behind a card number by guessing at it. Corroboration, not
+   * authentication — this stops the wrong record being opened and proves nothing about who is standing at
+   * the desk.</p>
+   */
+  verifyBeneficiary(identifier: string, name: string, signal?: AbortSignal): Promise<BeneficiaryVerification>;
   /**
    * 32.6 — ask eligibility-service, optionally about a named benefit category.
    *

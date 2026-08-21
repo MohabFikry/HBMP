@@ -2758,3 +2758,35 @@ invariants:
       - Mersal.Emr.Tests.AppointmentSummaryTests.Another_branchs_cancellations_are_not_on_this_desks_card
       - apps/web/test/reception-dashboard.test.tsx::counts cancellations apart from no-shows
       - apps/web/test/reception-dashboard.test.tsx::reads a genuine zero as 0 on the new card, not as a dash
+
+  - id: INV-AN-ELIGIBILITY-ANSWER-IS-ABOUT-A-PERSON-SOMEBODY-CHOSE
+    statement: >-
+      A coverage answer is produced only for a beneficiary resolved from an identifier they presented AND
+      corroborated by part of their name, both decided by the service. A partial name is never enough, a
+      partial identifier resolves nobody, and an identifier naming more than one person is refused rather
+      than resolved to the first of them.
+    source: 11-permission-matrix.md §3.2; 18-security-model.md §2; 13-ux-flows.md US-010
+    severity: Critical
+    tests:
+      - Mersal.Eligibility.Tests.IdentityCorroborationTests.A_fragment_too_short_to_narrow_anything_is_refused
+      - Mersal.Eligibility.Tests.IdentityCorroborationTests.Adding_a_term_can_only_narrow_the_match
+      - Mersal.Eligibility.Tests.PresentedIdentifierTests.Something_that_is_not_an_individual_identifier_resolves_nobody
+      - Mersal.Eligibility.Tests.PresentedIdentifierTests.A_policy_covering_more_than_one_person_resolves_nobody
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.A_name_with_no_identifier_is_refused_at_the_door
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.A_partial_identifier_resolves_nobody
+      - apps/web/test/reception-eligibility-verified.test.tsx::refuses to submit until both the number and the name are given
+      - apps/web/test/reception-eligibility-verified.test.tsx::sends BOTH to the service and never a bare search
+      - apps/web/test/reception-eligibility-verified.test.tsx::checks the member the service verified, not the first of several
+
+  - id: INV-A-REFUSED-LOOKUP-DISCLOSES-NOTHING-ABOUT-WHO-IT-REFUSED
+    statement: >-
+      When a verified lookup refuses, the answer carries a reason code and no identity — not the name on
+      file, not the member number, not the membership status. Telling a caller whose card they are holding
+      would be a larger disclosure than the ambiguity the check exists to remove.
+    source: 18-security-model.md §2; 19-audit-strategy.md §3
+    severity: Critical
+    tests:
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.A_wrong_name_is_refused_and_the_refusal_names_nobody
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.An_unknown_identifier_is_told_apart_from_a_wrong_name
+      - apps/web/test/reception-eligibility-verified.test.tsx::does not show the name on file — the service does not send it and the screen has none
+      - apps/web/test/reception-eligibility-verified.test.tsx::tells a name mismatch apart from an unknown number, because they need different actions

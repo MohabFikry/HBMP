@@ -47,6 +47,7 @@ import {
   zAuthorizationItem,
   zInvestigationOrder,
   zOrderPricing,
+  zBeneficiaryVerification,
   zEligibilityHit,
   zEligibilityResult,
   zEncounter,
@@ -937,6 +938,48 @@ export class HttpApiClient implements ApiClient {
       });
     });
   }
+  /**
+   * 33.9 — the verified lookup that replaced "search, then take the first hit".
+   *
+   * <p>POST, not a query string: a national ID and a name in a URL end up in the gateway's access log, the
+   * browser's history and every proxy between the two. The same reasoning the platform applies to any other
+   * identifier it declines to put in a path.</p>
+   *
+   * <p>The whole rule is the SERVICE's — which identifiers may be presented, whether the name agrees, and
+   * what a refusal is allowed to say. This method maps the answer and adds nothing: a client-side
+   * re-implementation would be a second opinion, and the two would drift.</p>
+   */
+  async verifyBeneficiary(identifier: string, name: string, signal?: AbortSignal) {
+    const r = (await postRaw(`/reception/verify`, { identifier, name }, undefined, { signal })) as any;
+    if (r?.verified !== true) {
+      // The refusal carries a machine code and no identity. Anything the client does not recognise is read
+      // as "not found" rather than as a match — default-deny, because the alternative on an unrecognised
+      // reason would be showing a card the server did not verify.
+      const reason = String(r?.reason ?? "not-found");
+      return parseOr(zBeneficiaryVerification, {
+        verified: false,
+        reason: ["not-found", "name-mismatch", "name-too-short"].includes(reason) ? reason : "not-found",
+      });
+    }
+    const c = r.card;
+    const raw = c?.identity?.status;
+    // The verified card is cached under the same key the check step reads, so `checkEligibility` needs no
+    // second round trip and never fabricates the DOB and gender this projection deliberately omits.
+    receptionCards.set(String(c?.identity?.beneficiaryId), c);
+    return parseOr(zBeneficiaryVerification, {
+      verified: true,
+      hit: {
+        id: c?.identity?.beneficiaryId,
+        name: neutral(c?.identity?.displayName),
+        cardNumber: c?.identity?.memberNo ?? "",
+        status: raw
+          ? { kind: toneToKind(c?.identity?.statusSemantics?.tone), label: neutral(c?.identity?.statusSemantics?.label ?? raw) }
+          : undefined,
+        bookable: String(raw ?? "") === "Active",
+      },
+    });
+  }
+
   /**
    * 32.6 — THE eligibility check, asked of eligibility-service.
    *

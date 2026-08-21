@@ -41,10 +41,12 @@ Empty state: wizard step with prefilled defaults when returning. All steps keybo
 
 ```mermaid
 flowchart TD
-    A([Beneficiary arrives]) --> B[Reception search: ID / Passport / Card / Policy / Phone]
-    B --> C{Match found?}
+    A([Beneficiary arrives]) --> B[Reception enters what was presented: ID / Passport / Card / Policy + part of the name]
+    B --> C{Identifier resolves ONE member?}
     C -- No --> C1[Empty: 'No match — try another identifier or register'] --> B
-    C -- Yes --> D[Show minimum-necessary result card]
+    C -- Yes --> CN{Name agrees with the record?}
+    CN -- No --> CN1[Refused: 'That name does not match this number' — no identity shown] --> B
+    CN -- Yes --> D[Show minimum-necessary result card]
     D --> E{Eligibility status}
     E -- Active --> F[Show coverage summary + remaining limits + visit history summary]
     E -- Expired/Suspended/Blocked/Inactive --> G[Show status chip + guidance; block visit creation]
@@ -57,6 +59,8 @@ flowchart TD
 ```
 
 Reception **cannot see EMR** (min-necessary; [11-permission-matrix.md](11-permission-matrix.md)). Result card exposes only eligibility, coverage, remaining limits, and a visit-history *summary*.
+
+The **identifier + name** pair is a corroboration step, not authentication: it stops the wrong record being opened, and proves nothing about who is standing at the desk. It was added after the screen was found searching on a bare name fragment and answering about the first match — see [54-the-check-that-checked-nobody.md](54-the-check-that-checked-nobody.md). A phone number is not accepted here (a household shares one, so it names a family and not a person); `/reception/search` still matches it, for the call centre, which is a search and is meant to be broad.
 
 ---
 

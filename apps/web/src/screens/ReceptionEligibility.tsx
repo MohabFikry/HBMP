@@ -8,21 +8,41 @@ import { PageHeader, useLoc } from "./_shared";
 
 const S = {
   title: { en: "Eligibility Check", ar: "التحقق من الأهلية" },
-  field: { en: "Card number, national ID, or name", ar: "رقم البطاقة أو الهوية أو الاسم" },
+
+  // ---- 33.9 — two fields, both required ----
+  //
+  // This was ONE box taking a card number, an ID, or any fragment of a name, and the screen then checked the
+  // first hit it came back with. "Ahmed" matched every Ahmed on the platform and one of them was shown, with
+  // nothing to say there had been others — so the plan, the remaining cap and the visit verdict on screen
+  // could belong to a person nobody had picked.
+  fieldId: { en: "Card or ID number", ar: "رقم البطاقة أو الهوية" },
+  fieldIdHelp: {
+    en: "Whatever they presented: member card, national ID, refugee ID, UNHCR number, passport or policy "
+      + "number. It must match in full — a partial number finds nobody.",
+    ar: "ما قدّموه: بطاقة العضوية أو الرقم القومي أو رقم اللاجئ أو رقم المفوضية أو جواز السفر أو رقم الوثيقة. "
+      + "يجب أن يطابق بالكامل — الرقم الناقص لا يجد أحداً.",
+  },
+  fieldName: { en: "Part of their name", ar: "جزء من اسمهم" },
+  fieldNameHelp: {
+    en: "A given or family name is enough — it confirms the card belongs to the person in front of you. "
+      + "At least two letters.",
+    ar: "الاسم الأول أو اسم العائلة يكفي — للتأكد من أن البطاقة تخص الشخص الذي أمامك. حرفان على الأقل.",
+  },
   // This screen is mounted under BOTH /reception/eligibility and /beneficiaries/eligibility (see
   // screens/registry.tsx), so it cannot name reception: a registration officer reading "reception sees
   // coverage only" is being told about somebody else's permissions, not their own. The rule is a property
-  // of the SEARCH, not of who is running it, so it is now stated that way and is true for every caller.
-  help: { en: "Minimum necessary — this search returns coverage only, never clinical data.", ar: "الحد الأدنى — يعرض هذا البحث التغطية فقط دون بيانات سريرية." },
+  // of the LOOKUP, not of who is running it, so it is stated that way and is true for every caller.
+  help: { en: "Minimum necessary — this lookup returns coverage only, never clinical data.", ar: "الحد الأدنى — يعرض هذا البحث التغطية فقط دون بيانات سريرية." },
   check: { en: "Check eligibility", ar: "تحقق من الأهلية" },
   // The idle card used to repeat the instruction already sitting on the field above it. What it says now is
   // the thing the field cannot: what the check ANSWERS, so an operator knows before running it whether this
   // is the screen that settles the question in front of them.
   idle: {
-    en: "A check returns the plan, benefit band, annual cap remaining, and whether a visit is allowed today. "
-      + "Name the benefit category and it also returns the copay for it.",
-    ar: "يعرض التحقق الخطة وفئة المنفعة والمتبقي من الحد السنوي، وما إذا كانت الزيارة مسموحة اليوم. "
-      + "وإذا حدّدت فئة المنفعة فسيعرض أيضاً المساهمة الخاصة بها.",
+    en: "The number and the name must agree before anything is shown. A check then returns the plan, benefit "
+      + "band, annual cap remaining, and whether a visit is allowed today. Name the benefit category and it "
+      + "also returns the copay for it.",
+    ar: "يجب أن يتطابق الرقم مع الاسم قبل عرض أي شيء. ثم يعرض التحقق الخطة وفئة المنفعة والمتبقي من الحد "
+      + "السنوي، وما إذا كانت الزيارة مسموحة اليوم. وإذا حدّدت فئة المنفعة فسيعرض أيضاً المساهمة الخاصة بها.",
   },
   loading: { en: "Checking…", ar: "جارٍ التحقق…" },
   error: { en: "Couldn't check eligibility. Try again.", ar: "تعذّر التحقق من الأهلية. حاول مجدداً." },
@@ -31,6 +51,25 @@ const S = {
   noneBody: {
     en: "Check the card or ID number for a mis-read digit. If it is right, this person is not registered yet — register them before the visit.",
     ar: "تحقّق من رقم البطاقة أو الهوية بحثًا عن رقم مقروء خطأ. وإذا كان صحيحًا فهذا الشخص غير مسجَّل بعد — سجّله قبل الزيارة.",
+  },
+
+  // ---- 33.9 — the two refusals, told apart because they lead to different actions ----
+  //
+  // The screen deliberately does NOT show the name on file. The service does not send it, and that is the
+  // point: an answer of "no, that card belongs to Amal Hassan" would give the name behind any card number to
+  // whoever is holding one.
+  mismatchTitle: { en: "That name does not match this number", ar: "هذا الاسم لا يطابق هذا الرقم" },
+  mismatchBody: {
+    en: "The number is on file and the name given does not belong to it. Ask them to say their name again, "
+      + "and check you are reading the right card. Do not continue on this record — the coverage behind it is "
+      + "somebody else's.",
+    ar: "الرقم مسجَّل والاسم المُدخل لا يخصّه. اطلب منهم قول الاسم مرة أخرى، وتأكّد أنك تقرأ البطاقة الصحيحة. "
+      + "لا تتابع على هذا السجل — فالتغطية خلفه تخصّ شخصاً آخر.",
+  },
+  shortTitle: { en: "Type more of the name", ar: "أدخل المزيد من الاسم" },
+  shortBody: {
+    en: "Two letters or more. A single letter matches too many people to confirm anything.",
+    ar: "حرفان أو أكثر. الحرف الواحد يطابق عدداً كبيراً من الأشخاص ولا يؤكّد شيئاً.",
   },
   coverage: { en: "Coverage", ar: "التغطية" },
   plan: { en: "Plan", ar: "الخطة" },
@@ -92,25 +131,44 @@ const CATEGORIES = [
 export function ReceptionEligibility() {
   const api = useApi();
   const t = useLoc();
-  const [query, setQuery] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [name, setName] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [result, setResult] = useState<EligibilityResult | null>(null);
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
 
+  const ready = identifier.trim().length > 0 && name.trim().length > 0;
+
+  /**
+   * 33.9 — verify, THEN check.
+   *
+   * <p>This used to be `searchEligibility(query)` followed by `checkEligibility(hits[0].id)`. Two things were
+   * wrong with that and only one of them was visible: a partial name was enough to open somebody's coverage,
+   * and WHICH somebody depended on the order the database returned rows in. The screen showed the resulting
+   * card with no indication that a choice had been made at all.</p>
+   *
+   * <p>The identifier now has to resolve to exactly one member and the name has to agree with it, and the
+   * SERVICE decides both — a rule the browser applies is a rule for whoever is looking at this browser. The
+   * refusal it sends back carries no identity, so this screen has no name on file to leak even if it wanted
+   * to render one.</p>
+   */
   async function run() {
-    if (query.trim().length < 2) return;
+    if (!ready) return;
     setStatus("loading");
+    setRefusal(null);
     try {
-      const hits = await api.searchEligibility(query.trim());
-      if (hits.length === 0) {
+      const v = await api.verifyBeneficiary(identifier.trim(), name.trim());
+      if (!v.verified) {
         setResult(null);
+        setRefusal(v.reason);
         setStatus("success");
         return;
       }
       // The category rides along when the desk knows it. Both the verdict and the copay are decided by
       // eligibility-service either way — this screen used to decide the verdict itself, from a cached
       // member status, and never called the service at all.
-      const res = await api.checkEligibility(hits[0].id, category ?? undefined);
+      const res = await api.checkEligibility(v.hit.id, category ?? undefined);
       setResult(res);
       setStatus("success");
     } catch (err) {
@@ -130,12 +188,23 @@ export function ReceptionEligibility() {
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <form onSubmit={onSubmit} className="stack" aria-label={t(S.title)}>
           <InputField
-            label={t(S.field)}
-            help={t(S.help)}
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
+            label={t(S.fieldId)}
+            help={t(S.fieldIdHelp)}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.currentTarget.value)}
             autoComplete="off"
+            inputMode="text"
+            required
           />
+          <InputField
+            label={t(S.fieldName)}
+            help={t(S.fieldNameHelp)}
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            autoComplete="off"
+            required
+          />
+          <p className="muted" style={{ margin: 0 }}>{t(S.help)}</p>
           <ComboboxField
             label={t(S.category)}
             help={t(S.categoryHelp)}
@@ -145,7 +214,9 @@ export function ReceptionEligibility() {
             placeholder={t(S.categoryAny)}
           />
           <div>
-            <Button type="submit" variant="primary"
+            {/* Disabled until BOTH are given: the check cannot run on one of them, and a button that
+                accepts the click and then does nothing reads as a broken screen rather than as a rule. */}
+            <Button type="submit" variant="primary" disabled={!ready}
               leadingIcon={<Icon name="check2" />} loading={status === "loading"}>
               {t(S.check)}
             </Button>
@@ -185,21 +256,42 @@ export function ReceptionEligibility() {
             </div>
           </Card>
         )}
-        {status === "success" && !result && (
-          /*
-           * "No matching beneficiary" is where the desk's work forks, and a grey chip saying so left the
-           * operator to work out both branches themselves: the number may be mis-read, or this person may
-           * genuinely not be registered yet. Naming the two is the whole content of the state — an empty
-           * screen is an invitation to act.
-           */
-          <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp2)" }} data-testid="elig-empty">
-            <h2 className="empty-title">{t(S.noneTitle)}</h2>
-            <p className="muted" style={{ margin: 0 }}>{t(S.noneBody)}</p>
-          </Card>
+        {status === "success" && !result && refusal && (
+          <RefusalCard reason={refusal} t={t} />
         )}
         {status === "success" && result && <ResultCard result={result} t={t} S={S} />}
       </div>
     </>
+  );
+}
+
+/** The three ways a verified lookup can say no — the service's codes, kept as a type so a new one cannot be
+ *  added on the server and quietly render as nothing here. */
+type Refusal = "not-found" | "name-mismatch" | "name-too-short";
+
+/**
+ * 33.9 — a refusal is a state with an instruction, not an empty screen.
+ *
+ * <p>The three lead to different actions and are told apart for that reason: re-read the digits, ask them to
+ * repeat their name, or type more. A mismatch is the one that carries a warning tone, because it is the one
+ * where continuing would put another member's coverage in front of the desk — and it says so, since an
+ * operator who reads "no match" is likely to try again more loosely rather than stop.</p>
+ *
+ * <p>None of them names the person on file. The service does not send it: see the api client.</p>
+ */
+function RefusalCard({ reason, t }: { reason: Refusal; t: (l: Localized) => string }) {
+  const copy = {
+    "not-found": { title: S.noneTitle, body: S.noneBody, tone: "info" as const, testid: "elig-empty" },
+    "name-mismatch": { title: S.mismatchTitle, body: S.mismatchBody, tone: "warn" as const, testid: "elig-mismatch" },
+    "name-too-short": { title: S.shortTitle, body: S.shortBody, tone: "info" as const, testid: "elig-short" },
+  }[reason];
+  return (
+    <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp3)" }} data-testid={copy.testid}>
+      <h2 className="empty-title">{t(copy.title)}</h2>
+      {copy.tone === "warn"
+        ? <InlineAlert tone="warn">{t(copy.body)}</InlineAlert>
+        : <p className="muted" style={{ margin: 0 }}>{t(copy.body)}</p>}
+    </Card>
   );
 }
 

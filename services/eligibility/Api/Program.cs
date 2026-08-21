@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Data;
 using Mersal.BenefitPricing;
 using Mersal.Eligibility.Api;
+using Mersal.Eligibility.Domain;
 using Mersal.Eligibility.Infrastructure;
 using Mersal.Events;
 using Mersal.Time;
@@ -281,6 +282,75 @@ reception.MapGet("/search", async (
     return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
 })
         .Produces<ReceptionSearchResponse>();
+
+// ---------------------------------------------------------------- VERIFIED LOOKUP (33.9)
+//
+// `POST /reception/verify` — the identifier the beneficiary presented, corroborated by part of their name.
+//
+// WHY THIS EXISTS. The eligibility screen ran `/reception/search` on one free-text box and then checked the
+// FIRST hit. Typing "Ahmed" matched every Ahmed on the platform, the database's ordering chose one, and the
+// plan, remaining cap and visit verdict on screen belonged to a person nobody had picked — with nothing on
+// the card to say there had been others. That is a wrong-patient defect: the desk turns somebody away, or
+// admits them, on another member's coverage.
+//
+// WHY IT IS HERE AND NOT IN THE SCREEN. A rule the browser applies is a rule for whoever is looking at that
+// browser. Stated here it is the same for the SPA, the call centre and anything built next, it is audited
+// once, and the refusal cannot be stepped over by a caller that skips the check and asks for the card
+// directly — because there is no path from a name fragment to a card on this endpoint at all.
+//
+// WHAT IT IS NOT. Corroboration, not authentication. It stops the wrong RECORD being opened; it does not
+// prove the person at the desk is the person on the card, and nothing downstream may treat it as though it
+// did. See IdentityCorroboration.
+reception.MapPost("/verify", async (
+    ReceptionVerifyRequest body, IReceptionIndex index, IAuditClient audit, IHbmpPrincipalAccessor me,
+    CancellationToken ct) =>
+{
+    var identifier = (body?.Identifier ?? "").Trim();
+    var name = (body?.Name ?? "").Trim();
+
+    if (identifier.Length == 0)
+        return Results.Problem(statusCode: 400, title: "identifier is required (Card / National ID / Refugee ID / UNHCR / Passport / Policy)");
+    // A refusal, not a 400: too short is a thing the operator can fix by typing more, and it must read the
+    // same way as the other two refusals rather than arriving as a transport error.
+    if (!IdentityCorroboration.IsUsableFragment(name))
+        return Results.Ok(ReceptionVerifyResponse.Refused(ReceptionVerifyResponse.NameTooShort));
+
+    var doc = await index.FindByPresentedIdentifierAsync(identifier, ct);
+    var corroborated = doc is not null && IdentityCorroboration.NameCorroborates(doc.GivenName, doc.FamilyName, name);
+
+    // Audited whichever way it goes. A MISS is a disclosure too — "is this identifier one of yours?" answered
+    // no is still an answer about a person — and the mismatch is the one worth being able to find later: a
+    // run of them across different numbers from one desk is somebody trying identifiers, and it is invisible
+    // unless each attempt left a row.
+    //
+    // EntityId is the beneficiary where one resolved, and the IDENTIFIER OFFERED where none did. There is no
+    // entity to name in that case, and recording nothing would make the failed attempts the only ones an
+    // investigator could not follow.
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = corroborated ? "member" : "reception_verify",
+        EntityId = corroborated ? doc!.BeneficiaryId.ToString() : identifier,
+        Action = AuditAction.Read,
+        ActorUserId = me.Principal?.Subject, ActorRole = me.Principal?.Roles.FirstOrDefault(),
+        TenantId = me.Principal?.TenantId,
+        DecisionOutcome = corroborated ? "Allow" : "Deny",
+        DecisionReasonCode = corroborated ? "verified"
+            : doc is null ? ReceptionVerifyResponse.NotFound : ReceptionVerifyResponse.NameMismatch,
+        FieldClasses = ["identity", "coverage"],
+        // High only for the mismatch. Not-found is ordinary — a mis-read digit happens all day — but a
+        // correct identifier with the wrong name is either a real mix-up at the counter or an attempt, and
+        // both are things somebody should be able to go and look at.
+        Severity = corroborated || doc is null ? AuditSeverity.Info : AuditSeverity.High,
+    }, ct);
+
+    if (corroborated) return Results.Ok(ReceptionVerifyResponse.Of(ReceptionResultCard.From(doc!)));
+
+    // Both refusals return the SAME shape with nothing in it but the reason. In particular the mismatch does
+    // not echo the name on file — see ReceptionVerifyResponse.
+    return Results.Ok(ReceptionVerifyResponse.Refused(
+        doc is null ? ReceptionVerifyResponse.NotFound : ReceptionVerifyResponse.NameMismatch));
+})
+        .Produces<ReceptionVerifyResponse>();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

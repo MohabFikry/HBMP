@@ -43,3 +43,45 @@ public sealed record ReceptionSearchResponse(
     int Count,
     IReadOnlyList<ReceptionResultCard> Results,
     string? EmptyStateHint);
+
+// ================================================================ VERIFIED LOOKUP (33.9)
+//
+// The eligibility screen used to search on one free-text box and check the FIRST hit. "Ahmed" matched every
+// Ahmed on the platform, one of them was chosen by whatever order the database returned, and the plan, the
+// remaining cap and the visit verdict on screen belonged to a person nobody had picked — with nothing on the
+// card to say there had been others. This pair replaces that path: an identifier that resolves to exactly one
+// member, and a name that has to agree with it.
+
+/// <summary>What the desk was given: something the beneficiary presented, and enough of their name to
+/// corroborate it. POST rather than a query string — a national ID and a name in a URL end up in the
+/// gateway's access log, the browser's history and every proxy in between.</summary>
+public sealed record ReceptionVerifyRequest(string? Identifier, string? Name);
+
+/// <summary>
+/// The answer, discriminated on <see cref="Verified"/>.
+/// </summary>
+/// <remarks>
+/// <para><b>The refusal carries no identity.</b> Not the name on file, not the member number, not the
+/// membership status — nothing but a reason code. An endpoint that answered "no, that card belongs to
+/// someone else called X" would hand out the name behind any card number to anyone holding one, which is a
+/// worse disclosure than the defect it replaces.</para>
+///
+/// <para><b>Not-found and name-mismatch stay distinguishable.</b> They are different situations at the desk
+/// and lead to different actions — re-read the digits, or ask the person to repeat their name — and
+/// collapsing them would leave an operator unable to tell a typo from the wrong person. The cost is that a
+/// holder of a card number learns the card is registered. That is a real disclosure and it is the smaller
+/// one; the mismatch is audited at High severity so a run of them across different numbers is visible as the
+/// fishing pattern it would be.</para>
+/// </remarks>
+public sealed record ReceptionVerifyResponse(bool Verified, string? Reason, ReceptionResultCard? Card)
+{
+    /// <summary>Nothing on file matches that identifier.</summary>
+    public const string NotFound = "not-found";
+    /// <summary>The identifier resolves, and the name given does not agree with the record.</summary>
+    public const string NameMismatch = "name-mismatch";
+    /// <summary>The name given is too short to narrow anything — see IdentityCorroboration.MinimumFragment.</summary>
+    public const string NameTooShort = "name-too-short";
+
+    public static ReceptionVerifyResponse Refused(string reason) => new(false, reason, null);
+    public static ReceptionVerifyResponse Of(ReceptionResultCard card) => new(true, null, card);
+}

@@ -43,6 +43,8 @@ Priority: M/S/C. Format: **US-nnn** · role · story · AC. Module-scoped storie
 - Given a valid identifier, When I search, Then I see a result card with status, coverage, remaining limits, and a visit-history summary within 2s (p95).
 - Given no match, When I search, Then I get an empty state suggesting another identifier or registration.
 - Given my Reception role, When I view the card, Then no EMR/diagnosis data is shown.
+- **Given a name and no identifier, When I try to check eligibility, Then nothing is returned.** The story has always said *a valid identifier*; the screen shipped with one free-text box that also matched names and then answered about the FIRST match, so a partial name opened whichever member the database returned first. See [54](54-the-check-that-checked-nobody.md).
+- **Given a valid identifier and a name that does not belong to it, When I check, Then I am told the two do not agree and shown nothing else** — not the name on file, not the member number, not the status. Telling a caller whose card they are holding is a larger disclosure than the ambiguity being removed.
 
 **US-011 (M) — Status-driven visit gating**
 *As a Reception officer, I want the system to block visit creation for ineligible members so that ineligible care isn't rendered.*
