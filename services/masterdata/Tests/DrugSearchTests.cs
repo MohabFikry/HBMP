@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Mersal.MasterData.Api;
+using Mersal.MasterData.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.MasterData.Tests;
@@ -221,26 +222,90 @@ public class DrugSearchTests
         finally { await app.CleanupAsync(); }
     }
 
+    /// <summary>
+    /// The typeahead reaches its trigram indexes rather than scanning the catalogue.
+    /// </summary>
+    /// <remarks>
+    /// <para>A typeahead that table-scans 31,651 rows per keystroke still returns correct results, so this
+    /// fails silently as latency. The index is only used when the query normalises the search term exactly as
+    /// the index expression does — assert the plan, not the timing.</para>
+    ///
+    /// <para><b>This test is about SCALE, and it now establishes the scale it is about.</b> It read the plan
+    /// straight out of whatever <c>masterdata.drug</c> happened to hold. Against a loaded catalogue the
+    /// planner picks the index and the test passes; against an empty one it picks a sequential scan and is
+    /// RIGHT to — at a few hundred rows a seq scan genuinely is cheaper, and the assertion is not merely
+    /// failing but meaningless. CI runs no catalogue load, so it failed there for months
+    /// (<c>cost=0.00..94.43</c>) while passing on every developer's machine.</para>
+    ///
+    /// <para>The crossover on this schema sits between 300 and 500 rows, measured. Seeding to
+    /// <see cref="CatalogueScale"/> clears it by roughly four times, which is the margin that keeps this
+    /// about the index rather than about the planner's arithmetic. When the real catalogue IS loaded the seed
+    /// is skipped entirely and the test reads exactly what it always did.</para>
+    /// </remarks>
     [SkippableFact]
     public async Task The_search_uses_its_trigram_indexes_rather_than_scanning_the_catalogue()
     {
-        // A typeahead that table-scans 31,651 rows per keystroke still returns correct results, so this
-        // fails silently as latency. The index is only used when the query normalises the search term
-        // exactly as the index expression does — assert the plan, not the timing.
         Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
         await using var db = MasterDataApiFactory.Ctx();
+        var release = "scale-" + Guid.NewGuid().ToString("N")[..10];
+        try
+        {
+            await EnsureCatalogueScaleAsync(db, release);
 
-        var plan = string.Join('\n', await db.Database.SqlQuery<string>($"""
-            EXPLAIN SELECT d.drug_id FROM masterdata.drug d
-            WHERE d.source_row_id IS NOT NULL
-              AND (   masterdata.search_key(d.name)            LIKE '%zykomentin%'
-                   OR masterdata.search_key(d.scientific_name) LIKE '%zykomentin%'
-                   OR masterdata.search_key(d.name_ar)         LIKE '%zykomentin%')
-            """).ToListAsync());
+            var plan = string.Join('\n', await db.Database.SqlQuery<string>($"""
+                EXPLAIN SELECT d.drug_id FROM masterdata.drug d
+                WHERE d.source_row_id IS NOT NULL
+                  AND (   masterdata.search_key(d.name)            LIKE '%zykomentin%'
+                       OR masterdata.search_key(d.scientific_name) LIKE '%zykomentin%'
+                       OR masterdata.search_key(d.name_ar)         LIKE '%zykomentin%')
+                """).ToListAsync());
 
-        plan.Should().Contain("ix_drug_search_name", "the trigram index on the trade name must be used");
-        plan.Should().NotContain("Seq Scan on drug",
-            "a sequential scan per keystroke is the failure this index exists to prevent");
+            plan.Should().Contain("ix_drug_search_name", "the trigram index on the trade name must be used");
+            plan.Should().NotContain("Seq Scan on drug",
+                "a sequential scan per keystroke is the failure this index exists to prevent");
+        }
+        finally
+        {
+            // Remove only what this run added, and re-ANALYZE: leaving stale statistics behind would hand the
+            // next test in this collection a planner that believes in rows that are gone.
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM masterdata.drug WHERE source_release = {0}; ANALYZE masterdata.drug;", release);
+        }
+    }
+
+    /// <summary>The row count at which the trigram index is unambiguously the cheaper plan — see the remarks
+    /// on the test above for how it was chosen.</summary>
+    private const int CatalogueScale = 2_000;
+
+    /// <summary>
+    /// Bring <c>masterdata.drug</c> up to <see cref="CatalogueScale"/> rows, and no further.
+    /// </summary>
+    /// <remarks>
+    /// A no-op wherever the catalogue is loaded. The synthetic rows carry a run-scoped
+    /// <c>source_release</c> so the caller can remove exactly them, and a <c>source_row_id</c> because the
+    /// query under test filters on it — rows the planner would discard are not the rows it must count.
+    /// <c>ANALYZE</c> is the point of the whole exercise: without fresh statistics the planner reasons about
+    /// the table as it was before the insert.
+    /// </remarks>
+    private static async Task EnsureCatalogueScaleAsync(MasterDataDbContext db, string release)
+    {
+        var have = await db.Drugs.CountAsync();
+        if (have >= CatalogueScale) return;
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO masterdata.drug (drug_id, drug_code, name, scientific_name, name_ar, source_release, source_row_id)
+            SELECT gen_random_uuid(),
+                   {0} || '-' || g,
+                   'Scale fixture ' || g || ' 500mg',
+                   'scalefixturil ' || g,
+                   'عينة ' || g,
+                   {0},
+                   {0} || '-row-' || g
+            FROM generate_series(1, {1}) g;
+            ANALYZE masterdata.drug;
+            """,
+            release, CatalogueScale - have);
     }
 
     // ---- 29.7 (design 45 §7) — the price/availability facts the combobox renders ------------------------

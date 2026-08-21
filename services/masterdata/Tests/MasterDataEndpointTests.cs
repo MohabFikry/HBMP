@@ -426,6 +426,10 @@ public class MasterDataEndpointTests
         await using var app = new MasterDataApiFactory();
         try
         {
+            // The codes below are the CPT book's, and this test reads them out of the database. Ensuring
+            // they are there is the test's own precondition — see EnsureCptReferenceAsync for why it was
+            // missing and what it costs when the catalogue IS loaded (nothing).
+            await app.EnsureCptReferenceAsync();
             using var client = app.ClinicalClient();
 
             static async Task<List<JsonElement>> Items(HttpClient c, string url) =>
@@ -474,6 +478,7 @@ public class MasterDataEndpointTests
         await using var app = new MasterDataApiFactory();
         try
         {
+            await app.EnsureCptReferenceAsync();
             using var client = app.ClinicalClient();
 
             static async Task<List<JsonElement>> Items(HttpClient c, string url) =>
@@ -933,6 +938,48 @@ public sealed class MasterDataApiFactory : WebApplicationFactory<Program>
             Status = "Retired",
         });
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The real CPT codes the section and search tests reason about, ensured to exist.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why these tests needed this.</b> They assert properties of the CPT book itself — that 88305 is
+    /// anatomic pathology and 80048 is laboratory, that a chest film is 7xxxx, that nine panel descriptions
+    /// cite the glucose code — and they read them straight out of <c>masterdata.cpt_code</c>. That works
+    /// wherever the catalogue has been loaded and fails wherever it has not, which is exactly what CI is: no
+    /// job in <c>backend-ci.yml</c> runs <c>tools/masterdata-loader</c>, so all three failed there for months
+    /// with "Expected collection not to be empty" while passing on every developer's machine.</para>
+    ///
+    /// <para><b>Upsert, not insert.</b> <c>ON CONFLICT DO NOTHING</c> so a loaded catalogue keeps its own
+    /// rows untouched — the tests then assert against the real book exactly as they always have, and this
+    /// method is a no-op. Only the rows this run actually added carry <see cref="Release"/>, so
+    /// <see cref="CleanupAsync"/>'s existing <c>source_release</c> delete removes precisely those and never a
+    /// real one.</para>
+    ///
+    /// <para>The descriptions are the book's, abbreviated. The component codes inside the panel descriptions
+    /// are load-bearing rather than decoration: the search test's ordering probe depends on rows that match
+    /// "82947" by DESCRIPTION while their own code does not begin with it, which is the only case where
+    /// "leads with the code" and "sorted by code" genuinely disagree.</para>
+    /// </remarks>
+    public async Task EnsureCptReferenceAsync()
+    {
+        if (Db is null) return;
+        await using var db = Ctx();
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO masterdata.cpt_code (code, description, category, source_release) VALUES
+              ('71045', 'Radiologic examination, chest; single view',                             'Category I', {0}),
+              ('71046', 'Radiologic examination, chest; 2 views',                                 'Category I', {0}),
+              ('82947', 'Glucose; quantitative, blood (except reagent strip)',                    'Category I', {0}),
+              ('80047', 'Basic metabolic panel (Calcium, ionized). This panel must include: Calcium ionized (82330), Carbon dioxide (82374), Chloride (82435), Creatinine (82565), Glucose (82947), Potassium (84132), Sodium (84295), Urea nitrogen (84520)', 'Category I', {0}),
+              ('80048', 'Basic metabolic panel (Calcium, total). This panel must include: Calcium total (82310), Carbon dioxide (82374), Chloride (82435), Creatinine (82565), Glucose (82947), Potassium (84132), Sodium (84295), Urea nitrogen (84520)',      'Category I', {0}),
+              ('80053', 'Comprehensive metabolic panel. This panel must include: Albumin (82040), Bilirubin total (82247), Calcium total (82310), Carbon dioxide (82374), Chloride (82435), Creatinine (82565), Glucose (82947), Phosphatase alkaline (84075), Potassium (84132), Protein total (84155), Sodium (84295), Transferase alanine amino (84460), Transferase aspartate amino (84450), Urea nitrogen (84520)', 'Category I', {0}),
+              ('88305', 'Level IV - Surgical pathology, gross and microscopic examination',        'Category I', {0}),
+              ('0001U', 'Red blood cell antigen typing, DNA, human erythrocyte antigen gene analysis', 'PLA', {0})
+            ON CONFLICT (code) DO NOTHING;
+            """,
+            Release);
     }
 
     public async Task CleanupAsync()
