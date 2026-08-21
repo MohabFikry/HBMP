@@ -51,8 +51,7 @@ public class DependencyDownYieldsUnavailableTests
         var request = new ValidationRequest(
             Guid.NewGuid(),
             [new PrescriptionLineInput(Guid.NewGuid(), DrugA, "Drug A"),
-             new PrescriptionLineInput(Guid.NewGuid(), DrugB, "Drug B")],
-            []);
+             new PrescriptionLineInput(Guid.NewGuid(), DrugB, "Drug B")]);
 
         var result = PrescriptionValidator.Validate(request, snapshot, DateTimeOffset.UtcNow);
 
@@ -104,9 +103,15 @@ public class DependencyDownYieldsUnavailableTests
         var snapshot = await ports.FetchAsync(Beneficiary, [DrugA], encounterId: null, clientDiagnoses: null, "token");
         var line = new PrescriptionLineInput(Guid.NewGuid(), DrugA, "Drug A");
         var result = PrescriptionValidator.Validate(
-            new ValidationRequest(Guid.NewGuid(), [line], []), snapshot, DateTimeOffset.UtcNow);
+            new ValidationRequest(Guid.NewGuid(), [line]), snapshot, DateTimeOffset.UtcNow);
 
-        result.For(CheckKind.Interaction).State.Should().Be(CheckState.Ok, "masterdata answered");
+        // 32.1 CHANGED THIS LINE, and the change is the finding. It used to assert Ok "because masterdata
+        // answered" — true only while the interaction check asked masterdata and nobody else. It now also
+        // asks what the patient is already taking, half of which is emr's medication history. With emr
+        // down, half of the comparison cannot be made, so Ok would be the same false assurance this suite
+        // exists to forbid; it is Unavailable for exactly the reason the allergy check below is.
+        result.For(CheckKind.Interaction).State.Should().Be(CheckState.Unavailable,
+            "the interaction check now depends on emr too — it compares against current medications");
         result.For(CheckKind.Allergy).State.Should().Be(CheckState.Unavailable, "emr did not");
         result.StateFor(line.LineId).Should().Be(CheckState.Unavailable,
             "a line with an unchecked source is not adequately summarised by the checks that did run");
@@ -128,7 +133,23 @@ public class DependencyDownYieldsUnavailableTests
 
     private static HttpClinicalValidationPorts Ports(HttpMessageHandler handler) =>
         new(new StubFactory(handler), new NotYetImplementedBenefitPreCheck(TimeProvider.System),
-            new NoLabelSource(), TimeProvider.System);
+            new NoLabelSource(), new NoPrescribedMedications(), TimeProvider.System);
+
+    /// <summary>
+    /// The local half of the active-medication union, stubbed empty.
+    /// </summary>
+    /// <remarks>
+    /// Empty and SUCCEEDING, which is the honest stand-in here: this suite is about what happens when an
+    /// HTTP dependency is down, and pharmacy's own database is not one. It returns no rows rather than
+    /// failing, so the emr half is what decides whether the fact is available — which is the coupling these
+    /// tests are actually about.
+    /// </remarks>
+    private sealed class NoPrescribedMedications : IPrescribedMedicationSource
+    {
+        public Task<IReadOnlyList<ActiveMedication>> ActiveForAsync(
+            Guid beneficiaryId, DateTimeOffset asOf, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ActiveMedication>>([]);
+    }
 
     /// <summary>
     /// Stands in for openFDA so these tests stay offline.

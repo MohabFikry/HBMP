@@ -100,6 +100,11 @@ import {
   zPrescriptionSubmitResult,
   zAllergenOption,
   zAllergyRecord,
+  zMedicationHistoryRow,
+  zNoteAddendum,
+  zLineNote,
+  zChronicAmendPreview,
+  zWithdrawResult,
   zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
@@ -138,6 +143,8 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionKind } from "@mersal/contracts";
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
+import type { AddMedicationHistoryRequest, MedicationHistoryRow, MedicationStatus } from "@mersal/contracts";
+import type { NoteAddendum, LineNote, LineNoteKind, NoteVisibility } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
 import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
@@ -289,6 +296,16 @@ const RECON_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad"
 };
 
 /** The masterdata allergen seed (its migration 0002), abbreviated to the categories the picker groups by. */
+/** 32.2 — the catalogue names searchDrugs answers with, keyed by id, so the fixture resolves a name the same
+ *  way the server does rather than inventing one. */
+const DEV_DRUG_NAMES: Record<string, string> = {
+  "d-amox-500": "Amoxicillin 500mg caps",
+  "d-amox-250": "Amoxicillin 250mg caps",
+  "d-metf-500": "Metformin 500mg",
+  "d-warf-5": "Warfarin 5mg",
+  "d-sjw": "St John's Wort 300mg",
+};
+
 const DEV_ALLERGENS: AllergenOption[] = [
   { allergenId: "alg-penicillin", code: "ALG-PENICILLIN", name: "Penicillins", category: "Drug" },
   { allergenId: "alg-sulfa", code: "ALG-SULFA", name: "Sulfonamides", category: "Drug" },
@@ -1023,7 +1040,6 @@ export class DevApiClient implements ApiClient {
    * those two tables — including any newly added one — invisible in the demo build and in the route sweep.
    */
   getEncounter(encounterId: string) {
-    void encounterId;
     return this.gate(() =>
       ok(zEncounter, {
         id: "ENC-88120",
@@ -1045,6 +1061,9 @@ export class DevApiClient implements ApiClient {
           heartRate: 82, tempC: 37.8, spo2: 97, measuredAt: NOW,
         },
         allergies: [{ id: "AL-1", substance: loc("Penicillin", "بنسلين"), severity: "moderate" }],
+        // 32.3 — corrections appended to this encounter's signed note, so the dev path can show the
+        // original and its addendum together rather than only the empty case.
+        addenda: this.addenda.get(encounterId) ?? [],
         diagnoses: [{
           id: "DX-1", system: "ICD-10", code: "J06.9", rank: "Primary",
           label: loc("Acute upper respiratory infection", "التهاب تنفسي علوي حاد"),
@@ -1172,9 +1191,162 @@ export class DevApiClient implements ApiClient {
   }
 
   /**
-   * 18.C2 (W4) — fixture approver inbox. Two rows, deliberately: one Requested and one UnderReview, so the
-   * screen's status handling and the "already picked up by someone" case are both exercised without a backend.
+   * 18.C2 (W4) — fixture approver inbox.
+   *
+   * <p>THREE rows since 32.4, and the third is the point: a request in InfoRequested that THIS caller
+   * raised. Two rows exercised only the decider's half of the workflow, which is exactly the half that
+   * worked — the requester's row was unreachable in production and equally unreachable in the fixture, so
+   * no screen test could have found the missing exit.</p>
    */
+  /**
+   * 32.5 — the fixture line notes, keyed by line.
+   *
+   * <p>Seeded with one ToFulfiller instruction on the first prescription line, so the counter's panel has
+   * something to render in the demo. An empty fixture would let both halves of this feature look finished
+   * while the read path was never exercised — which is how the server-side model shipped in 30.5b and went
+   * unseen for two months.</p>
+   */
+  private readonly lineNoteStore = new Map<string, LineNote[]>();
+
+  /**
+   * 32.6 — the fixture re-allocation.
+   *
+   * <p>Mirrors the real arithmetic's SHAPE rather than approximating its numbers: a 90-day script at 3/day
+   * is 270 across three windows, so 60 days is 180 with 90 already collected. The three refusal outcomes
+   * are reachable from the same inputs the live path refuses on, because a dev path that can only succeed
+   * teaches a flow with no failure branch — which is how the dialog came to render a preview nobody had
+   * seen.</p>
+   */
+  previewChronicAmendment(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ) {
+    void rxId;
+    void lineId;
+    return this.gate(() => {
+      const perDay = 3;
+      const alreadyDispensed = 90;
+      const newTotal = req.durationDays * perDay;
+      if (newTotal < alreadyDispensed) {
+        return ok(zChronicAmendPreview, {
+          outcome: "BelowDispensed", newTotal, alreadyDispensed, remainingWindows: [],
+          unit: "PrescribingUnits", missingField: null,
+        });
+      }
+      if (req.durationDays <= 30) {
+        return ok(zChronicAmendPreview, {
+          outcome: req.convertToAcute ? "ConvertedToAcute" : "NoLongerChronic",
+          newTotal, alreadyDispensed,
+          remainingWindows: req.convertToAcute ? [newTotal - alreadyDispensed] : [],
+          unit: "PrescribingUnits", missingField: null,
+        });
+      }
+      const remaining = newTotal - alreadyDispensed;
+      const windows = Math.max(1, Math.round(req.durationDays / (30 * req.frequencyMonths)) - 1);
+      const base = Math.floor(remaining / windows);
+      const split = Array.from({ length: windows }, (_, i) =>
+        i === 0 ? remaining - base * (windows - 1) : base);
+      return ok(zChronicAmendPreview, {
+        outcome: "Reallocated", newTotal, alreadyDispensed, remainingWindows: split,
+        unit: "PrescribingUnits", missingField: null,
+      });
+    });
+  }
+
+  async amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ) {
+    void rxId; void lineId; void req;
+    await this.gate(() => undefined);
+  }
+
+  cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string) {
+    void rxId; void reasonCode; void reasonText;
+    return this.gate(() => ok(zWithdrawResult, {
+      withdrawn: 2,
+      total: 3,
+      lines: [
+        { label: "Amoxicillin 500mg", withdrawn: true, refusal: null },
+        { label: "Paracetamol 500mg", withdrawn: true, refusal: null },
+        // Partial success is the interesting case and the fixture shows it: a dispensed line cannot be
+        // withdrawn, and "2 of 3" is the answer the prescriber has to read.
+        { label: "Amlodipine 5mg", withdrawn: false, refusal: "Already dispensed" },
+      ],
+    }));
+  }
+
+  lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
+    void orderId;
+    return this.gate(() => {
+      if (!this.lineNoteStore.has(lineId)) {
+        this.lineNoteStore.set(lineId, kind === "prescription"
+          ? [ok(zLineNote, {
+              noteId: `note-${lineId}-1`,
+              lineId,
+              visibility: "ToFulfiller",
+              body: "Patient cannot swallow tablets — syrup if available.",
+              authorDisplayName: "Dr Karim Adel",
+              authoredAt: "2026-08-19T09:20:00Z",
+              status: "Active",
+              cancelledAt: null,
+              cancelReason: null,
+            })]
+          : []);
+      }
+      return [...this.lineNoteStore.get(lineId)!];
+    }, []);
+  }
+
+  writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ) {
+    void kind;
+    void orderId;
+    return this.gate(() => {
+      const existing = this.lineNoteStore.get(lineId) ?? [];
+      const note = ok(zLineNote, {
+        noteId: `note-${lineId}-${existing.length + 1}`,
+        lineId,
+        visibility: visibility ?? "ToFulfiller",
+        body,
+        authorDisplayName: "Dr Karim Adel",
+        authoredAt: "2026-08-20T10:00:00Z",
+        status: "Active",
+        cancelledAt: null,
+        cancelReason: null,
+      });
+      this.lineNoteStore.set(lineId, [note, ...existing]);
+      return note;
+    });
+  }
+
+  async cancelLineNote(kind: LineNoteKind, noteId: string, reason: string) {
+    void kind;
+    await this.gate(() => {
+      for (const [lineId, notes] of this.lineNoteStore) {
+        if (!notes.some((n) => n.noteId === noteId)) continue;
+        // Marked, never removed — the same rule the server holds, so the dev path cannot teach a flow where
+        // a withdrawn note disappears.
+        this.lineNoteStore.set(lineId, notes.map((n) => n.noteId === noteId
+          ? { ...n, status: "Cancelled" as const, cancelledAt: "2026-08-20T10:05:00Z", cancelReason: reason }
+          : n));
+      }
+      return undefined;
+    });
+  }
+
+  async takeReportAccessUnderReview(requestId: string) {
+    void requestId;
+    await this.gate(() => undefined);
+  }
+
+  async supplyReportAccessInfo(requestId: string, supplement: string) {
+    void requestId;
+    void supplement;
+    await this.gate(() => undefined);
+  }
+
   async reportAccessInbox(): Promise<ReportAccessRequestRow[]> {
     return [
       {
@@ -1183,6 +1355,7 @@ export class DevApiClient implements ApiClient {
         justification: "Patient referred to me for follow-up; need the histology to plan treatment.",
         requestedTtlHours: 24,
         status: { kind: "warn", label: { en: "Awaiting decision", ar: "بانتظار القرار" } },
+        statusCode: "Requested", canDecide: true, isRequester: false,
         createdAt: new Date(Date.now() - 3_600_000).toISOString(),
       },
       {
@@ -1191,7 +1364,19 @@ export class DevApiClient implements ApiClient {
         justification: "Authorization review — medical necessity for the requested procedure.",
         requestedTtlHours: 8,
         status: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
+        statusCode: "UnderReview", canDecide: true, isRequester: false,
         createdAt: new Date(Date.now() - 7_200_000).toISOString(),
+      },
+      {
+        requestId: "rar-3", orderId: "ord-64", orderLineId: "ol-64b", beneficiaryToken: "•••7734",
+        requestedBy: "me", requestedForRole: "doctor", purposeCode: "TRT",
+        justification: "Treating this patient since June; need the result to plan the follow-up.",
+        requestedTtlHours: 12,
+        status: { kind: "warn", label: { en: "More information needed", ar: "مطلوب إيضاح" } },
+        // Mine, and waiting on ME. canDecide is false: I asked to see somebody else's result, so I am not
+        // that order's author and have no authority over my own request.
+        statusCode: "InfoRequested", canDecide: false, isRequester: true,
+        createdAt: new Date(Date.now() - 10_800_000).toISOString(),
       },
     ];
   }
@@ -1420,6 +1605,9 @@ export class DevApiClient implements ApiClient {
           {
             id: "rx-1", rxNo: "RX-2026-000202", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000231", token: "•••4821" },
             lineCount: 2, status: { kind: "ok", label: loc("Approved", "معتمدة") },
+            // 32.6 — one chronic row in the fixture, so the schedule control has somewhere to appear. With
+            // every fixture row acute, the amend-schedule path would still be unreachable in the demo.
+            kind: "Chronic", refillFrequencyCode: "Monthly", durationDays: 90,
             submittedAt: "2026-07-22T08:15:00Z", expiresAt: "2026-08-21T08:15:00Z",
             encounterId: "ENC-2026-000231",
             prescriber: loc("Dr Karim Abdel-Latif", "د. كريم عبد اللطيف"),
@@ -1442,6 +1630,7 @@ export class DevApiClient implements ApiClient {
           {
             id: "rx-2", rxNo: "RX-2026-000198", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000555", token: "•••2093" },
             lineCount: 1, status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") },
+            kind: "Acute", refillFrequencyCode: null, durationDays: 7,
             submittedAt: "2026-07-21T10:00:00Z", prescriber: null, encounterId: "ENC-2026-000231",
             lines: [
               {
@@ -1497,6 +1686,106 @@ export class DevApiClient implements ApiClient {
       () => DEV_ALLERGENS.map((a) => ok(zAllergenOption, a)),
       [],
     );
+  }
+
+  /**
+   * 32.2 — the fixture medication list.
+   *
+   * <p>Two rows, and the pair is deliberate: one `Prescribed` (Mersal's own record, derivable from the
+   * dispensing log) and one `SelfReported` (a medicine the patient mentioned, derivable from nowhere else).
+   * A fixture with only the first would let a screen look right while never exercising the half of the union
+   * that is the whole reason `medication_history` exists.</p>
+   */
+  private readonly medications = new Map<string, MedicationHistoryRow[]>();
+
+  private medicationsFor(beneficiaryId: string): MedicationHistoryRow[] {
+    if (!this.medications.has(beneficiaryId)) {
+      this.medications.set(beneficiaryId, [
+        ok(zMedicationHistoryRow, {
+          medHistoryId: "MH-1", beneficiaryId, drugId: "d-warf-5", drugName: "Warfarin 5mg",
+          source: "Prescribed", startDate: "2026-05-04", endDate: null, status: "Active",
+        }),
+        ok(zMedicationHistoryRow, {
+          medHistoryId: "MH-2", beneficiaryId, drugId: "d-sjw", drugName: "St John's Wort 300mg",
+          source: "SelfReported", startDate: "2026-07-01", endDate: null, status: "Active",
+        }),
+      ]);
+    }
+    return this.medications.get(beneficiaryId)!;
+  }
+
+  /** 32.3 — the corrections appended to a signed note, keyed by encounter. */
+  private readonly addenda = new Map<string, NoteAddendum[]>();
+
+  addNoteAddendum(
+    encounterId: string,
+    _noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ) {
+    return this.gate(() => {
+      const existing = this.addenda.get(encounterId) ?? [];
+      const row = ok(zNoteAddendum, {
+        id: `note-add-${existing.length + 1}`,
+        authoredAt: "2026-08-20T10:00:00Z",
+        // The signed-in clinician's name, not their id — the dev path renders what live renders, or the
+        // uuid problem 0027 fixed reappears the moment somebody demos this screen.
+        authoredByName: "Dr Karim Adel",
+        soap: {
+          subjective: soap.subjective ?? "",
+          objective: soap.objective ?? "",
+          assessment: soap.assessment ?? "",
+          plan: soap.plan ?? "",
+        },
+      });
+      this.addenda.set(encounterId, [...existing, row]);
+      return row;
+    });
+  }
+
+  medicationHistory(beneficiaryId: string, status?: MedicationStatus) {
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      return status ? rows.filter((r) => r.status === status) : [...rows];
+    });
+  }
+
+  async addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest) {
+    // The server snapshots the name from MASTER DATA and never trusts a client-supplied one (emr 0026), so
+    // the fixture resolves it from the same catalogue the picker searched rather than echoing a label the
+    // caller passed. An id the catalogue does not hold yields no name here either — a dev path kinder than
+    // the live one teaches a flow that does not exist.
+    const catalogue = await this.searchPrescribableDrugs("");
+    const resolved = catalogue.find((d) => d.drugId === req.drugId);
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      const row = ok(zMedicationHistoryRow, {
+        medHistoryId: `MH-${rows.length + 1}`,
+        beneficiaryId,
+        drugId: req.drugId,
+        drugName: resolved ? resolved.tradeName.en : (DEV_DRUG_NAMES[req.drugId] ?? null),
+        source: req.source,
+        startDate: req.startDate ?? null,
+        endDate: req.endDate ?? null,
+        status: req.status,
+      });
+      this.medications.set(beneficiaryId, [...rows, row]);
+      return row;
+    });
+  }
+
+  stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string) {
+    return this.gate(() => {
+      const rows = this.medicationsFor(beneficiaryId);
+      const found = rows.find((r) => r.medHistoryId === medHistoryId);
+      if (!found) throw new Error(`No medication ${medHistoryId}`);
+      // The server refuses a second stop rather than restamping the end date, because "when did they stop"
+      // is a recorded clinical fact. The fixture refuses it too, or the dev path teaches a flow the live one
+      // rejects.
+      if (found.status === "Stopped") throw new Error("This medication was already recorded as stopped.");
+      const stopped = { ...found, status: "Stopped" as const, endDate: endDate ?? "2026-08-20" };
+      this.medications.set(beneficiaryId, rows.map((r) => (r.medHistoryId === medHistoryId ? stopped : r)));
+      return stopped;
+    });
   }
 
   addAllergy(beneficiaryId: string, req: AddAllergyRequest) {
@@ -2024,6 +2313,10 @@ export class DevApiClient implements ApiClient {
       { drugId: "d-amox-500", name: loc("Amoxicillin 500mg caps", "أموكسيسيلين 500مجم"), atcCode: "J01CA04", form: "Capsule", strength: "500mg" },
       { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
       { drugId: "d-metf-500", name: loc("Metformin 500mg", "ميتفورمين 500مجم"), atcCode: "A10BA02", form: "Tablet", strength: "500mg" },
+      // 32.2 — the two the current-medications fixture references. A medication list whose drugs are absent
+      // from the catalogue would render as ids, which is what a screen looks like when nobody opened it.
+      { drugId: "d-warf-5", name: loc("Warfarin 5mg", "وارفارين 5مجم"), atcCode: "B01AA03", form: "Tablet", strength: "5mg" },
+      { drugId: "d-sjw", name: loc("St John's Wort 300mg", "عشبة سانت جون 300مجم"), atcCode: "N06AX25", form: "Capsule", strength: "300mg" },
     ].filter((d) => d.name.en.toLowerCase().includes(query.toLowerCase()));
     return this.gate(() => ok(z.array(zDrugRef), all), []);
   }

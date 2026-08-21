@@ -63,9 +63,7 @@ public sealed class PrescriptionValidationService(
             authoritative ? null : clientDiagnoses,
             bearerToken, ct);
 
-        // Active medications are not yet sourced on this path; the interaction check still runs across the
-        // lines being written. Left explicit rather than hidden behind a default.
-        var request = new ValidationRequest(encounterId, inputs, []);
+        var request = new ValidationRequest(encounterId, inputs);
 
         // The diagnoses the engine ACTUALLY used, handed back so the caller records what was checked rather
         // than what was sent. An Unavailable source yields an empty list with EncounterFetched provenance:

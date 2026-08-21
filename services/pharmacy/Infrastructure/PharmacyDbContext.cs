@@ -19,6 +19,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<PrescriptionLineOverride> PrescriptionLineOverrides => Set<PrescriptionLineOverride>();
     public DbSet<PrescriptionDispenseWindow> DispenseWindows => Set<PrescriptionDispenseWindow>();   // 29.5
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();                  // 30.1
+    public DbSet<PrescriptionNote> PrescriptionNotes => Set<PrescriptionNote>();                     // 32.5
     public DbSet<RefillFrequency> RefillFrequencies => Set<RefillFrequency>();                       // 29.5
     /// <summary>The approval-decision consumer's dedupe ledger — event ids only, no tenant data (0019).</summary>
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
@@ -186,6 +187,33 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasIndex(x => x.PrescriptionId);
             e.HasIndex(x => new { x.EncounterId, x.RanAt });
         });
+        // 32.5 — mapped onto pharmacy.rx_note, which migration 0015 CREATED AND LEFT UNWIRED.
+        //
+        // Its own header says so: "NOT YET WIRED. This table is created and correct, and NOTHING IN
+        // pharmacy-service WRITES OR READS IT YET — the entity, the endpoints and the projection are
+        // orders-side only as of 30.5b." That is the gap 32.5 closes, and the table needed nothing: it
+        // already has the real FK to prescription_line, the append-only trigger, the complete cancellation
+        // constraints and FORCEd RLS.
+        //
+        // A second table was written here first and deleted. Doc 46 §7b's rule — "two mechanisms means two
+        // behaviours for 'cancel a note'" — is quoted in 0015's own header, and adding prescription_note
+        // beside rx_note would have broken it while implementing it.
+        b.Entity<PrescriptionNote>(e =>
+        {
+            e.ToTable("rx_note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.SubjectType).HasColumnName("subject_type");
+            e.Property(x => x.SubjectId).HasColumnName("subject_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AuthorUserId).HasColumnName("author_user_id");
+            e.Property(x => x.AuthorDisplayName).HasColumnName("author_display_name");
+            e.Property(x => x.AuthoredAt).HasColumnName("authored_at");
+            e.Property(x => x.CancelledBy).HasColumnName("cancelled_by");
+            e.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+            e.Property(x => x.CancelReason).HasColumnName("cancel_reason");
+            e.HasIndex(x => x.RootLineId);
+        });
+
 
         b.Entity<PrescriptionLineOverride>(e =>
         {

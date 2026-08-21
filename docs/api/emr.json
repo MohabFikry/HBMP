@@ -1884,6 +1884,93 @@
             }
           }
         }
+      },
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MedicationHistoryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/beneficiaries/{beneficiaryId}/medication-history/{medHistoryId}/stop": {
+      "post": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "medHistoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopMedicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedicationHistoryResponse"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -2504,6 +2591,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "drugName": {
+            "type": "string",
+            "nullable": true
+          },
           "source": {
             "type": "string",
             "nullable": true
@@ -2579,6 +2670,10 @@
             "nullable": true
           },
           "authoredBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "authoredByName": {
             "type": "string",
             "nullable": true
           },
@@ -2720,6 +2815,17 @@
           },
           "open": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StopMedicationRequest": {
+        "type": "object",
+        "properties": {
+          "endDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
           }
         },
         "additionalProperties": false

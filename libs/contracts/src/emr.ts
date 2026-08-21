@@ -123,6 +123,48 @@ export const zAddAllergyRequest = z.object({
 });
 export type AddAllergyRequest = z.infer<typeof zAddAllergyRequest>;
 
+export const zMedicationSource = z.enum(["Prescribed", "SelfReported", "External"]);
+export type MedicationSource = z.infer<typeof zMedicationSource>;
+
+export const zMedicationStatus = z.enum(["Active", "Stopped"]);
+export type MedicationStatus = z.infer<typeof zMedicationStatus>;
+
+/**
+ * One medicine the patient is already taking.
+ *
+ * `source` is load-bearing rather than descriptive. `Prescribed` is Mersal's own record and is as current as
+ * the dispensing log; `SelfReported` is what the patient said at some consultation; `External` is a medicine
+ * another provider wrote. The prescribing interaction check reads this list and NAMES the source in its
+ * warnings, because a prescriber deciding what to do about an interaction is entitled to know whether it
+ * rests on a dispensing record or on a recollection.
+ *
+ * <b>An empty list does not mean "takes nothing".</b> It means nobody has recorded anything — the same
+ * distinction `zMemberClinicalRecord` draws for allergies, and the reason the interaction check says "no
+ * current medications recorded" rather than reporting a clean comparison.
+ */
+export const zMedicationHistoryRow = z.object({
+  medHistoryId: zId,
+  beneficiaryId: zId,
+  drugId: zId,
+  /** Snapshot by emr at recording time (its migration 0026). Nullish when none was captured. */
+  drugName: z.string().nullish(),
+  source: zMedicationSource,
+  startDate: z.string().nullish(),
+  endDate: z.string().nullish(),
+  status: zMedicationStatus,
+});
+export type MedicationHistoryRow = z.infer<typeof zMedicationHistoryRow>;
+
+/** Record a medicine the patient is already on. */
+export const zAddMedicationHistoryRequest = z.object({
+  drugId: zId,
+  source: zMedicationSource,
+  startDate: z.string().nullish(),
+  endDate: z.string().nullish(),
+  status: zMedicationStatus,
+});
+export type AddMedicationHistoryRequest = z.infer<typeof zAddMedicationHistoryRequest>;
+
 export const zSoap = z.object({
   subjective: z.string(),
   objective: z.string(),
@@ -156,6 +198,25 @@ export const zEncounterDiagnosis = zCoded.extend({
 });
 export type EncounterDiagnosis = z.infer<typeof zEncounterDiagnosis>;
 
+/**
+ * A correction appended to a SIGNED note.
+ *
+ * <b>It never replaces anything.</b> The original stays exactly as it was signed, and stays on screen — an
+ * addendum that overwrote the text it corrects would read as a tidier record and be a worse one, because the
+ * fact that a mistake was made and by whom is itself part of the clinical history.
+ *
+ * `authoredByName` is nullish because emr 0027 is nullable: notes written before it captured no name, and
+ * "(not recorded)" is the honest rendering. It is never the subject id — a correction attributed to
+ * `22222222-…` is unattributed in every sense that matters to the next clinician reading it.
+ */
+export const zNoteAddendum = z.object({
+  id: zId,
+  authoredAt: zInstant,
+  authoredByName: z.string().nullish(),
+  soap: zSoap,
+});
+export type NoteAddendum = z.infer<typeof zNoteAddendum>;
+
 export const zEncounter = z.object({
   id: zId,
   patientId: zId,
@@ -174,6 +235,13 @@ export const zEncounter = z.object({
   vitals: zVitals,
   allergies: z.array(zAllergy),
   diagnoses: z.array(zEncounterDiagnosis),
+  /**
+   * Corrections appended to the signed note, oldest first.
+   *
+   * Empty on an unsigned encounter, because there is nothing to correct yet: while the note is editable the
+   * correction path is to type in it.
+   */
+  addenda: z.array(zNoteAddendum),
 });
 export type Encounter = z.infer<typeof zEncounter>;
 

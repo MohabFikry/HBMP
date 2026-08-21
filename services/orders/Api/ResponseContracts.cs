@@ -38,7 +38,18 @@ public sealed record ReportAccessRequestView(
     string? Justification,
     int RequestedTtlHours,
     string Status,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    /// <summary>
+    /// May THIS caller decide this request (32.4)?
+    /// </summary>
+    /// <remarks>
+    /// Answered by the server because it is an authorization question. The screen needs it to know which
+    /// controls to offer, and a client that worked it out by comparing a subject id against
+    /// <see cref="RequestedBy"/> would be deciding authority in a browser.
+    /// </remarks>
+    bool CanDecide = false,
+    /// <summary>Did this caller raise it? The requester acts through supply-info, never through decide.</summary>
+    bool IsRequester = false);
 
 /// <summary>A request's identity and where it now stands — the answer to every act on one.</summary>
 public sealed record ReportAccessStatusView(Guid RequestId, string Status);

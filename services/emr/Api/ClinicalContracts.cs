@@ -10,6 +10,9 @@ public sealed record AddDiagnosisRequest(string IcdCode, DiagnosisRank Diagnosis
 public sealed record AddVitalRequest(VitalType VitalType, decimal? ValueNum, string? Unit, string? LoincCode, DateTimeOffset? MeasuredAt);
 public sealed record AddAllergyRequest(Guid AllergenId, string? Reaction, AllergySeverity Severity, AllergyStatus Status);
 public sealed record AddMedicationHistoryRequest(Guid DrugId, MedicationSource Source, DateOnly? StartDate, DateOnly? EndDate, MedicationStatus Status);
+
+/// <summary>32.2 — the patient stopped taking it. A null end date means today.</summary>
+public sealed record StopMedicationRequest(DateOnly? EndDate);
 /// <summary>Set a beneficiary's blood group (migration 0021). One of <see cref="BloodGroups.All"/>.</summary>
 public sealed record SetBloodGroupRequest(string BloodGroup);
 
@@ -17,11 +20,12 @@ public sealed record SetBloodGroupRequest(string BloodGroup);
 
 public sealed record NoteResponse(
     Guid NoteId, Guid EncounterId, string NoteType, string? Subjective, string? Objective, string? Assessment,
-    string? Plan, Guid? AddendumOfNoteId, string AuthoredBy, DateTimeOffset AuthoredAt, bool IsSigned)
+    string? Plan, Guid? AddendumOfNoteId, string AuthoredBy, string? AuthoredByName,
+    DateTimeOffset AuthoredAt, bool IsSigned)
 {
     public static NoteResponse From(EmrNote n) => new(
         n.NoteId, n.EncounterId, n.NoteType.ToString(), n.Subjective, n.Objective, n.Assessment, n.Plan,
-        n.AddendumOfNoteId, n.AuthoredBy, n.AuthoredAt, n.IsSigned);
+        n.AddendumOfNoteId, n.AuthoredBy, n.AuthoredByName, n.AuthoredAt, n.IsSigned);
 }
 
 public sealed record DiagnosisResponse(
@@ -56,10 +60,12 @@ public sealed record AllergyResponse(
 }
 
 public sealed record MedicationHistoryResponse(
-    Guid MedHistoryId, Guid BeneficiaryId, Guid DrugId, string Source, DateOnly? StartDate, DateOnly? EndDate, string Status)
+    Guid MedHistoryId, Guid BeneficiaryId, Guid DrugId, string? DrugName, string Source,
+    DateOnly? StartDate, DateOnly? EndDate, string Status)
 {
     public static MedicationHistoryResponse From(MedicationHistory m) => new(
-        m.MedHistoryId, m.BeneficiaryId, m.DrugId, m.Source.ToString(), m.StartDate, m.EndDate, m.Status.ToString());
+        m.MedHistoryId, m.BeneficiaryId, m.DrugId, m.DrugName, m.Source.ToString(), m.StartDate, m.EndDate,
+        m.Status.ToString());
 }
 
 /// <summary>

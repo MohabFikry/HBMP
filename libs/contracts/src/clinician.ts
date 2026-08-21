@@ -194,6 +194,16 @@ export const zRxRow = z.object({
    * returned them — so reading a prescription back costs no second request and no second audited PHI read.
    */
   lines: z.array(zRxRowLine),
+  /**
+   * 32.6 — Acute or Chronic, with the cadence when chronic.
+   *
+   * A chronic script is amended by duration and frequency (design 46 §4); an acute one by quantity. Without
+   * this the encounter could offer neither control, which is what it did — the amend-schedule endpoint was
+   * unreachable partly because no screen could tell which rows it applied to.
+   */
+  kind: z.enum(["Acute", "Chronic"]).nullish(),
+  refillFrequencyCode: z.string().nullish(),
+  durationDays: z.number().int().nullish(),
   /** The visit it was written in — the key its care timeline is read by. Null on a row that predates it. */
   encounterId: zId.nullable(),
 });

@@ -239,6 +239,11 @@ describe("Encounter workspace deep link", () => {
           memberClinicalRecord: vi.fn().mockResolvedValue({
             beneficiaryId: "ben-9", bloodGroup: null, bloodGroupRecordedAt: null, allergies: [],
           }),
+          // 32.2 — the same panel now also reads the current-medication list. Without this the call throws
+          // synchronously inside the effect, which escapes useAsync's error path entirely and surfaces as an
+          // UNHANDLED exception: the suite still reported 1497 passing while vitest warned it might be
+          // reporting false positives.
+          medicationHistory: vi.fn().mockResolvedValue([]),
         } as unknown as ApiClient}
       >
         <MemoryRouter

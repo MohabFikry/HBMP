@@ -49,6 +49,14 @@ import type {
   AllergenOption,
   AddAllergyRequest,
   AllergyRecord,
+  MedicationHistoryRow,
+  NoteAddendum,
+  ChronicAmendPreview,
+  LineNote,
+  LineNoteKind,
+  NoteVisibility,
+  MedicationStatus,
+  AddMedicationHistoryRequest,
   BloodGroup,
   MemberClinicalRecord,
   DrugRef,
@@ -390,6 +398,66 @@ export interface ApiClient {
   allergenCatalogue(): Promise<AllergenOption[]>;
   /** Record an allergy on the member's file (emr:write + treating relationship, enforced server-side). */
   addAllergy(beneficiaryId: string, req: AddAllergyRequest): Promise<AllergyRecord>;
+
+  /**
+   * 32.2 — what the patient is already taking, including medicines Mersal did not prescribe.
+   *
+   * The prescribing interaction check reads this list (32.1). An empty result means nothing has been
+   * recorded, which is not the same claim as "takes nothing" and must not be rendered as one.
+   */
+  /**
+   * 32.3 — append a correction to a signed note. The only way to change a signed clinical record: emr
+   * refuses an edit with a 409 that names this path.
+   */
+  /**
+   * 32.4 — Requested → UnderReview. Records the decider and starts the SLA clock, so it is an explicit act
+   * rather than something the screen does on render.
+   */
+  /**
+   * 32.5 — notes on an order or prescription line (design 46 §7b).
+   *
+   * One method per verb rather than per order kind: labs, radiology, procedures and prescriptions share a
+   * single panel, and a method per kind is how "cancel a note" acquires a second behaviour.
+   */
+  /**
+   * 32.6 — what a chronic amendment would do (design 46 §4/§10), computed server-side by the same function
+   * the write path calls. The dialog has rendered this since 30.3 for a caller that did not exist.
+   */
+  previewChronicAmendment(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ): Promise<ChronicAmendPreview>;
+  amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ): Promise<void>;
+  /** Withdraw every still-cancellable line. Reports partial success, which is an answer and not an error. */
+  cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult>;
+
+  lineNotes(kind: LineNoteKind, orderId: string, lineId: string): Promise<LineNote[]>;
+  writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ): Promise<LineNote>;
+  /** Marks, never deletes. The reason is required — a gap is not information. */
+  cancelLineNote(kind: LineNoteKind, noteId: string, reason: string): Promise<void>;
+
+  takeReportAccessUnderReview(requestId: string): Promise<void>;
+  /**
+   * 32.4 — InfoRequested → UnderReview: the requester answers the reviewer's question. The only exit from
+   * that state, and the reason "Ask for more" was a one-way door until now.
+   */
+  supplyReportAccessInfo(requestId: string, supplement: string): Promise<void>;
+
+  addNoteAddendum(
+    encounterId: string,
+    noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ): Promise<NoteAddendum>;
+
+  medicationHistory(beneficiaryId: string, status?: MedicationStatus): Promise<MedicationHistoryRow[]>;
+  addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest): Promise<MedicationHistoryRow>;
+  /** Stop one. Never a delete — what a patient WAS taking is part of the clinical picture. */
+  stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string): Promise<MedicationHistoryRow>;
   /**
    * Set the member's blood group.
    *

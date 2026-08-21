@@ -325,3 +325,29 @@ export const zQuantityPreview = z.object({
   isPackSplittable: z.boolean().nullable().optional(),
 });
 export type QuantityPreview = z.infer<typeof zQuantityPreview>;
+
+/**
+ * 32.6 — the re-allocation a prescriber confirms before amending a chronic script (design 46 §4/§10).
+ *
+ * <b>Every field comes from the server</b>, computed by the same function the write path uses. The one
+ * thing a client must never do here is arithmetic: `zChronicPreview` above says why, and it applies twice
+ * over to an amendment, where the numbers decide whether a patient is asked to return medicine.
+ */
+export const zChronicAmendPreview = z.object({
+  /**
+   * What the attempt concluded.
+   *
+   * `NoLongerChronic` is not a refusal — design 46 §4 asks the prescriber whether to convert the script to
+   * acute, and `ConvertedToAcute` is that same request re-run with their confirmation. `BelowDispensed` IS a
+   * refusal: it implies un-dispensing medicine the patient already holds.
+   */
+  outcome: z.enum(["Reallocated", "BelowDispensed", "NoLongerChronic", "ConvertedToAcute", "NotChecked"]),
+  newTotal: z.number(),
+  alreadyDispensed: z.number(),
+  /** Collected windows are absent: they are immutable, and showing them as re-allocated would be a lie. */
+  remainingWindows: z.array(z.number()),
+  unit: z.string(),
+  /** On NotChecked, the master-data field whose absence stopped the arithmetic. */
+  missingField: z.string().nullish(),
+});
+export type ChronicAmendPreview = z.infer<typeof zChronicAmendPreview>;

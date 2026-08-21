@@ -32,15 +32,19 @@ public sealed record PrescriptionLineInput(
 /// type system survives and one carried by review does not — moving the field is what makes "the server
 /// reads the diagnosis from the encounter" structural rather than a rule someone has to remember.
 /// </para>
+/// <para>
+/// <b>The current medications are not here either, and for the same reason.</b> They were — as
+/// <c>ActiveMedicationDrugIds</c>, a plain list — and the failure was the one this note warns about, one
+/// layer quieter. Nothing fetched the list, because it was not behind the fetch seam; no type objected,
+/// because an empty list is a valid list; and the interaction check then reported <c>Ok</c>, "no interaction
+/// found", to every prescriber on the platform about a comparison it had never made. They live in
+/// <see cref="ValidationSnapshot.ActiveMedications"/> now, where an absent source is <c>Unavailable</c> with
+/// a reason and cannot be mistaken for a clean result.
+/// </para>
 /// </remarks>
-/// <param name="ActiveMedicationDrugIds">
-/// The beneficiary's current medications, so interactions are checked against what they are already taking
-/// and not only across the lines being written now.
-/// </param>
 public sealed record ValidationRequest(
     Guid EncounterId,
-    IReadOnlyList<PrescriptionLineInput> Lines,
-    IReadOnlyList<Guid> ActiveMedicationDrugIds);
+    IReadOnlyList<PrescriptionLineInput> Lines);
 
 /// <summary>Where a validation run's diagnosis list came from.</summary>
 /// <remarks>
@@ -417,7 +421,31 @@ public sealed record ValidationSnapshot(
     Fetched<ContraindicationTable> Contraindications,
     // 29.6 (design 45 §6) — the drug's pack facts, behind Fetched like every other fetched fact, so
     // "masterdata was unreachable" stays distinguishable from "master data does not record this".
-    Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> PackFacts);
+    Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> PackFacts,
+    // 32.1 — what the beneficiary is already taking. The last of the request's fetched fields to move here,
+    // and the one that had been wrong the longest.
+    Fetched<ActiveMedications> ActiveMedications);
+
+/// <summary>One medicine the beneficiary is already taking, and where that fact came from.</summary>
+/// <param name="Source">
+/// <c>Prescribed</c>, <c>SelfReported</c> or <c>External</c>. Not decoration: a <c>Prescribed</c> row is
+/// Mersal's own record and is as current as the dispensing log, while a <c>SelfReported</c> one is what the
+/// patient said at some consultation and may be months stale. The finding names it, because a prescriber
+/// weighing a warning is entitled to know whether it rests on a dispensing record or on a recollection.
+/// </param>
+public sealed record ActiveMedication(Guid DrugId, string DrugName, string Source);
+
+/// <summary>
+/// What the beneficiary is already taking, as one fetched fact.
+/// </summary>
+/// <remarks>
+/// The union of two sources that are each incomplete alone: active lines on unexpired Mersal prescriptions,
+/// and <c>medication_history</c> rows the patient reported. Prescriptions cannot know what someone bought
+/// elsewhere; a reported history cannot keep itself current. An outage in EITHER makes the whole fact
+/// <c>Unavailable</c> — a half-list presented as a whole one is the failure <see cref="Fetched{T}"/> exists
+/// to prevent.
+/// </remarks>
+public sealed record ActiveMedications(IReadOnlyList<ActiveMedication> Items);
 
 /// <summary>
 /// 29.6 — what the drug master records about how a product is packed (design 45 §6).

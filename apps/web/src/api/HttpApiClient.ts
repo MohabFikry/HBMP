@@ -130,8 +130,12 @@ import {
   zServiceUseView,
   zSlaBreachView,
   zClaimsCostView,
+  zMedicationHistoryRow,
+  zNoteAddendum,
+  zLineNote,
+  zChronicAmendPreview,
 } from "@mersal/contracts";
-import type { Period, ServiceAxis } from "@mersal/contracts";
+import type { Localized, Period, ServiceAxis, LineNoteKind, NoteVisibility } from "@mersal/contracts";
 import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
@@ -142,7 +146,10 @@ import type {
   SetAutoDecision,
   GenerateSettlementRequest,
 } from "@mersal/contracts";
-import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind } from "@mersal/contracts";
+import type {
+  PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind,
+  AddMedicationHistoryRequest, MedicationStatus,
+} from "@mersal/contracts";
 import { zChronicPreview, zQuantityPreview, zRefillFrequency } from "@mersal/contracts";
 // 29.2b — VALUE imports (the schemas), not types: the payload is validated at the seam.
 import {
@@ -190,6 +197,68 @@ const ALLERGEN_CATEGORY = ["Drug", "Food", "Environmental"] as const;
  * substituted with the uuid or the reaction. The component renders "(unspecified)" in the reader's own
  * language; inventing a substance name in the API layer would put a word in a clinician's mouth.
  */
+/**
+ * 32.2 — one medication-history row.
+ *
+ * <p>Nothing is defaulted into existence here. A row with no source would be a row whose warning cannot say
+ * where it came from, and `parseOr` is meant to reject that rather than have this mapper invent
+ * "SelfReported" to keep a screen quiet — which is the shape of defect this whole pass is closing.</p>
+ */
+/**
+ * The path prefix for a line note, by order kind.
+ *
+ * <p>orders-service serves investigation and procedure notes; pharmacy serves prescription notes (32.5).
+ * Three prefixes and one shape, which is the whole point of the shared panel.</p>
+ */
+const lineNoteBase = (kind: LineNoteKind, orderId: string) => {
+  const root = kind === "prescription" ? "/prescriptions"
+    : kind === "procedure" ? "/procedure-orders"
+    : "/investigation-orders";
+  return orderId ? `${root}/${encodeURIComponent(orderId)}` : root;
+};
+
+const toLineNote = (n: any, lineId: string) => ({
+  noteId: n?.noteId,
+  // orders names it orderLineId, pharmacy prescriptionLineId. Neither is guessed: the caller already knows
+  // which line it asked about, so the fallback is the id it asked with rather than a fabricated one.
+  lineId: n?.orderLineId ?? n?.prescriptionLineId ?? lineId,
+  visibility: n?.visibility,
+  body: n?.body ?? "",
+  authorDisplayName: n?.authorDisplayName ?? "",
+  authoredAt: n?.authoredAt,
+  status: n?.status,
+  cancelledAt: n?.cancelledAt ?? null,
+  cancelReason: n?.cancelReason ?? null,
+});
+
+const toMedicationRow = (m: any) => ({
+  medHistoryId: m?.medHistoryId,
+  beneficiaryId: m?.beneficiaryId,
+  drugId: m?.drugId,
+  drugName: m?.drugName ?? null,
+  source: m?.source,
+  startDate: m?.startDate ?? null,
+  endDate: m?.endDate ?? null,
+  status: m?.status,
+});
+
+/**
+ * 32.4 — one chip per report-access state, because they say different things to different readers.
+ *
+ * `InfoRequested` is the one that mattered: it is not "awaiting a decision", it is awaiting the REQUESTER,
+ * and rendering the two identically is what made a request that needed an answer look like one that needed
+ * patience.
+ */
+const REPORT_ACCESS_CHIP: Record<string, { kind: "info" | "warn" | "ok" | "bad"; label: Localized }> = {
+  Requested: { kind: "warn", label: t("Awaiting decision", "في انتظار القرار") },
+  UnderReview: { kind: "info", label: t("Under review", "قيد المراجعة") },
+  InfoRequested: { kind: "warn", label: t("More information needed", "مطلوب إيضاح") },
+  Approved: { kind: "ok", label: t("Approved", "تمت الموافقة") },
+  Denied: { kind: "bad", label: t("Denied", "مرفوض") },
+  Expired: { kind: "info", label: t("Expired", "منتهٍ") },
+  Revoked: { kind: "bad", label: t("Revoked", "أُلغي") },
+};
+
 const toAllergyRecord = (a: any) => ({
   allergyId: a?.allergyId,
   allergenId: a?.allergenId,
@@ -1181,9 +1250,29 @@ export class HttpApiClient implements ApiClient {
     // their original, and a signed note is immutable, so "the note to edit" is the newest note that is
     // neither. Taking `notes[0]` picked whatever the database returned first, which after a single addendum
     // was as likely to be the locked original as the live draft.
-    const notes: any[] = (r?.notes ?? []).filter((n: any) => !n.addendumOfNoteId);
+    const allNotes: any[] = r?.notes ?? [];
+    const notes: any[] = allNotes.filter((n: any) => !n.addendumOfNoteId);
     notes.sort((a, b) => String(b.authoredAt ?? "").localeCompare(String(a.authoredAt ?? "")));
     const note = notes.find((n: any) => !n.isSigned) ?? notes[0] ?? {};
+
+    // 32.3 — the corrections appended to THIS note. They were filtered out above and then discarded, which
+    // is why an addendum written by anyone was invisible to every reader: the mechanism the workspace tells
+    // a doctor to use produced a record nothing displayed. Oldest first, because they are read in the order
+    // they were made.
+    const addenda = allNotes
+      .filter((n: any) => n.addendumOfNoteId && String(n.addendumOfNoteId) === String(note.noteId ?? ""))
+      .sort((a, b) => String(a.authoredAt ?? "").localeCompare(String(b.authoredAt ?? "")))
+      .map((n: any) => ({
+        id: n.noteId,
+        authoredAt: n.authoredAt,
+        authoredByName: n.authoredByName ?? null,
+        soap: {
+          subjective: n.subjective ?? "",
+          objective: n.objective ?? "",
+          assessment: n.assessment ?? "",
+          plan: n.plan ?? "",
+        },
+      }));
 
     const vitals: any[] = r?.vitals ?? [];
     // Newest first, so `v()` answers with the CURRENT reading. Unsorted, a vitals panel showed whichever row
@@ -1223,6 +1312,7 @@ export class HttpApiClient implements ApiClient {
         spo2: v("SpO2"),
         measuredAt: vitals[0]?.measuredAt ?? null,
       },
+      addenda,
       // The SUBSTANCE, which is what an allergy chip is for. This read `a.reaction ?? "Allergen"` — so a
       // penicillin allergy recorded with a reaction of "rash" displayed as "rash", and one recorded without
       // a reaction displayed as the literal word "Allergen". emr has carried `allergenDisplay` since its
@@ -1682,12 +1772,32 @@ export class HttpApiClient implements ApiClient {
         purposeCode: String(q.purposeCode ?? ""),
         justification: String(q.justification ?? ""),
         requestedTtlHours: typeof q.requestedTtlHours === "number" ? q.requestedTtlHours : undefined,
-        status: q.status === "UnderReview"
-          ? { kind: "info" as const, label: t("Under review", "قيد المراجعة") }
-          : { kind: "warn" as const, label: t("Awaiting decision", "في انتظار القرار") },
+        // 32.4 — every state gets its own chip. This was a two-branch conditional, so an InfoRequested
+        // request rendered as "Awaiting decision": the queue told the decider it was waiting on THEM while
+        // it was in fact waiting on the requester, and told the requester nothing at all because the row
+        // was not in any list they could see.
+        status: REPORT_ACCESS_CHIP[String(q.status)] ?? { kind: "warn" as const, label: t(String(q.status), String(q.status)) },
+        statusCode: q.status,
+        canDecide: Boolean(q.canDecide),
+        isRequester: Boolean(q.isRequester),
         createdAt: q.createdAt ?? new Date().toISOString(),
       }),
     );
+  }
+
+  async takeReportAccessUnderReview(requestId: string) {
+    await postRaw(`/report-access-requests/${encodeURIComponent(requestId)}/review`, {});
+  }
+
+  /**
+   * Answer the question a reviewer asked (32.4).
+   *
+   * <p>The supplement is APPENDED server-side; the original justification is never overwritten. This is the
+   * only exit from InfoRequested, and until now no client called it — so "Ask for more" was a one-way door
+   * the product itself offered.</p>
+   */
+  async supplyReportAccessInfo(requestId: string, supplement: string) {
+    await postRaw(`/report-access-requests/${encodeURIComponent(requestId)}/supply-info`, { supplement });
   }
 
   async decideReportAccess(requestId: string, decision: "approve" | "deny" | "requestinfo", reason: string, ttlHours?: number) {
@@ -1706,6 +1816,10 @@ export class HttpApiClient implements ApiClient {
         rxNo: p.rxNo,
         beneficiary: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
         lineCount: (p.lines ?? []).length,
+        // 32.6 — Acute vs Chronic, which decides which amendment control a row may offer at all.
+        kind: p.kind ?? null,
+        refillFrequencyCode: p.refillFrequencyCode ?? null,
+        durationDays: typeof p.durationDays === "number" ? p.durationDays : null,
         // The authorization decides whether this reads "Approved" or "Verified" — see `rxStatus`.
         status: rxStatus(p.status, p.authorizationId),
         submittedAt: p.submittedAt ?? undefined,
@@ -1785,6 +1899,174 @@ export class HttpApiClient implements ApiClient {
         category: ALLERGEN_CATEGORY[Number(a.category)] ?? "Drug",
       }),
     );
+  }
+
+  /**
+   * What the patient is already taking (32.2).
+   *
+   * <p>This read exists because the prescribing interaction check needs it, not only because a screen wants
+   * to show it. Until 32.1 the check compared a prescription against nothing at all and reported "no
+   * interaction found" — so an empty answer here is rendered as "nothing recorded", never as "takes
+   * nothing", and the two sentences are not interchangeable.</p>
+   */
+  /**
+   * Append a correction to a signed note (32.3).
+   *
+   * <p>The only way to change a signed clinical record on this platform — emr refuses an edit with a 409
+   * naming this path, the workspace tells the doctor so twice, and until now no client could take it.</p>
+   */
+  async addNoteAddendum(
+    encounterId: string,
+    noteId: string,
+    soap: { subjective?: string; objective?: string; assessment?: string; plan?: string },
+  ) {
+    const r = (await postRaw(
+      `/encounters/${encodeURIComponent(encounterId)}/notes/${encodeURIComponent(noteId)}/addendum`,
+      {
+        noteType: "SOAP",
+        subjective: soap.subjective ?? null,
+        objective: soap.objective ?? null,
+        assessment: soap.assessment ?? null,
+        plan: soap.plan ?? null,
+      },
+    )) as any;
+    return parseOr(zNoteAddendum, {
+      id: r?.noteId,
+      authoredAt: r?.authoredAt,
+      authoredByName: r?.authoredByName ?? null,
+      soap: {
+        subjective: r?.subjective ?? "",
+        objective: r?.objective ?? "",
+        assessment: r?.assessment ?? "",
+        plan: r?.plan ?? "",
+      },
+    });
+  }
+
+  /**
+   * 32.5 — notes on an order or prescription line (design 46 §7b).
+   *
+   * <p>One method, three paths, because one PANEL serves all four order kinds. The alternative — a method
+   * per kind — is how a platform ends up with two behaviours for "cancel a note", which is the outcome doc
+   * 46 §7b names when it insists on a single mechanism.</p>
+   *
+   * <p>A cancelled note still comes back. The screen strikes it through; dropping it would turn "withdrawn
+   * by X because Z" into a gap.</p>
+   */
+  /**
+   * 32.6 — what a chronic amendment would do, before it does it (design 46 §10).
+   *
+   * <p>Computed by the SERVER, by the same pure function the write path calls. Re-deriving largest-remainder
+   * here would fork the one piece of arithmetic `zChronicPreview` forbids forking — the copies drift, and
+   * the drift appears as a doctor shown a schedule the pharmacy never honours.</p>
+   */
+  async previewChronicAmendment(
+    rxId: string, lineId: string, req: { durationDays: number; frequencyMonths: number; convertToAcute?: boolean },
+  ) {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/amend-schedule/preview`,
+      { durationDays: req.durationDays, frequencyMonths: req.frequencyMonths, convertToAcute: req.convertToAcute ?? false },
+    )) as any;
+    return parseOr(zChronicAmendPreview, {
+      outcome: r?.outcome,
+      newTotal: Number(r?.newTotal ?? 0),
+      alreadyDispensed: Number(r?.alreadyDispensed ?? 0),
+      remainingWindows: (r?.remainingWindows ?? []).map(Number),
+      unit: String(r?.unit ?? ""),
+      missingField: r?.missingField ?? null,
+    });
+  }
+
+  /** 32.6 — apply it. Idempotency-Key per user action, not per retry. */
+  async amendChronicSchedule(
+    rxId: string, lineId: string,
+    req: { durationDays: number; frequencyMonths: number; reasonCode: string; reasonText?: string; convertToAcute?: boolean },
+  ) {
+    await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/amend-schedule`,
+      {
+        durationDays: req.durationDays, frequencyMonths: req.frequencyMonths,
+        reasonCode: req.reasonCode, reasonText: req.reasonText ?? null,
+        convertToAcute: req.convertToAcute ?? false,
+      },
+      crypto.randomUUID(),
+    );
+  }
+
+  /**
+   * 32.6 — withdraw every still-cancellable line of a prescription.
+   *
+   * <p>The medication twin of `withdrawOrder`, and it answers the same way: 200, 207 or 409 by how much
+   * succeeded, with a per-line refusal. All three are read identically, because "three of five withdrawn" is
+   * an answer the prescriber has to see rather than an error to swallow.</p>
+   */
+  async cancelPrescriptionLines(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult> {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/cancel-lines`,
+      { reasonCode, reasonText },
+      crypto.randomUUID(),
+    )) as { cancelled?: number; lines?: { drugName?: string | null; cancelled: boolean; refusal?: string | null }[] };
+
+    const lines = (r.lines ?? []).map((l) => ({
+      label: l.drugName ?? "—",
+      withdrawn: l.cancelled,
+      refusal: l.refusal ?? null,
+    }));
+    // `total` is the count the prescriber ASKED about, not the count that succeeded — "3 of 5 withdrawn"
+    // needs both numbers, and deriving the denominator from the successes would always read "5 of 5".
+    return { withdrawn: r.cancelled ?? lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
+  }
+
+  async lineNotes(kind: LineNoteKind, orderId: string, lineId: string) {
+    const r = (await getRaw(`${lineNoteBase(kind, orderId)}/lines/${encodeURIComponent(lineId)}/notes`)) as any[];
+    return (r ?? []).map((n) => parseOr(zLineNote, toLineNote(n, lineId)));
+  }
+
+  async writeLineNote(
+    kind: LineNoteKind, orderId: string, lineId: string, body: string, visibility?: NoteVisibility,
+  ) {
+    const r = (await postRaw(
+      `${lineNoteBase(kind, orderId)}/lines/${encodeURIComponent(lineId)}/notes`,
+      { body, visibility: visibility ?? null },
+    )) as any;
+    return parseOr(zLineNote, toLineNote(r, lineId));
+  }
+
+  async cancelLineNote(kind: LineNoteKind, noteId: string, reason: string) {
+    await postRaw(`${lineNoteBase(kind, "")}/notes/${encodeURIComponent(noteId)}/cancel`, { reason });
+  }
+
+  async medicationHistory(beneficiaryId: string, status?: MedicationStatus) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const r = (await getRaw(
+      `/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history${q}`,
+    )) as any[];
+    return (r ?? []).map((m) => parseOr(zMedicationHistoryRow, toMedicationRow(m)));
+  }
+
+  async addMedicationHistory(beneficiaryId: string, req: AddMedicationHistoryRequest) {
+    const r = (await postRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history`, {
+      drugId: req.drugId,
+      source: req.source,
+      startDate: req.startDate ?? null,
+      endDate: req.endDate ?? null,
+      status: req.status,
+    })) as any;
+    return parseOr(zMedicationHistoryRow, toMedicationRow(r));
+  }
+
+  /**
+   * The patient stopped taking it.
+   *
+   * <p>Not a delete: what someone WAS taking is part of the clinical picture. The row keeps its place and
+   * gains an end date, and it leaves the active list the interaction check reads.</p>
+   */
+  async stopMedication(beneficiaryId: string, medHistoryId: string, endDate?: string) {
+    const r = (await postRaw(
+      `/beneficiaries/${encodeURIComponent(beneficiaryId)}/medication-history/${encodeURIComponent(medHistoryId)}/stop`,
+      { endDate: endDate ?? null },
+    )) as any;
+    return parseOr(zMedicationHistoryRow, toMedicationRow(r));
   }
 
   async addAllergy(beneficiaryId: string, req: AddAllergyRequest) {

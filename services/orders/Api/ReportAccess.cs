@@ -27,9 +27,17 @@ public static class ReportAccessEndpoints
             if (p is null) return Results.Unauthorized();
 
             var q = db.ReportAccessRequests.AsNoTracking().Where(r => r.TenantId == p.TenantId);
-            // Default view: what needs a decision. An approver opening the inbox wants the work, not history.
+            // Default view: everything OPEN — what needs a decision, and what needs the requester's answer.
+            //
+            // 32.4: this used to be Requested + UnderReview only, which is the decider's half of the
+            // workflow. InfoRequested was in neither branch, so the one person who can move a request out of
+            // it — the requester, through supply-info — could not find it in any list this service serves.
+            // 18.A4 built that exit and a state-machine test has proven it legal ever since; the product
+            // stayed stuck because the row was unreachable, which is not something a domain test can see.
             if (string.IsNullOrWhiteSpace(status))
-                q = q.Where(r => r.Status == ReportAccessStatus.Requested || r.Status == ReportAccessStatus.UnderReview);
+                q = q.Where(r => r.Status == ReportAccessStatus.Requested
+                                 || r.Status == ReportAccessStatus.UnderReview
+                                 || r.Status == ReportAccessStatus.InfoRequested);
             else if (Enum.TryParse<ReportAccessStatus>(status, ignoreCase: true, out var s))
                 q = q.Where(r => r.Status == s);
             else
@@ -40,20 +48,38 @@ public static class ReportAccessEndpoints
             // Deliberately CLINICAL-FREE: the inbox shows who asked, for which line, why — never the result.
             var isDirector = p.IsInRole("medical_director");
             var rows = await q.OrderBy(r => r.CreatedAt).Take(200).ToListAsync(ct);
-            if (!isDirector)
-            {
-                var mine = await db.Orders.AsNoTracking()
-                    .Where(o => o.OrderingProviderId.ToString() == p.Subject)
-                    .Select(o => o.OrderId).ToListAsync(ct);
-                var mineSet = mine.ToHashSet();
-                rows = [.. rows.Where(r => mineSet.Contains(r.OrderId))];
-            }
 
-            return Results.Ok(rows.Select(r => new ReportAccessRequestView(
-                r.RequestId, r.OrderId, r.OrderLineId, r.BeneficiaryId,
-                r.RequestedBy, r.RequestedForRole,
-                r.PurposeCode.ToString(), r.Justification, r.RequestedTtlHours,
-                r.Status.ToString(), r.CreatedAt)));
+            var authored = await db.Orders.AsNoTracking()
+                .Where(o => o.OrderingProviderId.ToString() == p.Subject)
+                .Select(o => o.OrderId).ToListAsync(ct);
+            var authoredSet = authored.ToHashSet();
+
+            // 32.4 — MY OWN REQUESTS ARE MINE TO SEE, and this is the whole of the widening. A clinician who
+            // asks to see somebody else's sensitive result is by definition not that order's provider, so
+            // their request appeared in no list at all: they raised it and then had no way to learn it had
+            // been answered, questioned, or was about to lapse.
+            //
+            // It discloses nothing new. The requester wrote the justification, named the purpose and chose
+            // the beneficiary — the row is their own words. What stays invisible is somebody ELSE's request
+            // on an order neither of us placed, which the filter below still refuses.
+            if (!isDirector)
+                rows = [.. rows.Where(r => authoredSet.Contains(r.OrderId)
+                                           || string.Equals(r.RequestedBy, p.Subject, StringComparison.Ordinal))];
+
+            var roles = p.Roles ?? new HashSet<string>();
+            return Results.Ok(rows.Select(r =>
+            {
+                // Computed HERE, not in the client. Whether this caller may decide is an authorization
+                // question, and a screen that worked it out by comparing identity strings would be deciding
+                // authority in the browser — which is where the platform's rule is that it must not be.
+                var canDecide = SensitiveResultGate.CanDecide(authoredSet.Contains(r.OrderId), roles);
+                var isRequester = string.Equals(r.RequestedBy, p.Subject, StringComparison.Ordinal);
+                return new ReportAccessRequestView(
+                    r.RequestId, r.OrderId, r.OrderLineId, r.BeneficiaryId,
+                    r.RequestedBy, r.RequestedForRole,
+                    r.PurposeCode.ToString(), r.Justification, r.RequestedTtlHours,
+                    r.Status.ToString(), r.CreatedAt, canDecide, isRequester);
+            }));
         }).Produces<IEnumerable<ReportAccessRequestView>>();
 
         // Raise a request (purpose + justification REQUIRED → else 422). Routes to the authoring doctor.

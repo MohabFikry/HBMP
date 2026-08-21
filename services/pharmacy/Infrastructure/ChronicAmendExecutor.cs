@@ -67,6 +67,39 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
            AND xmin::text = @expected
         """;
 
+    /// <summary>
+    /// 32.6 — what the amendment WOULD do, without doing it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Design 46 §10 asks the prescriber to confirm an arithmetic they have seen, and
+    /// <c>AmendLineDialog</c> has rendered exactly that since 30.3 — for a caller that never existed.
+    /// This is the read half of <see cref="AmendScheduleAsync"/> and nothing else: the same collected-window
+    /// query, the same <see cref="Request"/> builder, the same <c>ChronicAmendment.Reallocate</c>. No
+    /// transaction, no successor line, no outbox.
+    /// </para>
+    /// <para>
+    /// It lives here rather than in the endpoint so it cannot drift from the write path. A preview computed
+    /// separately is a second implementation of the one piece of arithmetic <c>zChronicPreview</c>'s header
+    /// forbids forking — "the drift would appear as a doctor being shown a schedule the pharmacy never
+    /// honours".
+    /// </para>
+    /// </remarks>
+    public async Task<ChronicReallocation?> PreviewScheduleAsync(
+        Guid lineId, ChronicAmendRequest req, CancellationToken ct = default)
+    {
+        var line = await db.PrescriptionLines.AsNoTracking()
+            .FirstOrDefaultAsync(l => l.PrescriptionLineId == lineId, ct);
+        if (line is null) return null;
+
+        var windows = await db.DispenseWindows.AsNoTracking()
+            .Where(w => w.PrescriptionLineId == lineId).OrderBy(w => w.WindowNo).ToListAsync(ct);
+        var collected = windows.Where(w => w.DispensedQuantity > 0).ToList();
+
+        return ChronicAmendment.Reallocate(
+            Request(line, req), collected.Sum(w => w.DispensedQuantity), collected.Count, req.ConvertToAcute);
+    }
+
     public async Task<ChronicAmendResult> AmendScheduleAsync(
         Guid rxId, Guid lineId, string idempotencyKey, ChronicAmendRequest req, AmendReason reason,
         Guid actor, string? actorDisplay, DateTimeOffset now, DateOnly today, int toleranceDays,

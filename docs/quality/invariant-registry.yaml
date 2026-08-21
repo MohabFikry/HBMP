@@ -2391,3 +2391,86 @@ invariants:
       - Mersal.Finance.Tests.ExportProducesWhatItNamesTests.A_submitted_settlement_names_its_submitter
       - Mersal.Finance.Tests.FinanceEndpointTests.A_settlement_cannot_be_approved_by_the_person_who_submitted_it
       - apps/web/test/finance-and-counter.test.tsx::withholds Approve from the person who submitted, and says why
+
+  # ---------------------------------------------------------------- 32.x, the prescriber's portal pass
+
+  - id: INV-NO-CHECK-REPORTS-OK-ABOUT-A-COMPARISON-IT-DID-NOT-MAKE
+    statement: >-
+      A clinical check reports Ok only about data it actually compared. The prescribing interaction check
+      compares each written line against the beneficiary's CURRENT medications; when that source cannot be
+      read the finding is Unavailable, and when nothing is recorded the finding says so rather than claiming
+      a clean comparison.
+    source: 43-approval-engine-and-prescribing-support.md §1; 44-clinical-validation-hardening.md §8; doc 50
+    severity: Critical
+    tests:
+      - Mersal.ClinicalValidation.Tests.ActiveMedicationInteractionTests.An_interaction_with_a_current_medication_is_reported
+      - Mersal.ClinicalValidation.Tests.ActiveMedicationInteractionTests.An_unavailable_source_is_never_reported_as_clear
+      - Mersal.ClinicalValidation.Tests.ActiveMedicationInteractionTests.Nothing_recorded_says_so_rather_than_claiming_a_comparison
+      - Mersal.ClinicalValidation.Tests.ActiveMedicationInteractionTests.A_clear_result_states_how_many_medications_it_compared_against
+      # The engine's half was green for months while production passed it an empty list. These prove the
+      # WIRING, against rows in a database — the half a unit test cannot reach.
+      - Mersal.Pharmacy.Tests.ActiveMedicationSourceTests.An_active_line_on_a_live_prescription_is_a_current_medication
+      - Mersal.Pharmacy.Tests.ActiveMedicationSourceTests.A_dispensed_line_is_still_a_current_medication
+      - Mersal.Pharmacy.Tests.ActiveMedicationSourceTests.A_cancelled_line_a_superseded_line_and_a_draft_script_are_not
+      - Mersal.Pharmacy.Tests.ActiveMedicationSourceTests.An_expired_prescription_is_not_a_current_medication
+      - Mersal.Pharmacy.Tests.ActiveMedicationSourceTests.Another_beneficiarys_medication_is_never_returned
+
+  - id: INV-A-SIGNED-CLINICAL-RECORD-HAS-A-CORRECTION-PATH
+    statement: >-
+      A signed clinical note can be corrected. The correction is appended as an addendum, never merged into
+      the original, and the original text stays readable exactly as it was signed.
+    source: 46-order-amendment-and-cancellation.md §1; emr domain model; doc 50
+    severity: High
+    tests:
+      - apps/web/test/encounter-addendum.test.tsx::corrects a signed note, and leaves the mistake readable
+      - apps/web/test/encounter-addendum.test.tsx::shows an existing addendum beneath its original, with who wrote it and when
+      - apps/web/test/encounter-addendum.test.tsx::offers no addendum control while the note is still editable
+      - apps/web/test/http-client-contract.test.ts::surfaces the corrections appended to the signed note, oldest first
+
+  - id: INV-NO-STATE-THE-PRODUCT-CAN-ENTER-AND-NOT-LEAVE
+    statement: >-
+      Every workflow state a Mersal screen can drive a record into has an exit reachable from a Mersal
+      screen, by the party who owns that exit. A result-access request moved to InfoRequested by the inbox's
+      own control is visible to its requester and answerable by them.
+    source: 23-state-machines.md §11; 37-branch-scoping-and-clinical-sensitivity.md §6; doc 50
+    severity: High
+    tests:
+      - Mersal.Orders.Tests.ReportAccessInboxTests.A_requester_sees_the_request_they_raised_even_though_they_decide_nothing
+      - Mersal.Orders.Tests.ReportAccessInboxTests.A_request_awaiting_the_requesters_answer_is_in_the_default_view
+      - Mersal.Orders.Tests.ReportAccessInboxTests.Someone_elses_request_on_someone_elses_order_stays_invisible
+      - Mersal.Orders.Tests.ReportAccessInboxTests.The_author_of_the_order_can_decide_and_is_told_so
+      - apps/web/test/report-access-transitions.test.tsx::lets the requester answer the reviewer's question, which is the only way out of InfoRequested
+      - apps/web/test/report-access-transitions.test.tsx::takes a request under review only when asked, never by being looked at
+      - apps/web/test/report-access-transitions.test.tsx::offers no decision controls on a request the caller may not decide
+
+  - id: INV-A-NOTE-IS-NEVER-AN-AMENDMENT
+    statement: >-
+      Annotating an order or prescription line does not supersede it, create a version, or alter its
+      authorisation. A note's visibility class is projected server-side before serialization, and a
+      fulfilling provider may write only FromFulfiller.
+    source: 46-order-amendment-and-cancellation.md §7b; doc 50
+    severity: High
+    tests:
+      - Mersal.Pharmacy.Tests.PrescriptionNoteTests.A_note_is_not_an_amendment
+      - Mersal.Pharmacy.Tests.PrescriptionNoteTests.An_Internal_note_never_reaches_the_counter
+      - Mersal.Pharmacy.Tests.PrescriptionNoteTests.A_counter_may_only_answer_back
+      - Mersal.Pharmacy.Tests.PrescriptionNoteTests.A_cancelled_note_stays_visible_struck_through_and_needs_a_reason
+      - apps/web/test/line-notes.test.tsx::shows the prescriber's instruction to the counter
+      - apps/web/test/line-notes.test.tsx::offers a fulfiller only the class they may write
+      - apps/web/test/line-notes.test.tsx::keeps a withdrawn note visible, struck through, with the reason
+
+  - id: INV-A-CHRONIC-AMENDMENT-IS-CONFIRMED-AGAINST-THE-ARITHMETIC-THAT-WILL-RUN
+    statement: >-
+      A prescriber confirms a chronic schedule change against the re-allocation the write path will actually
+      perform, computed by the same function. What was dispensed is never recalculated, a total below it is
+      refused before the request, and shortening below the chronic definition requires explicit confirmation.
+    source: 46-order-amendment-and-cancellation.md §4 and §10; doc 50
+    severity: Critical
+    tests:
+      - Mersal.Pharmacy.Tests.ChronicAmendPreviewTests.It_shows_the_remainder_split_across_the_windows_that_are_left
+      - Mersal.Pharmacy.Tests.ChronicAmendPreviewTests.It_refuses_a_total_below_what_was_already_collected_and_says_so
+      - Mersal.Pharmacy.Tests.ChronicAmendPreviewTests.Shortening_below_the_chronic_definition_asks_rather_than_deciding
+      - Mersal.Pharmacy.Tests.ChronicAmendPreviewTests.A_preview_writes_nothing
+      - apps/web/test/chronic-amend.test.tsx::refuses a total below what has already been collected, in words
+      - apps/web/test/chronic-amend.test.tsx::asks before turning a chronic script acute, and will not proceed until told
+      - apps/web/test/chronic-amend.test.tsx::says the arithmetic could not run rather than showing a schedule

@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
 using Mersal.Events;
+using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Emr.Api;
@@ -209,7 +210,8 @@ public static class ClinicalEndpoints
             {
                 NoteId = Guid.NewGuid(), EncounterId = id, NoteType = req.NoteType,
                 Subjective = req.Subjective, Objective = req.Objective, Assessment = req.Assessment, Plan = req.Plan,
-                AuthoredBy = me.Principal!.Subject, AuthoredAt = clock.GetUtcNow(), IsSigned = false,
+                AuthoredBy = me.Principal!.Subject, AuthoredByName = me.Principal.DisplayName,
+                AuthoredAt = clock.GetUtcNow(), IsSigned = false,
             };
             if (!SoapNoteRules.HasContent(note))
                 return Problem(422, "empty-note", "A note must contain at least one populated section (S/O/A/P).");
@@ -304,7 +306,8 @@ public static class ClinicalEndpoints
             {
                 NoteId = Guid.NewGuid(), EncounterId = id, NoteType = req.NoteType,
                 Subjective = req.Subjective, Objective = req.Objective, Assessment = req.Assessment, Plan = req.Plan,
-                AddendumOfNoteId = noteId, AuthoredBy = me.Principal!.Subject, AuthoredAt = clock.GetUtcNow(),
+                AddendumOfNoteId = noteId, AuthoredBy = me.Principal!.Subject,
+                AuthoredByName = me.Principal.DisplayName, AuthoredAt = clock.GetUtcNow(),
             };
             if (!SoapNoteRules.HasContent(addendum))
                 return Problem(422, "empty-note", "An addendum must contain at least one populated section (S/O/A/P).");
@@ -718,12 +721,19 @@ public static class ClinicalEndpoints
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.MedicationHistory, beneficiaryId.ToString(), beneficiaryId, ct);
             if (denied is not null) return denied;
 
-            if (!await codes.DrugExistsAsync(req.DrugId, Bearer(http), ct))
+            // The NAME, not an existence bit — 0026, and the same rule the allergy write beside it follows.
+            // Both readers of this row show the medicine to a clinician: the encounter's current-medications
+            // list, and the prescribing interaction warning, which says "interacts with X, which the patient
+            // is already taking". Asking only whether the drug exists is how that sentence ends up with a
+            // uuid in it at the moment somebody is deciding what to prescribe.
+            var drugName = await codes.DrugNameAsync(req.DrugId, Bearer(http), ct);
+            if (drugName is null)
                 return Problem(422, "unknown-drug", $"Drug '{req.DrugId}' is not present in master data.");
 
             var med = new MedicationHistory
             {
                 MedHistoryId = Guid.NewGuid(), BeneficiaryId = beneficiaryId, DrugId = req.DrugId,
+                DrugName = drugName,
                 Source = req.Source, StartDate = req.StartDate, EndDate = req.EndDate, Status = req.Status,
                 RecordedBy = me.Principal!.Subject, RecordedAt = clock.GetUtcNow(),
             };
@@ -731,6 +741,92 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "medication_history", med.MedHistoryId, AuditAction.Create, me, $"{{\"source\":\"{med.Source}\"}}", ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/medication-history/{med.MedHistoryId}", MedicationHistoryResponse.From(med));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<MedicationHistoryResponse>();
+
+        /* ---- GET /beneficiaries/{beneficiaryId}/medication-history ----------------------------------
+         *
+         * 32.1 — the read that makes the write worth having. The POST above has existed since phase 4.1
+         * with NO caller anywhere: not the SPA, not another service. So the table fed `/clinical`'s
+         * medication list and the FHIR MedicationStatement projection with nothing, and both reported "no
+         * medications" as a fact about every patient on the platform.
+         *
+         * It is also half of the interaction check's missing input. pharmacy's validation ports read this
+         * and union it with Mersal's own active prescriptions: what a patient takes that Mersal prescribed
+         * is derivable from our records, and what they take that Mersal did NOT prescribe is derivable from
+         * nowhere else, which is exactly what MedicationSource.SelfReported and .External are for.
+         *
+         * Gated as `/clinical` is — a medication list is clinical content. */
+        ben.MapGet("/{beneficiaryId:guid}/medication-history", async (
+            Guid beneficiaryId, string? status, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.MedicationHistory,
+                beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var q = db.MedicationHistories.AsNoTracking().Where(m => m.BeneficiaryId == beneficiaryId);
+
+            // An unparseable status filters nothing rather than everything. "?status=nonsense" returning an
+            // empty list would read as "this patient takes nothing", which is the class of false negative
+            // this whole change exists to remove.
+            if (Enum.TryParse<MedicationStatus>(status, ignoreCase: true, out var wanted))
+                q = q.Where(m => m.Status == wanted);
+
+            var rows = await q.OrderByDescending(m => m.StartDate).ToListAsync(ct);
+            await EmitAsync(audit, "medication_history", beneficiaryId, AuditAction.Read, me,
+                $"{{\"returned\":{rows.Count}}}", ct);
+            return Results.Ok(rows.Select(MedicationHistoryResponse.From));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:read"))
+        .Produces<IEnumerable<MedicationHistoryResponse>>();
+
+        /* ---- POST /beneficiaries/{beneficiaryId}/medication-history/{medHistoryId}/stop ---------------
+         *
+         * 32.2 — the patient stopped taking it.
+         *
+         * The POST above can CREATE a row already marked Stopped, which is the "they used to take this"
+         * case. Nothing could move an Active row to Stopped, so a medicine recorded once stayed current
+         * forever — and since 32.1 this list is an input to the prescribing interaction check, a medicine
+         * nobody is on any more would go on generating warnings until somebody noticed the check was
+         * arguing about a drug that had been stopped a year ago.
+         *
+         * Not a DELETE: what a patient WAS taking is part of the clinical picture, and this platform does
+         * not hard-delete clinical data. The row stays, its status changes, and the end date records when. */
+        ben.MapPost("/{beneficiaryId:guid}/medication-history/{medHistoryId:guid}/stop", async (
+            Guid beneficiaryId, Guid medHistoryId, StopMedicationRequest req, EmrDbContext db,
+            ClinicalGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, IBusinessCalendar calendar,
+            CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.MedicationHistory,
+                beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var med = await db.MedicationHistories
+                .FirstOrDefaultAsync(m => m.MedHistoryId == medHistoryId && m.BeneficiaryId == beneficiaryId, ct);
+            if (med is null) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            // Re-stopping would move an end date that is already recorded, with nothing saying it moved.
+            // "When did they stop taking it" is a clinical fact, not a field.
+            if (med.Status == MedicationStatus.Stopped)
+                return Problem(409, "already-stopped",
+                    $"This medication was already recorded as stopped on {med.EndDate?.ToString("yyyy-MM-dd") ?? "an unrecorded date"}.");
+
+            // The CAIRO business date, not a UTC one. "Today" read off a UTC instant is yesterday for the
+            // first two to three hours of every Cairo day, so a medicine stopped at 1am would be recorded as
+            // having stopped the day before — and NoUtcBusinessDateArchitectureTests fails the build for it,
+            // which is how this line was caught.
+            var endDate = req.EndDate ?? calendar.Today();
+            if (med.StartDate is { } started && endDate < started)
+                return Problem(422, "stopped-before-started",
+                    "A medication cannot stop before it started. Correct the start date first.");
+
+            med.Status = MedicationStatus.Stopped;
+            med.EndDate = endDate;
+            await db.SaveChangesAsync(ct);
+            await EmitAsync(audit, "medication_history", med.MedHistoryId, AuditAction.StateChange, me,
+                $"{{\"status\":\"Stopped\",\"endDate\":\"{endDate:yyyy-MM-dd}\"}}", ct);
+            return Results.Ok(MedicationHistoryResponse.From(med));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
         .Produces<MedicationHistoryResponse>();
 
