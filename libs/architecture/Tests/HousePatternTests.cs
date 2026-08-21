@@ -216,6 +216,30 @@ public class HousePatternTests
             "the C# and Python RLS-free registers must name the same tables");
     }
 
+    [Fact]
+    public void The_only_sanctioned_empty_tenant_is_the_platform_default_grant_bucket()
+    {
+        // 2026-08-21 — `tools/ci/check-tenant-stamping.py` proves no row on the platform carries
+        // `tenant_id = ''`, with exactly one exemption. That exemption is not a convenience: it is
+        // `RoleScope.PlatformDefault`, the fallback bucket `RoleScopeResolver` reads for any tenant that has
+        // not been provisioned its own grants, and a CHECK constraint there would strand every one of them.
+        //
+        // The register is pinned HERE rather than only in the gate, because the failure this guards against
+        // is somebody ADDING to it. An exemption list is the one part of a control that can be edited to make
+        // the control pass, and a second entry — "just this one table too" — would be invisible in a diff of
+        // a Python file nobody reviews line by line. Widening it is now a two-file change that says so.
+        var gate = File.ReadAllText(Path.Combine(RepoRoot(), "tools", "ci", "check-tenant-stamping.py"));
+        var sanctioned = Regex.Matches(
+                gate[gate.IndexOf("SANCTIONED = {", StringComparison.Ordinal)..],
+                @"^\s*""([\w.]+)"":", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        sanctioned.Should().BeEquivalentTo(["identity.role_scope"],
+            "an empty tenant means 'belongs to nobody' everywhere except the one table where it is a named "
+            + "constant the resolver reads — adding a second exemption needs a reason in this test, not a "
+            + "line in a register");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private sealed record ProgramFile(string Service, string Source);

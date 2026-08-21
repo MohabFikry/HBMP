@@ -1,6 +1,7 @@
 import {
   zAccessReviewCampaign,
   zAppointmentRow,
+  zWaitingTicket,
   zBookableClinic,
   zTimelineStep,
   zBookableSlot,
@@ -323,13 +324,81 @@ const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? 
 /** Map the reception card's accessible status tone to the design-system StatusKind. */
 const toneToKind = (tone: unknown): "ok" | "warn" | "bad" | "neu" | "info" =>
   ({ positive: "ok", caution: "warn", critical: "bad", neutral: "neu" })[String(tone ?? "neutral")] as any ?? "neu";
-/** Map member coverage status → the eligibility verdict the result card renders. */
-const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" => {
-  const s = String(status ?? "").toLowerCase();
-  if (s === "active") return "eligible";
-  if (s === "blocked" || s === "expired") return "ineligible";
+/**
+ * 32.6 — the SERVICE's decision → the verdict the result card renders.
+ *
+ * <p>`NeedsAuthorization` is "review", not "ineligible": the engine's own words are that it is "a soft No
+ * that routes to the approval team, not a denial". An unrecognised value also lands on "review" rather than
+ * "eligible" — a decision this client cannot read is not permission to proceed.</p>
+ */
+const decisionToVerdict = (decision: unknown): "eligible" | "ineligible" | "review" => {
+  const d = String(decision ?? "").toLowerCase();
+  if (d === "eligible") return "eligible";
+  if (d === "ineligible") return "ineligible";
   return "review";
 };
+
+/**
+ * 32.6 — the service's cost-share preview → the typed union the screen renders.
+ *
+ * <p>The service's `reason` is English prose. It is NOT passed through: an Arabic-reading receptionist must
+ * not be shown an English sentence about what a beneficiary owes (ADR-0042). The three cases it can report
+ * are mapped to typed pairs here, and an unrecognised one falls to a sentence that says the share is unknown
+ * rather than to a number.</p>
+ */
+const toCostShare = (preview: any, category: string | undefined): any => {
+  if (!category) {
+    return {
+      known: false,
+      why: {
+        en: "No benefit category was chosen, so no copay can be quoted. This is not a report that the "
+          + "member pays nothing.",
+        ar: "لم تُختَر فئة منفعة، لذا لا يمكن تحديد المساهمة. وهذا ليس تأكيداً بأن المستفيد لا يدفع شيئاً.",
+      },
+    };
+  }
+  if (preview?.determinate === true) {
+    return {
+      known: true,
+      tierCode: preview.tierCode ?? null,
+      copayPercent: preview.copayPercent ?? null,
+      copayFixed: preview.copayFixed ?? null,
+      coinsurancePercent: preview.coinsurancePercent ?? null,
+    };
+  }
+  const reason = String(preview?.reason ?? "");
+  if (/tier could be resolved/i.test(reason)) {
+    return {
+      known: false,
+      why: {
+        en: "No network tier could be resolved for this provider on this date, so the member's share is unknown.",
+        ar: "تعذّر تحديد شريحة الشبكة لهذا المقدّم في هذا التاريخ، لذا فإن حصة المستفيد غير معروفة.",
+      },
+    };
+  }
+  if (/could not be read/i.test(reason)) {
+    return {
+      known: false,
+      why: {
+        en: "The plan's cost share could not be read, so the member's share is unknown. This is not a "
+          + "report that the service is free.",
+        ar: "تعذّرت قراءة المساهمة في الخطة، لذا فإن حصة المستفيد غير معروفة. وهذا ليس تأكيداً بأن الخدمة مجانية.",
+      },
+    };
+  }
+  return {
+    known: false,
+    why: {
+      en: "This plan does not price this benefit category, so no copay can be quoted.",
+      ar: "لا تُسعّر هذه الخطة فئة المنفعة هذه، لذا لا يمكن تحديد المساهمة.",
+    },
+  };
+};
+
+// 32.6 — `statusToVerdict` lived here and is gone. It mapped a cached member-status STRING to an eligibility
+// verdict in the browser, which is how the reception desk came to answer a question it had never asked
+// eligibility-service. Deleted rather than left unused: the next screen that needed a verdict in a hurry
+// would have found it.
 /** Map a beneficiary status (Pending/Active/Suspended/Expired/Blocked/Inactive) → a non-color StatusKind chip. */
 const beneficiaryStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
   const k = String(s ?? "Pending");
@@ -808,16 +877,50 @@ export class HttpApiClient implements ApiClient {
       });
     });
   }
-  async checkEligibility(beneficiaryId: string) {
+  /**
+   * 32.6 — THE eligibility check, asked of eligibility-service.
+   *
+   * <p>This method used to make no network call at all. It read the reception search cache, compared
+   * `identity.status` to the string "active", and returned that as the verdict. So none of the properties
+   * eligibility-service exists to apply reached the desk: not the network tier, not the plan version in force
+   * on the service date, not the waiting period, not the remaining limits, and not the audit event — the
+   * question "who checked this beneficiary's eligibility, and what were they told?" had no answer on the
+   * chain, because as far as the platform was concerned nobody had checked anything. The screen promised a
+   * copay in its own idle text and there was no code path that could ever produce one.</p>
+   *
+   * <p><b>Two questions, each asked of the service that owns it.</b> The membership check (no category) gives
+   * the visit gate: may this person be admitted today. The benefit check (with a category) gives cover and
+   * cost share for the care they came for. They are separate because a `NeedsAuthorization` verdict on a
+   * benefit is a soft No that routes to approvals — it does not turn the person away at the door, and
+   * collapsing the two would do exactly that.</p>
+   *
+   * <p>The identity block still comes from the reception card, which is the min-necessary projection the desk
+   * is entitled to. That was never the defect; deciding eligibility from it was.</p>
+   */
+  async checkEligibility(beneficiaryId: string, benefitCategory?: string) {
     const c = receptionCards.get(String(beneficiaryId));
     const identity = c?.identity ?? {};
     const categories: string[] = c?.coverage ?? [];
     const limits: any[] = c?.remainingLimits ?? [];
     // Pick a monetary remaining-limit (annual cap) for the coverage summary, if the card carries one.
     const cap = limits.find((l) => /amount|annual/i.test(String(l.limitType)));
-    const active = String(identity.status ?? "").toLowerCase() === "active";
+
+    const membership = (await postRaw(`/eligibility/check`, { beneficiaryId })) as any;
+    const category = benefitCategory?.trim() || undefined;
+    const benefit = category
+      ? ((await postRaw(`/eligibility/check`, { beneficiaryId, benefitCategory: category })) as any)
+      : null;
+
+    // The verdict on screen is the one about the question that was actually asked.
+    const answering = benefit ?? membership;
+    const decision = String(answering?.decision ?? "");
+
     return parseOr(zEligibilityResult, {
-      verdict: statusToVerdict(identity.status),
+      verdict: decisionToVerdict(decision),
+      // From the SERVER's own label, not from whether a category happened to be passed here: a response
+      // whose scope disagrees with what we asked for is a contract breach we want to see, not paper over.
+      scope: String(membership?.decisionScope ?? "") === "Membership" && !benefit ? "membership" : "benefit",
+      benefitCategory: category ?? null,
       status: { kind: toneToKind(identity.statusSemantics?.tone), label: neutral(identity.statusSemantics?.label ?? identity.status) },
       beneficiary: {
         id: identity.beneficiaryId ?? beneficiaryId,
@@ -831,9 +934,15 @@ export class HttpApiClient implements ApiClient {
             annualCapRemaining: cap ? money(cap.remaining, "coverage.annualCapRemaining") : undefined,
           }
         : null,
-      visitGate: active
+      costShare: toCostShare(benefit?.costShare, category),
+      // THE MEMBERSHIP answer, always. Whether the person may be seen today is a question about their
+      // standing, and a benefit that needs authorisation is not a closed door.
+      visitGate: String(membership?.decision ?? "") === "Eligible"
         ? { allowed: true }
-        : { allowed: false, reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." } },
+        : {
+            allowed: false,
+            reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." },
+          },
     });
   }
 
@@ -904,6 +1013,60 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
+  // ---- 32.6 — the waiting room (emr /queues, phase 3.3) ------------------------------------------------
+  //
+  // Five endpoints that had no caller anywhere in the product for four phases, while the WRITE half of the
+  // same subsystem ran on every check-in. Nothing read the tickets and nothing cleared them.
+  //
+  // NO ARGUMENTS on the reads. The branch comes from the caller's validated active-branch claim server-side;
+  // passing one from here would be a filter the server has to re-check anyway, and a filter that looks like
+  // a permission is how a client-side narrowing gets mistaken for one.
+
+  async waitingRoom() {
+    const r = (await getRaw(`/queues`)) as any[];
+    return (r ?? []).map((t) => parseOr(zWaitingTicket, {
+      queueId: t.queueId,
+      appointmentId: t.appointmentId,
+      position: Number(t.position ?? 0),
+      // NOT defaulted to a placeholder. Check-in can be recorded without them, and a board that prints
+      // "Unknown" calls somebody who is not there.
+      memberNo: t.memberNo ?? null,
+      displayName: t.displayName ?? null,
+      appointmentType: String(t.appointmentType ?? ""),
+      state: String(t.state ?? ""),
+      waitSeconds: Number(t.waitSeconds ?? 0),
+    }));
+  }
+
+  async callNextWaiting() {
+    // 204 when nobody is waiting — an empty waiting room is an answer, not a failure, and `getRaw`/`postRaw`
+    // give back undefined for a no-content body.
+    const r = (await postRaw(`/queues/call-next`, {})) as any;
+    if (!r?.queueId) return null;
+    return parseOr(zWaitingTicket, {
+      queueId: r.queueId,
+      appointmentId: r.appointmentId,
+      position: Number(r.position ?? 0),
+      memberNo: r.memberNo ?? null,
+      displayName: r.displayName ?? null,
+      appointmentType: String(r.appointmentType ?? ""),
+      state: String(r.state ?? ""),
+      waitSeconds: Number(r.waitSeconds ?? 0),
+    });
+  }
+
+  async requeueWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/requeue`, {});
+  }
+
+  async removeWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/remove`, {});
+  }
+
+  async completeWaiting(queueId: string) {
+    await postRaw(`/queues/${encodeURIComponent(queueId)}/complete`, {});
+  }
+
   async checkIn(appointmentId: string, rowVersion?: number) {
     // Opt-in optimistic concurrency: echo the row version we read as If-Match; a stale board loses to a
     // concurrent transition with 412 (surfaced as an ApiError the desk shows) instead of double check-in.
@@ -2213,10 +2376,14 @@ export class HttpApiClient implements ApiClient {
     const o = (rows ?? []).find((x: any) => String(x.orderNo ?? "") === orderNo) ?? (rows ?? [])[0];
     if (!o) return null;
 
-    // 29.1 — READS accept BOTH spellings, and must go on doing so long after writes stopped emitting the old
-    // one: orders placed before the switch keep `Imaging` in the row for the life of the order. Narrowing
-    // this to the new value alone would silently reclassify every pre-switch radiology order as a LAB order,
-    // sending it to a bench that cannot perform it.
+    // 29.1 — READS accept BOTH spellings. Belt and braces, not a live dependency: orders 0009 rewrote every
+    // stored `Imaging` to `Radiology` in place and asserts none remain, so nothing on the wire should carry
+    // the old value today. It stays because narrowing it would silently reclassify any that did as a LAB
+    // order, sending it to a bench that cannot perform it — a failure with no error attached.
+    //
+    // 32.6 — this comment used to claim pre-switch orders keep `Imaging` "for the life of the order", which
+    // the backfill contradicts. Left uncorrected it invites the opposite mistake: a reader adding a
+    // dual-accept filter elsewhere to fix a problem that does not exist.
     const rawType = String(o.orderType ?? "").toLowerCase();
     const kind = rawType === "radiology" || rawType === "imaging" ? "radiology" : "lab";
     return parseOr(zInvestigationOrder, {
@@ -2292,8 +2459,19 @@ export class HttpApiClient implements ApiClient {
         }),
       );
   }
-  async uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string) {
-    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, { resultValue }, idempotencyKey);
+  async uploadResult(
+    orderId: string, lineId: string,
+    result: { value?: string; report?: File },
+    idempotencyKey?: string,
+  ) {
+    // Only the parts that were actually given. Sending `resultValue: ""` alongside a file would overwrite a
+    // summary a previous upload had recorded — the server writes the value only when it is non-blank, and a
+    // client that always sends the field is relying on that rather than saying what it means.
+    const fields: Record<string, string | Blob> = {};
+    if (result.value?.trim()) fields.resultValue = result.value.trim();
+    // `report` is the field name the service reads (Results.cs). The filename rides along with the Blob.
+    if (result.report) fields.report = result.report;
+    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, fields, idempotencyKey);
     return parseOr(zResultUpload, { orderId, lineId, uploaded: true });
   }
   async consume(req: ConsumeRequest) {

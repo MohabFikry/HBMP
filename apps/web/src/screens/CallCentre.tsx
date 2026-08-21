@@ -1,7 +1,7 @@
 import { memberStatus, callOutcomeLabel, callReasonLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Combobox, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, ComboboxField, Icon, InlineAlert, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
@@ -108,7 +108,37 @@ export interface CcApi {
    */
   close(interactionId: string, outcome: string, summary: string, reasonCode?: string): Promise<CcOutcome<CcCloseResult>>;
   history(): Promise<CcCallRow[]>;
+
+  /**
+   * 32.6 — correct a contact the member has just told you is wrong.
+   *
+   * <p>Both endpoints have existed since 15.4: verified-caller-only (403 + audit otherwise), value validated
+   * server-side before anything is persisted, forwarded to patient-service which owns the one-primary rule
+   * and the history, and audited with the call_ref. Nothing in the workspace called either, so the 360 listed
+   * contacts read-only — the single commonest thing a member rings to change, and the agent's only recourse
+   * was to write it in the call summary and hope somebody read it.</p>
+   */
+  updateContact(
+    interactionId: string, beneficiaryId: string, contactId: string, kind: string, value: string,
+  ): Promise<CcOutcome<CcContactResult>>;
+  /** Add a contact the member does not yet have on file. */
+  addContact(
+    interactionId: string, beneficiaryId: string, kind: string, value: string, isPrimary: boolean,
+  ): Promise<CcOutcome<CcContactResult>>;
 }
+
+/**
+ * 32.6 — the outcome of a contact correction.
+ *
+ * <p>`invalid` is the server's 422 and is a correctable typo, not a failure: the agent has the member on the
+ * phone and can read the number back. `not-verified` is its 403 and means something else entirely — the call
+ * is not bound to this member, so the fix is to open their file, not to retype the value. Collapsing the two
+ * into "error" would tell an agent to retype a number that was never the problem.</p>
+ */
+export type CcContactResult = "ok" | "invalid" | "not-verified" | "error";
+
+/** The contact kinds the call centre may edit — `ContactValidation.EditableKinds`, server-side. */
+export const CC_CONTACT_KINDS = ["Phone", "Mobile", "Email", "Address"] as const;
 
 /** Who rang whom. Recorded on the interaction when it opens. */
 export type CcDirection = "Inbound" | "Outbound";
@@ -241,6 +271,19 @@ function verdict<K extends string>(kind: K, body?: unknown): CcOutcome<K> {
 const bookingKey = (interactionId: string, beneficiaryId: string, slotId: string) =>
   `cc-book:${interactionId}:${beneficiaryId}:${slotId}`;
 
+/**
+ * 32.6 — map a contact write's status to a verdict the agent can act on.
+ *
+ * <p>Three outcomes, deliberately not two. 422 is the value; 403 is the call. An agent told "that didn't
+ * work" for the second one retypes a number that was never wrong.</p>
+ */
+function contactVerdict(status: number, body?: unknown): CcOutcome<CcContactResult> {
+  if (status >= 200 && status < 300) return verdict("ok");
+  if (status === 422) return verdict("invalid");
+  if (status === 403) return verdict("not-verified");
+  return verdict("error", body);
+}
+
 /** The live gateway-backed implementation (used in the app; tests inject a fake instead). */
 export function createHttpCcApi(): CcApi {
   return {
@@ -336,6 +379,16 @@ export function createHttpCcApi(): CcApi {
     async history() {
       const r = await req<{ items: CcCallRow[] }>("GET", "/call-interactions");
       return r.data?.items ?? [];
+    },
+    async updateContact(interactionId, beneficiaryId, contactId, kind, value) {
+      const r = await req("PATCH", `/call-centre/members/${beneficiaryId}/contacts/${contactId}`,
+        { interactionId, kind, value });
+      return contactVerdict(r.status, r.data);
+    },
+    async addContact(interactionId, beneficiaryId, kind, value, isPrimary) {
+      const r = await req("POST", `/call-centre/members/${beneficiaryId}/contacts`,
+        { interactionId, kind, value, isPrimary });
+      return contactVerdict(r.status, r.data);
     },
   };
 }
@@ -657,10 +710,26 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   <ul>{summary.coverage.map((c) => <li key={c.category}>{c.category}: {c.remainingLimit ?? "—"} / {c.annualLimit ?? "—"}</li>)}</ul>
                 </section>
 
-                <section aria-label={t(L.ccContacts)}>
-                  <h3>{t(L.ccContacts)}</h3>
-                  <ul>{summary.contacts.map((c) => <li key={c.contactId}>{t(identifierTypeLabel(c.kind))}: {c.value}{c.isPrimary ? " ★" : ""}</li>)}</ul>
-                </section>
+                {/* 32.6 — EDITABLE. Design 11 §3.1 gives the call centre `U🟠(contact, CVP)`, the endpoints
+                    have existed since 15.4 behind the verification gate, and the workspace listed contacts
+                    read-only — so "my number changed" was the commonest reason to ring and the one thing an
+                    agent could not act on. */}
+                <ContactsSection
+                  contacts={summary.contacts}
+                  beneficiaryId={openedFor.beneficiaryId}
+                  interactionId={interactionId ?? ""}
+                  api={api}
+                  t={t}
+                  onChanged={async () => {
+                    const s = interactionId
+                      ? await api.summary(openedFor.beneficiaryId, interactionId).catch(() => null)
+                      : null;
+                    // RE-READ, never patch the row locally. patient-service owns the one-primary rule: an
+                    // added primary demotes the incumbent, and a screen that edited its own copy would show
+                    // two stars until the next reload.
+                    if (s) setSummary(s);
+                  }}
+                />
 
                 <section aria-label={t(L.ccAppointments)}>
                   <h3>{t(L.ccAppointments)}</h3>
@@ -825,6 +894,161 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
 }
 
 /** Phase 15.5 — the agent's own call history (supervisors see the team, server-side). */
+/**
+ * 32.6 — the member's contacts, and correcting one on the call (design 11 §3.1, endpoints from 15.4).
+ *
+ * <p><b>Nothing is decided here.</b> Whether the value is well formed is the service's answer (422), whether
+ * this call may change it is the service's answer (403), and which contact is primary is patient-service's —
+ * so after every write the file is re-read rather than patched locally. A screen that demoted the incumbent
+ * primary in its own copy would be reimplementing a rule it does not own, and would be wrong the first time
+ * the rule changed.</p>
+ *
+ * <p>The two refusals are told apart on purpose. "That is not a valid phone number" sends the agent back to
+ * the member to read it again; "this call is not open on their file" is about the call, and retyping the
+ * number will never fix it.</p>
+ */
+function ContactsSection({
+  contacts, beneficiaryId, interactionId, api, t, onChanged,
+}: {
+  contacts: CcContact[];
+  beneficiaryId: string;
+  interactionId: string;
+  api: CcApi;
+  t: (l: { en: string; ar: string }) => string;
+  onChanged: () => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newKind, setNewKind] = useState<string | null>(null);
+  const [newValue, setNewValue] = useState("");
+  const [newPrimary, setNewPrimary] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+
+  function report(r: CcOutcome<CcContactResult>, okText: string) {
+    if (r.kind === "ok") { setMessage({ tone: "ok", text: okText }); return true; }
+    setMessage({
+      tone: "bad",
+      text: r.kind === "invalid" ? t(L.ccContactInvalid)
+        : r.kind === "not-verified" ? t(L.ccContactNotVerified)
+        : withReason(t(L.ccContactFailed), r),
+    });
+    return false;
+  }
+
+  async function save(c: CcContact) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await api.updateContact(interactionId, beneficiaryId, c.contactId, c.kind, draft.trim());
+      if (report(r, t(L.ccContactSaved))) {
+        setEditing(null);
+        setDraft("");
+        await onChanged();
+      }
+    } finally { setBusy(false); }
+  }
+
+  async function add() {
+    if (!newKind) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await api.addContact(interactionId, beneficiaryId, newKind, newValue.trim(), newPrimary);
+      if (report(r, t(L.ccContactAdded))) {
+        setAdding(false);
+        setNewKind(null);
+        setNewValue("");
+        setNewPrimary(false);
+        await onChanged();
+      }
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section aria-label={t(L.ccContacts)}>
+      <h3>{t(L.ccContacts)}</h3>
+      <ul>
+        {contacts.map((c) => (
+          <li key={c.contactId}>
+            {editing === c.contactId ? (
+              <>
+                <InputField
+                  label={`${t(identifierTypeLabel(c.kind))} — ${t(L.ccContactValue)}`}
+                  value={draft}
+                  onChange={(e) => setDraft(e.currentTarget.value)}
+                />
+                <Button variant="primary" size="sm" loading={busy} onClick={() => void save(c)}>
+                  {t(L.ccSaveContact)}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => { setEditing(null); setMessage(null); }}>
+                  {t(L.ccCancelEdit)}
+                </Button>
+              </>
+            ) : (
+              <>
+                {t(identifierTypeLabel(c.kind))}: {c.value}{c.isPrimary ? " ★" : ""}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  // Named for the contact, not just "Correct": a screen-reader user hearing five identical
+                  // buttons in a row has no way to tell which one edits the phone number.
+                  aria-label={`${t(L.ccEditContact)} — ${t(identifierTypeLabel(c.kind))}`}
+                  onClick={() => { setEditing(c.contactId); setDraft(c.value); setMessage(null); }}
+                >
+                  {t(L.ccEditContact)}
+                </Button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {adding ? (
+        <div className="stack">
+          <ComboboxField
+            label={t(L.ccContactKind)}
+            options={CC_CONTACT_KINDS.map((k) => ({ value: k, label: t(identifierTypeLabel(k)) }))}
+            value={newKind}
+            onChange={(v) => setNewKind(v || null)}
+          />
+          <InputField
+            label={t(L.ccContactValue)}
+            value={newValue}
+            onChange={(e) => setNewValue(e.currentTarget.value)}
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={newPrimary}
+              onChange={(e) => setNewPrimary(e.currentTarget.checked)}
+            />{" "}
+            {t(L.ccContactPrimary)}
+          </label>
+          <div>
+            <Button variant="primary" size="sm" loading={busy} disabled={!newKind || newValue.trim() === ""}
+              onClick={() => void add()}>
+              {t(L.ccSaveContact)}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { setAdding(false); setMessage(null); }}>
+              {t(L.ccCancelEdit)}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="ghost" size="sm" leadingIcon={<Icon name="plus" />} onClick={() => { setAdding(true); setMessage(null); }}>
+          {t(L.ccAddContact)}
+        </Button>
+      )}
+
+      <div aria-live="polite">
+        {message && <InlineAlert tone={message.tone}>{message.text}</InlineAlert>}
+      </div>
+    </section>
+  );
+}
+
 export function CallHistory({ api = defaultCcApi }: { api?: CcApi }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();

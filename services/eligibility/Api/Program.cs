@@ -73,8 +73,42 @@ v1.MapPost("/check", async (
     EligibilityDbContext db, HttpContext http,
     IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
+    // 32.6 — NO CATEGORY IS A QUESTION, not a malformed request.
+    //
+    // This used to be a 400, and the consequence was not that callers supplied one: the reception desk
+    // stopped calling this endpoint altogether and computed its own verdict in the browser from a cached
+    // member status. Every property this service exists to apply — the tier, the plan version in force on the
+    // service date, the waiting period, the limits, the audit event — was simply absent from the answer a
+    // beneficiary was given at the desk, and nothing anywhere recorded that the check had happened.
+    //
+    // So the category-less question is answered, at MEMBERSHIP scope, with the answer labelled as such and no
+    // cost share attached. The audit below fires either way, which is the point: a check that happened is on
+    // the chain whether or not the desk knew what care was coming.
     if (string.IsNullOrWhiteSpace(req.BenefitCategory))
-        return Results.Problem(statusCode: 400, title: "benefitCategory is required");
+    {
+        var membership = await checker.CheckMembershipAsync(req.BeneficiaryId, ct);
+
+        await audit.EmitAsync(new AuditEventDraft
+        {
+            EntityType = "eligibility", EntityId = req.BeneficiaryId.ToString(),
+            Action = AuditAction.Read, ActorUserId = me.Principal?.Subject,
+            DecisionOutcome = membership.Result.Decision.ToString(),
+            DecisionReasonCode = "membership-scope",
+            FieldClasses = ["coverage", "eligibility"],
+        }, ct);
+
+        return Results.Ok(EligibilityCheckResponse.From(
+            membership.Result, membership.ExpiresAt, membership.FromCache,
+            // NOT a null cost share dressed as an absent one: the desk is told WHY there is no number, so
+            // "no copay shown" cannot be read as "no copay due".
+            new CostSharePreviewResponse(
+                null, null, IsCoveredAtTier: false, RequiresPreauthAtTier: false,
+                Determinate: false,
+                Reason: "No benefit category was named, so no cost share could be quoted. This is NOT a "
+                      + "report that the member pays nothing.",
+                null, null, null, null, false, null, null, null),
+            EligibilityDecisionScope.Membership));
+    }
 
     // 19.1b — resolve the tier FIRST, because the tier can make a service gated that is open-access
     // elsewhere (requires_preauth_override). That has to reach the decision, not just the preview: showing a

@@ -82,7 +82,7 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
             s.RemoveAll<IPractitionerBranchDirectory>();
             s.AddSingleton<IPractitionerBranchDirectory>(new FakePractitionerBranches(this));
             s.RemoveAll<IBranchDirectory>();
-            s.AddSingleton<IBranchDirectory>(new NoBranchRestriction());
+            s.AddSingleton<IBranchDirectory>(new TestBranchDirectory(this));
 
             // The branch-revoked consumer listens on a broker that is not running here, and the reminder
             // sweep writes to the tables the assertions read.
@@ -96,6 +96,11 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
         Outbox = (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
         return c;
     }
+
+    /// <summary>32.6 — the branch this factory's callers are assigned to, or null for "no assignment".
+    /// A BranchScoped caller with none is narrowed to an empty set and sees nothing, which is correct and is
+    /// why a test that wants a desk with a waiting room has to name one.</summary>
+    public Guid? HomeBranch { get; set; }
 
     /// <summary>Reception: books, reschedules, cancels, checks in. No clinical write.</summary>
     public HttpClient ReceptionClient(string? displayName = null) => As(EmrTestAuth.ReceptionSub, "reception",
@@ -160,10 +165,23 @@ internal sealed class FakePractitionerBranches(EmrApiFactory f) : IPractitionerB
             f.DoctorLicenceExpiry));
 }
 
-internal sealed class NoBranchRestriction : IBranchDirectory
+/// <summary>
+/// The caller's branch entitlements.
+///
+/// <para>32.6 — this was <c>NoBranchRestriction</c>, which returned <see cref="PermittedBranches.None"/> for
+/// everybody. The name said "no restriction"; the behaviour was the opposite — a BranchScoped caller resolved
+/// to an EMPTY permitted set, so every branch-narrowed read returned nothing whatever was in the table. No
+/// test could exercise a branch-scoped read at all, and one that tried would look like a query bug.</para>
+///
+/// <para>It still grants nothing by default, so existing tests are unaffected. A test that needs a desk with
+/// a branch sets <see cref="EmrApiFactory.HomeBranch"/>.</para>
+/// </summary>
+internal sealed class TestBranchDirectory(EmrApiFactory f) : IBranchDirectory
 {
     public Task<PermittedBranches> GetAsync(HbmpPrincipal principal, CancellationToken ct = default)
-        => Task.FromResult(PermittedBranches.None);
+        => Task.FromResult(f.HomeBranch is { } home
+            ? new PermittedBranches(home, new HashSet<Guid> { home })
+            : PermittedBranches.None);
 }
 
 /// <summary>Builds a principal from X-Test-* headers; the house shape.</summary>

@@ -78,6 +78,7 @@ import {
   zStatusChangeResult,
   type RegisterBeneficiaryInput,
   zCheckInResult,
+  zWaitingTicket,
   zOrderRow,
   zRxRow,
   zResultDetail,
@@ -711,10 +712,21 @@ export class DevApiClient implements ApiClient {
       all.filter((h) => h.name.en.toLowerCase().includes(q) || h.id.toLowerCase().includes(q) || q.length >= 2),
     );
   }
-  checkEligibility(beneficiaryId: string) {
+  /**
+   * 32.6 — the two scopes, both present in the fixture.
+   *
+   * <p>A fixture that always quoted a copay is part of why the real client's missing one went unnoticed for
+   * so long: the dev portal showed "10%" on a code path that could not produce a number against the service.
+   * So the no-category case here returns an explicitly UNKNOWN cost share carrying its reason, and only the
+   * category case quotes.</p>
+   */
+  checkEligibility(beneficiaryId: string, benefitCategory?: string) {
+    const category = benefitCategory?.trim() || undefined;
     return this.gate(() =>
       ok(zEligibilityResult, {
         verdict: "eligible",
+        scope: category ? "benefit" : "membership",
+        benefitCategory: category ?? null,
         status: { kind: "ok", label: loc("Eligible", "مؤهل") },
         beneficiary: {
           id: beneficiaryId,
@@ -727,9 +739,18 @@ export class DevApiClient implements ApiClient {
           planName: loc("Mersal Essential", "مرسال الأساسية"),
           band: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
           validUntil: "2026-12-31",
-          copayPercent: 10,
           annualCapRemaining: 8400,
         },
+        costShare: category
+          ? { known: true, tierCode: "IN", copayPercent: 10, copayFixed: null, coinsurancePercent: null }
+          : {
+              known: false,
+              why: loc(
+                "No benefit category was chosen, so no copay can be quoted. This is not a report that the "
+                  + "member pays nothing.",
+                "لم تُختَر فئة منفعة، لذا لا يمكن تحديد المساهمة. وهذا ليس تأكيداً بأن المستفيد لا يدفع شيئاً.",
+              ),
+            },
         visitGate: { allowed: true },
       }),
     );
@@ -905,6 +926,48 @@ export class DevApiClient implements ApiClient {
   checkIn(appointmentId: string, _rowVersion?: number) {
     void _rowVersion; // fixture path applies no concurrency guard; the live client echoes it as If-Match.
     return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "ok", label: loc("Checked in", "تم الوصول") } }));
+  }
+
+  // ---- 32.6 — the waiting room ------------------------------------------
+  //
+  // The fixture carries a ticket with NO NAME on purpose. Check-in can be recorded without one, and a board
+  // that quietly prints "Unknown" in that slot calls somebody who is not there; a fixture where every row is
+  // named would never exercise the branch that has to say so.
+  private waitingTickets = [
+    { queueId: "q-1", appointmentId: "appt-2", position: 1, memberNo: "MRS-M-2026-000009", displayName: "Amal Hassan", appointmentType: "FollowUp", state: "Waiting", waitSeconds: 1140 },
+    { queueId: "q-2", appointmentId: "appt-3", position: 2, memberNo: "MRS-M-2026-000031", displayName: null, appointmentType: "Consultation", state: "Waiting", waitSeconds: 420 },
+  ];
+
+  waitingRoom() {
+    return this.gate(() => ok(z.array(zWaitingTicket), this.waitingTickets), []);
+  }
+
+  callNextWaiting() {
+    return this.gate(() => {
+      const head = this.waitingTickets[0];
+      // An empty waiting room is an ANSWER. The service returns 204 and the client maps it to null; a
+      // fixture that threw here would make the honest case look like a fault.
+      if (!head) return null;
+      this.waitingTickets = this.waitingTickets.slice(1).map((t, i) => ({ ...t, position: i + 1 }));
+      return ok(zWaitingTicket, { ...head, state: "InConsultation", position: 0 });
+    });
+  }
+
+  requeueWaiting(queueId: string) {
+    return this.gate(() => { void queueId; return undefined as void; });
+  }
+
+  removeWaiting(queueId: string) {
+    return this.gate(() => {
+      this.waitingTickets = this.waitingTickets
+        .filter((t) => t.queueId !== queueId)
+        .map((t, i) => ({ ...t, position: i + 1 }));
+      return undefined as void;
+    });
+  }
+
+  completeWaiting(queueId: string) {
+    return this.gate(() => { void queueId; return undefined as void; });
   }
 
   // ---- Booking -----------------------------------------------------------
@@ -1840,11 +1903,14 @@ export class DevApiClient implements ApiClient {
   // refuses a single identifier, and a replayed session key returns the same progress rather than a second one.
   private procedureSessions = new Map<string, number>();
   private procedureSeenKeys = new Set<string>();
+  /** orderId → when the loop was closed. Dev-only, so the counter can show "reported" after it reports. */
+  private procedureReports = new Map<string, string>();
 
   private procedureFixture() {
     return [
       {
-        orderId: "ord-proc-1", orderNo: "ORD-2026-000901", orderType: "Procedure", status: "Active",
+        orderId: "ord-proc-1", orderLineId: "ord-proc-1-line-1",
+        orderNo: "ORD-2026-000901", orderType: "Procedure", status: "Active",
         beneficiaryId: "ben-1", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
         codeSystem: "CPT", code: "97110", description: "Therapeutic exercise",
         procedureTypeCode: "Physiotherapy",
@@ -1853,7 +1919,8 @@ export class DevApiClient implements ApiClient {
         sharedClinicalContext: "Post-op knee rehabilitation, ACL repair 12 Feb.",
       },
       {
-        orderId: "ord-proc-2", orderNo: "ORD-2026-000902", orderType: "Procedure", status: "Active",
+        orderId: "ord-proc-2", orderLineId: "ord-proc-2-line-1",
+        orderNo: "ORD-2026-000902", orderType: "Procedure", status: "Active",
         beneficiaryId: "ben-2", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
         codeSystem: "CPT", code: "90935", description: "Haemodialysis",
         procedureTypeCode: "Dialysis",
@@ -1867,6 +1934,7 @@ export class DevApiClient implements ApiClient {
       ...o,
       sessionsRemaining: Math.max(0, o.sessionsAuthorised - o.sessionsDelivered),
       progressLabel: `${o.sessionsDelivered} of ${o.sessionsAuthorised} sessions delivered`,
+      completionReportedAt: this.procedureReports.get(o.orderId) ?? null,
     }));
   }
 
@@ -1980,7 +2048,8 @@ export class DevApiClient implements ApiClient {
       if (findings.trim() === "") {
         throw new ApiError("http", "report-required", 422, { type: "urn:hbmp:report-required" });
       }
-      void orderId;
+      // 32.6 — recorded, so the counter can show the loop closed rather than offering to close it again.
+      this.procedureReports.set(orderId, new Date().toISOString());
       return undefined as void;
     });
   }
@@ -2303,9 +2372,16 @@ export class DevApiClient implements ApiClient {
       [],
     );
   }
-  uploadResult(orderId: string, lineId: string, resultValue: string) {
-    void resultValue;
-    return this.gate(() => ok(zResultUpload, { orderId, lineId, uploaded: true }));
+  uploadResult(orderId: string, lineId: string, result: { value?: string; report?: File }) {
+    return this.gate(() => {
+      // 32.6 — the service's rule, mirrored: a summary and/or a file, and refusing only when neither came.
+      // A dev client that accepted an empty upload would make the one case the screen has to prevent
+      // untestable against the fixture.
+      if (!result.value?.trim() && !result.report) {
+        throw new ApiError("http", "empty-result", 400, { type: "urn:hbmp:empty-result" });
+      }
+      return ok(zResultUpload, { orderId, lineId, uploaded: true });
+    });
   }
 
   searchDrugs(query: string) {

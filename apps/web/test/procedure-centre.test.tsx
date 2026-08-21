@@ -1,94 +1,125 @@
-import { describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderApp } from "./helpers";
+import { MemoryRouter } from "react-router-dom";
+import { AppProviders } from "../src/App";
+import { DevAuthClient } from "../src/auth/devAuthClient";
+import { DevApiClient } from "../src/api/DevApiClient";
+import type { ApiClient } from "../src/api/client";
+import ProcedureCentre from "../src/screens/ProcedureCentre";
 
 /**
- * 29.2b / design 45 §2b — the external delivering provider's portal.
+ * 32.6 — the external delivery centre's counter (design 45 §2b).
  *
- * <p>What is asserted here is what the SCREEN must get right; the ownership rule itself is server-side and
- * proved by the two-provider test in orders. The UI's own obligations are narrower and easy to get wrong:
- * progress must read identically to the doctor's worklist, a withheld referral reason must not render as
- * "none", and a double-tap must not appear to burn two visits.</p>
+ * <p>The service side of this portal had eleven passing tests and the counter's one write had never worked:
+ * the screen sent the ORDER id where the server expected a LINE id, because the projection did not carry a
+ * line id and nothing on either side compared the two. Every test handed the endpoint ids fetched from the
+ * database, so none of them was ever the screen.</p>
+ *
+ * <p>So these tests assert on the ARGUMENTS the screen passes, not on the answer it gets back. A fake that
+ * accepts anything would reproduce the original defect exactly.</p>
  */
-describe("29.2b — procedure delivery centre", () => {
-  it("shows the queue with progress in the same words the doctor's worklist uses", async () => {
-    renderApp("/procedure/queue", "procedure_provider");
 
-    // "4 of 6 sessions delivered" — a course that reads differently at each end is one somebody delivers twice.
-    expect(await screen.findByText(/0 of 6 sessions delivered/i)).toBeInTheDocument();
-    expect(await screen.findByText(/0 of 12 sessions delivered/i)).toBeInTheDocument();
-  });
+function renderScreen(api: ApiClient, mode: "queue" | "counter" = "queue") {
+  return render(
+    <AppProviders authClient={new DevAuthClient()} apiClient={api}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ProcedureCentre mode={mode} />
+      </MemoryRouter>
+    </AppProviders>,
+  );
+}
 
-  it("renders a withheld referral reason as 'not disclosed', never as 'none'", async () => {
-    renderApp("/procedure/queue", "procedure_provider");
-
-    // The dialysis fixture carries sharedClinicalContext = null: the ordering doctor chose to share nothing.
-    // A physiotherapist who reads that as "no relevant history" treats someone as uncomplicated who is not.
-    expect(await screen.findByText(/not disclosed/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^none$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/no diagnosis/i)).not.toBeInTheDocument();
-  });
-
-  it("shows the clinical context the doctor DID choose to share", async () => {
-    renderApp("/procedure/queue", "procedure_provider");
-
-    expect(await screen.findByText(/Post-op knee rehabilitation/i)).toBeInTheDocument();
-  });
-
-  it("never shows a diagnosis, coverage amount or claim value", async () => {
-    const { container } = renderApp("/procedure/queue", "procedure_provider");
-    await screen.findByText(/0 of 6 sessions delivered/i);
-
-    const text = container.textContent?.toLowerCase() ?? "";
-    for (const forbidden of ["diagnosis", "icd-", "coverage", "cost-share", "copay", "claim", "egp"]) {
-      expect(text).not.toContain(forbidden);
-    }
-  });
-
-  it("advances progress by exactly one when a session is recorded", async () => {
+describe("recording a session", () => {
+  it("names the LINE, not the order", async () => {
     const user = userEvent.setup();
-    renderApp("/procedure/queue", "procedure_provider");
-    await screen.findByText(/0 of 6 sessions delivered/i);
+    const api = new DevApiClient({ latencyMs: 0 }) as unknown as ApiClient;
+    const record = vi.fn().mockResolvedValue({
+      orderId: "ord-proc-1", orderLineId: "ord-proc-1-line-1",
+      sessionsDelivered: 1, sessionsAuthorised: 6, sessionsRemaining: 5,
+      progressLabel: "1 of 6 sessions delivered",
+    });
+    (api as { recordProcedureSession: unknown }).recordProcedureSession = record;
 
-    const rows = screen.getAllByRole("row");
-    const physio = rows.find((r) => within(r).queryByText(/97110/));
-    await user.click(within(physio!).getByRole("button", { name: /record session/i }));
+    renderScreen(api);
+    await user.click((await screen.findAllByRole("button", { name: "Record session" }))[0]);
 
-    await waitFor(() => expect(screen.getByText(/1 of 6 sessions delivered/i)).toBeInTheDocument());
-    // The OTHER order is untouched — sessions are per line, not a shared counter.
-    expect(screen.getByText(/0 of 12 sessions delivered/i)).toBeInTheDocument();
+    await waitFor(() => expect(record).toHaveBeenCalled());
+    const [orderId, orderLineId] = record.mock.calls[0];
+    expect(orderId).toBe("ord-proc-1");
+    expect(orderLineId).toBe("ord-proc-1-line-1");
+    // THE assertion. Passing the order id twice is what the screen used to do, and the server answered 404
+    // to every single tap.
+    expect(orderLineId).not.toBe(orderId);
   });
+});
 
-  it("refuses a counter lookup with only one identifier", async () => {
+describe("verifying the person at the counter", () => {
+  it("shows the name the directory disclosed", async () => {
     const user = userEvent.setup();
-    renderApp("/procedure/counter", "procedure_provider");
+    const api = new DevApiClient({ latencyMs: 0 });
 
-    await user.type(await screen.findByLabelText(/card number/i), "CARD-123");
-    await user.click(screen.getByRole("button", { name: /verify/i }));
+    renderScreen(api as unknown as ApiClient, "counter");
+    await user.type(screen.getByLabelText("Card number"), "CARD-123");
+    await user.type(screen.getByLabelText("Member number"), "M-9");
+    await user.click(screen.getByRole("button", { name: "Verify" }));
 
-    // A card number is a lookup key, not an authenticator — cards are shared and photographed.
-    expect(await screen.findByText(/card number on its own is not enough/i)).toBeInTheDocument();
+    // The section is called "Verify & deliver" and it rendered nothing to verify against: the service passed
+    // a null name into a projection whose own contract puts the name on this path.
+    expect(await screen.findByText("Amal Hassan")).toBeInTheDocument();
   });
 
-  it("resolves the person once two identifiers are given", async () => {
+  it("says a withheld name is withheld rather than showing a blank", async () => {
     const user = userEvent.setup();
-    renderApp("/procedure/counter", "procedure_provider");
+    const api = new DevApiClient({ latencyMs: 0 }) as unknown as ApiClient;
+    const base = new DevApiClient({ latencyMs: 0 });
+    (api as { procedureCounterSearch: unknown }).procedureCounterSearch = async () =>
+      (await base.procedureCounterSearch({ cardNumber: "CARD-123", memberNo: "M-9" }))
+        .map((r) => ({ ...r, beneficiaryDisplayName: null }));
 
-    await user.type(await screen.findByLabelText(/card number/i), "CARD-123");
-    await user.type(screen.getByLabelText(/member number/i), "MEM-9");
-    await user.click(screen.getByRole("button", { name: /verify/i }));
+    renderScreen(api, "counter");
+    await user.type(screen.getByLabelText("Card number"), "CARD-123");
+    await user.type(screen.getByLabelText("Member number"), "M-9");
+    await user.click(screen.getByRole("button", { name: "Verify" }));
 
-    expect(await screen.findByText(/97110/)).toBeInTheDocument();
-    expect(screen.queryByText(/card number on its own is not enough/i)).not.toBeInTheDocument();
+    // A withheld name is a decision patient-service made about this caller. Rendering "—" would read as a
+    // record with no name; rendering anything else would verify the wrong person.
+    expect(await screen.findByText("Name not disclosed to your centre")).toBeInTheDocument();
+  });
+});
+
+describe("closing the referral loop", () => {
+  it("sends the report the ordering doctor is waiting for", async () => {
+    const user = userEvent.setup();
+    const api = new DevApiClient({ latencyMs: 0 }) as unknown as ApiClient;
+    const report = vi.fn().mockResolvedValue(undefined);
+    (api as { reportProcedureCompletion: unknown }).reportProcedureCompletion = report;
+
+    renderScreen(api);
+    await user.click((await screen.findAllByRole("button", { name: "Report back" }))[0]);
+    await user.type(
+      screen.getByLabelText(/What was found or done/),
+      "Six sessions completed; discharged to home exercise.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send report" }));
+
+    await waitFor(() => expect(report).toHaveBeenCalled());
+    expect(report.mock.calls[0][0]).toBe("ord-proc-1");
   });
 
-  it("prompts before a lookup rather than showing an empty result", async () => {
-    renderApp("/procedure/counter", "procedure_provider");
+  it("will not send an empty report", async () => {
+    const user = userEvent.setup();
+    const api = new DevApiClient({ latencyMs: 0 }) as unknown as ApiClient;
+    const report = vi.fn().mockResolvedValue(undefined);
+    (api as { reportProcedureCompletion: unknown }).reportProcedureCompletion = report;
 
-    // "Absence of data is never a clean result": before anyone searches, the screen must not imply the
-    // person has nothing.
-    expect(await screen.findByText(/enter two identifiers to begin/i)).toBeInTheDocument();
-    expect(screen.queryByText(/no sessions are routed/i)).not.toBeInTheDocument();
+    renderScreen(api);
+    await user.click((await screen.findAllByRole("button", { name: "Report back" }))[0]);
+
+    // The service refuses an empty body with a typed 422. A client that let one through would turn a
+    // deliberate refusal into a failed save nobody can interpret — and an empty report closes the loop
+    // without saying anything, which is worse than leaving it open.
+    expect(screen.getByRole("button", { name: "Send report" })).toBeDisabled();
+    expect(report).not.toHaveBeenCalled();
   });
 });

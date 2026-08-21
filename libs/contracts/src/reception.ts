@@ -7,6 +7,32 @@ import { zDate, zId, zInstant, zStatus, zPatientRef } from "./common";
  * status is pre-resolved to a non-color StatusChip kind (accessibility: hue + text). `checkInEligible` tells
  * the desk which rows can be checked in without the screen re-deriving the state machine.
  */
+/**
+ * 32.6 — one person in the waiting room (design 14 §3.3 / emr `GET /queues`).
+ *
+ * <p>The MINIMUM-NECESSARY ticket, and the shape is the guarantee: there is nowhere here to put a diagnosis,
+ * a reason for visit or a note. A waiting-room board hangs where everybody in the room can read it.</p>
+ *
+ * <p>Distinct from `AppointmentRow`, which is the day's SCHEDULE. The board answers "who is in the building
+ * and in what order", which is a different question from "who is expected today" and has a different answer
+ * the moment somebody walks in early, is triaged urgent, or is sent back to wait.</p>
+ */
+export const zWaitingTicket = z.object({
+  queueId: zId,
+  appointmentId: zId,
+  /** Call order — 1 is next. Computed server-side from priority then arrival, never re-sorted here. */
+  position: z.number().int(),
+  /** Both optional: check-in may be recorded without them, and an invented name calls the wrong person. */
+  memberNo: z.string().nullable().optional(),
+  displayName: z.string().nullable().optional(),
+  appointmentType: z.string(),
+  /** "Waiting" | "InConsultation" | "Done" | "Removed", as the emr enum names them. */
+  state: z.string(),
+  /** How long they have been waiting, in seconds. Formatted at render, in the reader's locale. */
+  waitSeconds: z.number().int(),
+});
+export type WaitingTicket = z.infer<typeof zWaitingTicket>;
+
 export const zAppointmentRow = z.object({
   id: zId,
   beneficiary: zPatientRef,

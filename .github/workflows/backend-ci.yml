@@ -309,6 +309,19 @@ jobs:
           python3 tools/ci/check-tenant-isolation.py --selftest
           python3 tools/ci/check-tenant-isolation.py
 
+      # 2026-08-21 — the sibling of the fuzzer above, asking a different question. That one proves a tenant
+      # cannot see ANOTHER tenant's rows; this one proves every row belongs to a tenant at all. The second
+      # fails silently in a way the first cannot detect: a row written with tenant_id = '' is hidden by RLS
+      # from every real tenant, so the fuzzer reports the table as perfectly isolated while the person the
+      # row is about has vanished from the product.
+      - name: "gate: tenant-stamping census (no row belongs to nobody)"
+        id: gate_tenant_stamping
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-tenant-stamping.py --selftest
+          python3 tools/ci/check-tenant-stamping.py
+
       # 24.1 — the quietest gate in the file. Every DB-gated test answers Skip.If(<SERVICE>_TEST_DB is null),
       # so if this step fails the ~100 concurrency, RLS-isolation and break-glass proofs SKIP and the suite
       # still reports green — CLAUDE.md's "a green suite is only meaningful with this flag", inverted. It was
@@ -462,6 +475,7 @@ jobs:
             build=${{ steps.gate_build.outcome }}
             apply-migrations=${{ steps.gate_apply_migrations.outcome }}
             tenant-isolation=${{ steps.gate_tenant_isolation.outcome }}
+            tenant-stamping=${{ steps.gate_tenant_stamping.outcome }}
             test-db-env=${{ steps.gate_test_db_env.outcome }}
             tests=${{ steps.gate_tests.outcome }}
             skipped-tests=${{ steps.gate_skipped_tests.outcome }}

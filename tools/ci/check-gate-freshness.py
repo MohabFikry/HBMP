@@ -85,6 +85,13 @@ REQUIRED_GATES = [
     # the argument for listing every gate rather than only the ones in tools/ci/.
     "secret-scan",
     "sca-sast-image",
+    # 2026-08-21 — the tenant-stamping census, the sibling of tenant-isolation. Listed here for the reason
+    # every gate above it is, and this one has the cleanest example: an unstamped row is INVISIBLE. RLS hides
+    # `tenant_id = ''` from every real tenant, so the isolation fuzzer beside it reports the table as
+    # perfectly isolated while the row it is about has vanished from the product. Sixty prescriptions and a
+    # queue ticket were found that way, by hand, by somebody who happened to look. If this stopped running,
+    # nothing anywhere would go red — which is exactly the shape this file was written for.
+    "tenant-stamping",
 ]
 
 

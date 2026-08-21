@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, DataTableView, Icon, InlineAlert, KpiCard, useTableQuery } from "@mersal/design-system";
+import { Button, Card, DataTableView, Icon, InlineAlert, KpiCard, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
-import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
+import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty, WaitingTicket } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { useFormat } from "../i18n/useFormat";
 import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
 import { AppointmentNoteButton } from "./AppointmentNote";
+import { ConfirmAction } from "./ConfirmAction";
 import { patientColumn } from "./booking/appointmentColumns";
 
 const S = {
@@ -44,6 +45,42 @@ const S = {
 
   calendarHeading: { en: "Schedule", ar: "الجدول" },
   calendarEmpty: { en: "No appointments booked for this day.", ar: "لا توجد مواعيد محجوزة في هذا اليوم." },
+
+  // ---- 32.6 — the waiting room ----
+  waitingHeading: { en: "Waiting room", ar: "غرفة الانتظار" },
+  waitingEmpty: { en: "Nobody is waiting.", ar: "لا أحد في الانتظار." },
+  wPosition: { en: "#", ar: "#" },
+  wPatient: { en: "Patient", ar: "المريض" },
+  wType: { en: "Type", ar: "النوع" },
+  wWaiting: { en: "Waiting", ar: "مدة الانتظار" },
+  wActions: { en: "Actions", ar: "إجراءات" },
+  wNoName: { en: "Name not recorded", ar: "الاسم غير مسجَّل" },
+  wNoNameHint: {
+    en: "This person was checked in without a name. Their member number is the only thing to call them by.",
+    ar: "سُجِّل وصول هذا الشخص دون اسم. رقم العضوية هو الوسيلة الوحيدة لمناداته.",
+  },
+  callNext: { en: "Call next", ar: "نادِ التالي" },
+  calling: { en: "Calling…", ar: "جارٍ المناداة…" },
+  called: { en: "Called", ar: "تمت المناداة" },
+  nobodyWaiting: { en: "Nobody is waiting to be called.", ar: "لا أحد ينتظر المناداة." },
+  requeue: { en: "Send back", ar: "إعادة للانتظار" },
+  removeTicket: { en: "Remove", ar: "إزالة" },
+  removeTitle: { en: "Remove from the waiting room?", ar: "إزالة من غرفة الانتظار؟" },
+  removeBody: {
+    en: "They stop being in the queue. If they are still in the building nobody will call them, and they "
+      + "have to be checked in again to get back on the board.",
+    ar: "سيخرج هذا الشخص من قائمة الانتظار. وإذا كان لا يزال في المبنى فلن يناديه أحد، وسيلزم تسجيل وصوله "
+      + "من جديد للعودة إلى القائمة.",
+  },
+  removeReversible: {
+    en: "This does not cancel their appointment.",
+    ar: "هذا لا يُلغي موعده.",
+  },
+  waitingSearch: { en: "Search", ar: "بحث" },
+  waitingSearchHint: { en: "Patient or member number", ar: "المريض أو رقم العضوية" },
+  waitingNoMatches: { en: "Nobody waiting matches your search.", ar: "لا أحد في الانتظار يطابق بحثك." },
+  waitingFailed: { en: "That didn't go through. Try again.", ar: "لم يتم تنفيذ ذلك. حاول مجدداً." },
+  minutes: { en: "min", ar: "دقيقة" },
 } satisfies Record<string, Localized>;
 
 const ZONE = "Africa/Cairo";
@@ -323,6 +360,9 @@ export function ReceptionDashboard() {
         </AsyncSection>
       </Card>
 
+      {/* ── 32.6 — who is actually in the building ─────────────────── */}
+      <WaitingRoom t={t} />
+
       {/* ── The day, laid out ──────────────────────────────────────── */}
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp4)" }}>
         <h2 className="section-h">{t(S.calendarHeading)}</h2>
@@ -331,6 +371,147 @@ export function ReceptionDashboard() {
         </AsyncSection>
       </Card>
     </>
+  );
+}
+
+/**
+ * 32.6 — the waiting room, in call order (emr `GET /queues`, phase 3.3).
+ *
+ * <p><b>Why this is not the Visits table above it.</b> That table is the day's SCHEDULE filtered to people
+ * who have checked in: it answers "who was expected, and did they arrive". This answers "who is in the room,
+ * and who is next" — a different question with a different answer the moment somebody arrives early, is
+ * triaged urgent, or is called and sent back. The order is the server's, computed from priority then arrival;
+ * nothing here re-sorts it, because a board that disagreed with the service about who is next is worse than
+ * no board.</p>
+ *
+ * <p>Five endpoints served this and nothing called any of them for four phases, while check-in issued a
+ * ticket every single time. The rows piled up in Waiting and were never read, never ordered and never
+ * cleared.</p>
+ */
+function WaitingRoom({ t }: { t: (l: Localized) => string }) {
+  const api = useApi();
+  const [nonce, setNonce] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<Localized | null>(null);
+  const [outcome, setOutcome] = useState<Localized | null>(null);
+  const [removing, setRemoving] = useState<WaitingTicket | null>(null);
+
+  const queue = useAsync<WaitingTicket[]>(() => api.waitingRoom(), [nonce]);
+
+  async function act(key: string, run: () => Promise<unknown>) {
+    setBusy(key);
+    setError(null);
+    setOutcome(null);
+    try {
+      const r = await run();
+      // 204 → null. An empty waiting room is an answer, and it is said in words rather than by nothing
+      // happening when the button is pressed.
+      if (key === "call-next") setOutcome(r ? S.called : S.nobodyWaiting);
+      setNonce((n) => n + 1);
+    } catch {
+      setError(S.waitingFailed);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const cols: Column<WaitingTicket>[] = [
+    { key: "position", header: t(S.wPosition), cell: (r) => <span className="tnum">{r.position}</span> },
+    {
+      key: "patient",
+      header: t(S.wPatient),
+      cell: (r) =>
+        r.displayName ? (
+          <span>
+            {r.displayName}
+            {r.memberNo && <> · <span className="tnum muted">{r.memberNo}</span></>}
+          </span>
+        ) : (
+          // NOT a blank and not "Unknown". Check-in can be recorded without a name; a board that invents one
+          // calls somebody who is not in the room.
+          <span>
+            <span className="tnum">{r.memberNo ?? "—"}</span>{" "}
+            <span className="muted" title={t(S.wNoNameHint)}>({t(S.wNoName)})</span>
+          </span>
+        ),
+    },
+    { key: "type", header: t(S.wType), cell: (r) => r.appointmentType },
+    {
+      key: "wait",
+      header: t(S.wWaiting),
+      cell: (r) => <span className="tnum">{Math.floor(r.waitSeconds / 60)} {t(S.minutes)}</span>,
+    },
+    {
+      key: "actions",
+      header: t(S.wActions),
+      cell: (r) => (
+        <div className="row-actions">
+          <Button size="sm" variant="ghost" disabled={busy === r.queueId}
+            onClick={() => void act(r.queueId, () => api.requeueWaiting(r.queueId))}>
+            {t(S.requeue)}
+          </Button>
+          {/* Removing somebody is asked about, not fired from the row. They are standing in the room: a
+              mis-tap takes them off the board with nothing on screen to say it happened, and getting back on
+              means being checked in again. The call itself lives in the dialog, not in this button. */}
+          <Button size="sm" variant="danger" disabled={busy === r.queueId}
+            onClick={() => setRemoving(r)}>
+            {t(S.removeTicket)}
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  const query = useTableQuery({
+    rows: queue.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.displayName, r.memberNo, r.appointmentType].filter(Boolean).join(" "),
+    searchLabel: t(S.waitingSearch),
+    searchPlaceholder: t(S.waitingSearchHint),
+    pageSize: 25,
+    persistKey: "reception-waiting-room",
+  });
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp4)" }}>
+      <div className="result-head">
+        <h2 className="section-h" style={{ margin: 0 }}>{t(S.waitingHeading)}</h2>
+        <Button variant="primary" size="sm" loading={busy === "call-next"}
+          onClick={() => void act("call-next", () => api.callNextWaiting())}>
+          {busy === "call-next" ? t(S.calling) : t(S.callNext)}
+        </Button>
+      </div>
+      <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
+        {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+        {outcome && <StatusChip kind="ok" label={t(outcome)} />}
+      </div>
+      <AsyncSection<WaitingTicket[]> state={queue} isEmpty={(d) => d.length === 0} emptyLabel={S.waitingEmpty}>
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(r) => r.queueId}
+            caption={t(S.waitingHeading)}
+            emptyLabel={t(S.waitingEmpty)}
+            noMatchesLabel={t(S.waitingNoMatches)}
+            density="compact"
+          />
+        )}
+      </AsyncSection>
+      <ConfirmAction
+        open={removing !== null}
+        onOpenChange={(open) => { if (!open) setRemoving(null); }}
+        title={S.removeTitle}
+        body={S.removeBody}
+        description={S.removeReversible}
+        confirmLabel={S.removeTicket}
+        onConfirm={async () => {
+          const target = removing;
+          setRemoving(null);
+          if (target) await act(target.queueId, () => api.removeWaiting(target.queueId));
+        }}
+      />
+    </Card>
   );
 }
 

@@ -315,15 +315,27 @@ v1.MapGet("/{id:guid}", async (Guid id, EmrDbContext db, CancellationToken ct) =
 }).RequireAuthorization()
         .Produces<EncounterResponse>();
 
-// Clinician worklist — beneficiaries who have checked in and are waiting.
-v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
-{
-    var items = await db.QueueEntries.AsNoTracking()
-        .Where(q => q.State == QueueState.Waiting)
-        .OrderBy(q => q.EnqueuedAt).ToListAsync(ct);
-    return Results.Ok(items.Select(QueueItemResponse.From));
-}).RequireAuthorization()
-        .Produces<IEnumerable<QueueItemResponse>>();
+// 32.6 — GET /encounters/queue IS RETIRED. It stood here from phase 2.3 with no caller anywhere, and it was
+// not a queue.
+//
+// THREE reasons, and the first alone settles it:
+//
+//  1. IT DESCRIBED THE WRONG MOMENT. A QueueEntry is written when an ENCOUNTER is created — which is when the
+//     person stops waiting and starts being seen. A "waiting" list built from encounters lists people who are
+//     already with the clinician. The platform's actual waiting room is the phase-3.3 QueueTicket, issued at
+//     CHECK-IN, which is when somebody joins a queue.
+//
+//  2. IT WAS A SECOND, WEAKER QUEUE. No branch scope, no priority ordering, no audit on any transition, and a
+//     projection of raw beneficiary ids. QueueTicket has all four. Two queues over the same waiting room is
+//     one queue plus somewhere for the two to disagree, and the disagreement would be about who is next.
+//
+//  3. ITS GATE WAS `.RequireAuthorization()` WITH NO SCOPE. Every other read in this file names one. Any
+//     authenticated principal on the platform — a finance analyst, a claims officer — could list the
+//     beneficiary ids of everyone currently waiting. Nothing called it, so nothing exercised that.
+//
+// The QueueEntry ENTITY stays. It is the encounter's own open/closed bookkeeping: created with the encounter
+// and closed by EndVisit (ClinicalRecords.cs), which is a real job and not this one. Its name is the trap —
+// see the note on the type — and re-exposing it as a queue is what this comment exists to prevent.
 
 app.MapAppointments();
 app.MapQueue();

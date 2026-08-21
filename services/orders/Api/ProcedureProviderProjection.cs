@@ -29,6 +29,15 @@ namespace Mersal.Orders.Api;
 public sealed record ProcedureQueueItem(
     Guid OrderId,
     string OrderNo,
+
+    /// <summary>The LINE this row is about.
+    ///
+    /// <para>32.6 — the row has always been one order paired with one deliverable line, and this id was the
+    /// one thing the projection did not carry. Without it the counter had no way to name the line it was
+    /// delivering, so "Record session" sent the ORDER id where the server expected a line and every tap came
+    /// back 404. A row that describes a line must be able to identify it.</para></summary>
+    Guid OrderLineId,
+
     string OrderType,
     string Status,
 
@@ -60,7 +69,15 @@ public sealed record ProcedureQueueItem(
 
     /// <summary>The referral reason / clinical context the ordering doctor DELIBERATELY shared. Null when they
     /// shared none — which is the default, and reads as "not disclosed", never as "no diagnosis".</summary>
-    string? SharedClinicalContext)
+    string? SharedClinicalContext,
+
+    /// <summary>When this centre reported back, or null while the loop is still open.
+    ///
+    /// <para>32.6 — design 45 §7 makes closing the loop the centre's obligation, and the portal had no way to
+    /// see whether it had discharged it. A centre cannot be asked to close a loop it cannot tell is open, and
+    /// re-reporting because the screen said nothing is how one visit becomes two entries in the doctor's
+    /// inbox.</para></summary>
+    DateTimeOffset? CompletionReportedAt)
 {
     public int SessionsRemaining => Math.Max(0, SessionsAuthorised - SessionsDelivered);
 
@@ -86,6 +103,7 @@ public sealed record ProcedureQueueItem(
         return new ProcedureQueueItem(
             OrderId: order.OrderId,
             OrderNo: order.OrderNo,
+            OrderLineId: line.OrderLineId,
             OrderType: OrderTypes.Canonical(order.OrderType).ToString(),
             Status: order.Status.ToString(),
             BeneficiaryId: order.BeneficiaryId,
@@ -103,6 +121,7 @@ public sealed record ProcedureQueueItem(
             // swept the row still reads Active and a status-only test would offer the centre work that consume
             // then refuses.
             Expired: order.ExpiresAt is { } exp && exp <= now,
-            SharedClinicalContext: order.SharedClinicalContext);
+            SharedClinicalContext: order.SharedClinicalContext,
+            CompletionReportedAt: order.CompletionReportedAt);
     }
 }

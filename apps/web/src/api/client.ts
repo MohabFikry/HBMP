@@ -22,6 +22,7 @@ import type {
   MembershipRow,
   ProgramEnablement,
   AppointmentRow,
+  WaitingTicket,
   BookableClinic,
   DoctorAvailability,
   AppointmentDay,
@@ -231,9 +232,38 @@ export interface ApiClient {
    * named without handing out the provider directory. Missing ids are absent from the map.
    */
   branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
+  /**
+   * 32.6 — the waiting room, in call order (emr `GET /queues`).
+   *
+   * <p>Tickets have been issued on every check-in since phase 3.3 and read by nothing: the endpoint required
+   * a locationId AND a providerId, which a reception desk does not have — it knows its branch. So the rows
+   * accumulated in Waiting for ever while the board beside them showed the same people out of the
+   * appointments table, unordered and with no notion of who is next.</p>
+   *
+   * <p>No arguments. The branch is the caller's, resolved server-side from their validated active branch;
+   * naming another is a 403 the desk could not talk its way around anyway.</p>
+   */
+  waitingRoom(): Promise<WaitingTicket[]>;
+  /** Call the head of the queue through (Waiting → InConsultation). Null when nobody is waiting. */
+  callNextWaiting(): Promise<WaitingTicket | null>;
+  /** Send somebody back to Waiting — they stepped out, or were called and did not come. */
+  requeueWaiting(queueId: string): Promise<void>;
+  /** Drop a ticket. The person left, or was checked in by mistake. */
+  removeWaiting(queueId: string): Promise<void>;
+  /** The consultation is over (InConsultation → Done). */
+  completeWaiting(queueId: string): Promise<void>;
+
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
-  checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
+  /**
+   * 32.6 — ask eligibility-service, optionally about a named benefit category.
+   *
+   * <p>Without a category the answer is about MEMBERSHIP: may this person be seen today. With one it is also
+   * about cover and cost share for that category. Both are decided, and audited, by the service that owns
+   * the rules — this used to be computed in the browser from a cached member status, so no tier, plan
+   * version, waiting period or audit event reached the desk at all.</p>
+   */
+  checkEligibility(beneficiaryId: string, benefitCategory?: string): Promise<EligibilityResult>;
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
   // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
@@ -543,7 +573,20 @@ export interface ApiClient {
   /** Consumed lines this provider still owes a result on (US-042). */
   awaitingResult(kind: "lab" | "radiology"): Promise<ResultTask[]>;
   /** Attach a result value to a consumed line (US-042). */
-  uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string): Promise<ResultUpload>;
+  /**
+   * Upload a result for a line THIS provider consumed.
+   *
+   * <p>32.6 — the summary AND the report file, because the service has always taken both and the screen only
+   * ever sent the first. "Report files upload from the workstation" was the portal describing a workflow that
+   * does not exist here: for radiology the report IS the result, and it had no way in.</p>
+   *
+   * <p>Either half alone is a complete upload; the server refuses only when both are missing.</p>
+   */
+  uploadResult(
+    orderId: string, lineId: string,
+    result: { value?: string; report?: File },
+    idempotencyKey?: string,
+  ): Promise<ResultUpload>;
 
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;

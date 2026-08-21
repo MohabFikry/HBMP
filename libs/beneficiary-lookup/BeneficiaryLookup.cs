@@ -28,9 +28,23 @@ public enum ResolveOutcome
 }
 
 /// <summary>The result of resolving a person from identifiers.</summary>
-public readonly record struct BeneficiaryResolution(ResolveOutcome Outcome, Guid? BeneficiaryId)
+/// <param name="Outcome">How the attempt ended.</param>
+/// <param name="BeneficiaryId">Who matched, when exactly one did.</param>
+/// <param name="DisplayName">
+/// The name patient-service DISCLOSED to this caller, or null when it disclosed none.
+///
+/// <para>32.6 — carried here rather than fetched again, because the resolve response already contains the
+/// field-projected record and the projector has already decided what this caller may see. A second lookup
+/// would be a second disclosure decision about the same person in the same act, and the two would drift.</para>
+///
+/// <para>Null means WITHHELD OR ABSENT, never "no name". A counter that renders it must show nothing rather
+/// than invent a placeholder: the point of the name is to verify the person present, and a fabricated one
+/// verifies nobody.</para>
+/// </param>
+public readonly record struct BeneficiaryResolution(ResolveOutcome Outcome, Guid? BeneficiaryId, string? DisplayName = null)
 {
-    public static BeneficiaryResolution Resolved(Guid id) => new(ResolveOutcome.Resolved, id);
+    public static BeneficiaryResolution Resolved(Guid id, string? displayName = null) =>
+        new(ResolveOutcome.Resolved, id, displayName);
     public static readonly BeneficiaryResolution NotFound = new(ResolveOutcome.NotFound, null);
     public static readonly BeneficiaryResolution TooFew = new(ResolveOutcome.TooFewIdentifiers, null);
     public static readonly BeneficiaryResolution Unavailable = new(ResolveOutcome.Unavailable, null);
@@ -94,14 +108,37 @@ public sealed class HttpBeneficiaryResolver(IHttpClientFactory factory) : IBenef
 
             var body = await resp.Content.ReadFromJsonAsync<ResolveDto>(Json, ct);
             return body?.BeneficiaryId is { } id
-                ? BeneficiaryResolution.Resolved(id)
+                ? BeneficiaryResolution.Resolved(id, DisplayName(body.Beneficiary))
                 : BeneficiaryResolution.Unavailable;   // a 200 with no id is a contract breach, not a miss
         }
         catch (HttpRequestException) { return BeneficiaryResolution.Unavailable; }
         catch (TaskCanceledException) { return BeneficiaryResolution.Unavailable; }
     }
 
-    private sealed record ResolveDto(Guid? BeneficiaryId);
+    /// <summary>
+    /// Build a display name from the fields patient-service actually handed over.
+    /// </summary>
+    /// <remarks>
+    /// <para>Every part is optional because the projector may withhold any of them, and the result is null
+    /// when nothing survived — the caller then shows no name at all. Joining what is present is not the same
+    /// as filling in what is missing: "Amal —" would read as a surname the record does not have.</para>
+    /// </remarks>
+    /// <summary>The name parts, in the order they are spoken. Not a set — order is the whole point.</summary>
+    private static readonly string[] NameParts = ["givenName", "middleName", "familyName"];
+
+    private static string? DisplayName(IReadOnlyDictionary<string, JsonElement>? disclosed)
+    {
+        if (disclosed is null) return null;
+        var parts = NameParts
+            .Select(k => disclosed.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToArray();
+        return parts.Length == 0 ? null : string.Join(' ', parts);
+    }
+
+    /// <summary>The resolve payload. <c>beneficiary</c> is the FIELD-PROJECTED record — its keys are whatever
+    /// the caller was entitled to, so it is read as a dictionary rather than a fixed shape.</summary>
+    private sealed record ResolveDto(Guid? BeneficiaryId, IReadOnlyDictionary<string, JsonElement>? Beneficiary);
 }
 
 public static class BeneficiaryLookupServiceCollectionExtensions

@@ -82,21 +82,56 @@ public sealed class DomainEventConsumer(
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// What a delivery earns: an ack, or the dead-letter queue.
+    ///
+    /// <para><see cref="Outcome.DeadLetter"/> is NEVER a requeue. Every path that reaches it is one more
+    /// delivery cannot fix — an envelope with no tenant, an event type nobody sent, a handler that threw on
+    /// the same bytes — so requeueing would put the message straight back at the head of the queue and spin
+    /// there for ever, starving everything behind it. The one failure mode a fan-out consumer must not have
+    /// is the one that looks busy.</para>
+    /// </summary>
+    internal enum Outcome { Ack, DeadLetter }
+
     private async Task OnReceivedAsync(BasicDeliverEventArgs ea, CancellationToken ct)
+    {
+        // TRANSPORT ONLY. Every decision lives in HandleAsync below, for the reason BuildEnvelope was pulled
+        // out before it: what is left here needs a live broker to reach, so anything left here has nothing
+        // proving it.
+        var outcome = await HandleAsync(
+            ea.BasicProperties.Type ?? "", ea.BasicProperties.MessageId,
+            Encoding.UTF8.GetString(ea.Body.Span), ea.DeliveryTag, ct);
+
+        if (outcome == Outcome.Ack) _channel!.BasicAck(ea.DeliveryTag, multiple: false);
+        else _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+    }
+
+    /// <summary>
+    /// One delivery, from bytes to a disposition — everything except the two channel calls.
+    ///
+    /// <para>Extracted for the same reason <see cref="BuildEnvelope"/> was: this was inline inside the
+    /// RabbitMQ receive handler, so exercising any of it meant standing up a broker, and none of it was
+    /// exercised. What lives here is the whole of the consumer's judgement — whether a message can be
+    /// attributed to a tenant at all, which tenant the RLS context is bound to before a single row is
+    /// written, and what happens when the dispatcher throws.</para>
+    /// </summary>
+    internal async Task<Outcome> HandleAsync(
+        string eventType, string? messageId, string body, ulong deliveryTag, CancellationToken ct)
     {
         try
         {
-            var eventType = ea.BasicProperties.Type ?? "";
-            var eventId = Guid.TryParse(ea.BasicProperties.MessageId, out var id) ? id : Guid.NewGuid();
-            var notice = Parse(Encoding.UTF8.GetString(ea.Body.Span));
+            // An unparseable or absent message id is not worth rejecting the message over — it is the
+            // dispatcher's dedupe key, and a fresh one means "treat this as new", which is the safe reading
+            // when the publisher did not say.
+            var eventId = Guid.TryParse(messageId, out var id) ? id : Guid.NewGuid();
+            var notice = Parse(body);
             if (notice is null || eventType.Length == 0)
             {
                 // A message that cannot be attributed to a tenant, or has nobody to tell, is dead-lettered
                 // rather than guessed at: an in-app notice written under a guessed tenant is a cross-tenant
                 // disclosure, which is worse than a lost doorbell.
                 logger.LogWarning("notification envelope {EventId} ({Type}) lacked a tenant or a recipient", eventId, eventType);
-                _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
-                return;
+                return Outcome.DeadLetter;
             }
 
             using var scope = scopeFactory.CreateScope();
@@ -111,12 +146,12 @@ public sealed class DomainEventConsumer(
                 "{EventType} notified {Created} recipient(s) (deduplicated: {Dup})",
                 eventType, result.Created, result.Deduplicated);
 
-            _channel!.BasicAck(ea.DeliveryTag, multiple: false);
+            return Outcome.Ack;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "notification fan-out failed for delivery {Tag}", ea.DeliveryTag);
-            _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+            logger.LogError(ex, "notification fan-out failed for delivery {Tag}", deliveryTag);
+            return Outcome.DeadLetter;
         }
     }
 

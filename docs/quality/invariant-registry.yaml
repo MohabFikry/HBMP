@@ -2474,3 +2474,111 @@ invariants:
       - apps/web/test/chronic-amend.test.tsx::refuses a total below what has already been collected, in words
       - apps/web/test/chronic-amend.test.tsx::asks before turning a chronic script acute, and will not proceed until told
       - apps/web/test/chronic-amend.test.tsx::says the arithmetic could not run rather than showing a schedule
+
+  # ---------------------------------------------------------------- 32.6, the counters pass (doc 51)
+
+  - id: INV-AN-ELIGIBILITY-VERDICT-COMES-FROM-ELIGIBILITY-SERVICE
+    statement: >-
+      A verdict shown at a counter is decided by eligibility-service, never derived in the browser from a
+      cached member status. The check is made — and therefore audited — whether or not the desk knows the
+      benefit category yet, and a cost share that could not be quoted says why rather than rendering blank.
+    source: 11-permission-matrix.md §3.1; 17-api-specifications.md §5; doc 51 §2.1
+    severity: Critical
+    tests:
+      # The assertions are on the REQUESTS. A test on the returned shape would have passed against the
+      # browser-side verdict too, which is exactly how this survived four passes.
+      - apps/web/test/reception-eligibility-asks-the-service.test.ts::posts an eligibility check even when no category is named
+      - apps/web/test/reception-eligibility-asks-the-service.test.ts::says why there is no copay rather than leaving the row out
+      - apps/web/test/reception-eligibility-asks-the-service.test.ts::asks the benefit question too when a category is named, and quotes what comes back
+      - apps/web/test/reception-eligibility-asks-the-service.test.ts::does not read a decision it cannot parse as permission to proceed
+      - Mersal.Eligibility.Tests.EligibilityEndpointTests.A_check_without_a_benefit_category_answers_about_the_membership_and_says_so
+      - Mersal.Eligibility.Tests.EligibilityEndpointTests.A_membership_check_on_a_suspended_member_is_ineligible
+
+  - id: INV-A-VERDICT-SAYS-WHAT-IT-IS-ABOUT
+    statement: >-
+      An eligibility answer carries the SCOPE it was decided at. A membership verdict says the member is in
+      good standing and says nothing about cover for any particular service; a benefit verdict is about the
+      named category. The two render the same word and must not be confused by a consumer.
+    source: doc 51 §2.1
+    severity: High
+    tests:
+      - Mersal.Eligibility.Tests.EligibilityEndpointTests.A_benefit_check_still_says_which_scope_it_answered_at
+      - Mersal.Eligibility.Tests.EligibilityEndpointTests.A_membership_check_writes_no_snapshot
+      - apps/web/test/reception-eligibility-asks-the-service.test.ts::posts an eligibility check even when no category is named
+
+  - id: INV-A-COUNTER-CAN-ACT-ON-WHAT-ITS-ROW-GAVE-IT
+    statement: >-
+      A row a counter is shown carries every identifier the action offered beside it needs. A screen never
+      substitutes one id for another, and the proof works from the payload the portal receives rather than
+      from ids fetched out of the database.
+    source: 45-encounter-and-prescription-adjustments.md §2b; doc 51 §2.4
+    severity: Critical
+    tests:
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.A_queue_row_names_the_line_it_is_about
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.The_counter_can_record_a_session_using_only_what_the_row_gave_it
+      - apps/web/test/procedure-centre.test.tsx::names the LINE, not the order
+
+  - id: INV-A-VERIFICATION-COUNTER-HAS-SOMETHING-TO-VERIFY-AGAINST
+    statement: >-
+      A counter that exists to confirm the person present is given an identity to confirm them against,
+      disclosed by the service that owns it and under the caller's own token. A name the projector withheld
+      renders as withheld — never as a blank, and never as a placeholder.
+    source: 45-encounter-and-prescription-adjustments.md §2b; doc 51 §2.5
+    severity: High
+    tests:
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.The_counter_says_who_was_verified
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.A_name_the_directory_withheld_is_absent_rather_than_invented
+      - apps/web/test/procedure-centre.test.tsx::shows the name the directory disclosed
+      - apps/web/test/procedure-centre.test.tsx::says a withheld name is withheld rather than showing a blank
+
+  - id: INV-A-REFERRAL-LOOP-CAN-BE-CLOSED-FROM-THE-CENTRE-THAT-DELIVERED-IT
+    statement: >-
+      The centre that delivered a procedure or referral can report back to the ordering doctor, and can see
+      whether it already has. An open loop the product offers no way to close is the classic outpatient
+      patient-safety failure.
+    source: 45-encounter-and-prescription-adjustments.md §7 and §11; doc 51 §2.6
+    severity: High
+    tests:
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.A_closed_loop_shows_as_closed_on_the_row
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.Provider_A_cannot_close_the_loop_on_provider_Bs_order
+      - apps/web/test/procedure-centre.test.tsx::sends the report the ordering doctor is waiting for
+      - apps/web/test/procedure-centre.test.tsx::will not send an empty report
+
+  - id: INV-A-SECTION-SHOWS-WHAT-ITS-NAME-PROMISES
+    statement: >-
+      A named portal section shows what its name and its permission say it shows. The nurse's results inbox
+      reads investigation results under the caller's own token; a section the caller may not read is reported
+      as withheld rather than rendered as an empty list.
+    source: 11-permission-matrix.md §3.2; 37-branch-scoping-and-clinical-sensitivity.md §6; doc 51 §2.7
+    severity: High
+    tests:
+      - apps/web/test/nurse-results.test.tsx::asks for investigation results, not for vitals
+      - apps/web/test/nurse-results.test.tsx::says a withheld section is withheld rather than showing no results
+
+  - id: INV-A-WAITING-ROOM-IS-READ-BY-THE-DESK-THAT-KEEPS-IT
+    statement: >-
+      Tickets issued at check-in are readable by the desk that issued them, in the server's call order, and a
+      caller who is not narrowed to a branch cannot ask for the queue unfiltered. Dropping a required filter
+      never widens a disclosure.
+    source: 14-navigation-structure.md §3.3; 37-branch-scoping-and-clinical-sensitivity.md §3; doc 51 §2.2
+    severity: High
+    tests:
+      - Mersal.Emr.Tests.WaitingRoomEndpointTests.A_branch_desk_can_ask_who_is_waiting_without_naming_a_clinic
+      - Mersal.Emr.Tests.WaitingRoomEndpointTests.An_unnarrowed_caller_is_refused_rather_than_shown_every_branch
+      - Mersal.Emr.Tests.WaitingRoomEndpointTests.Calling_next_moves_the_head_and_the_board_agrees
+      - Mersal.Emr.Tests.WaitingRoomEndpointTests.An_empty_waiting_room_is_an_answer_not_an_error
+      - apps/web/test/reception-waiting-room.test.tsx::shows who is in the building, in the server's call order
+      - apps/web/test/reception-waiting-room.test.tsx::asks before taking somebody off the board
+
+  - id: INV-A-CONTACT-CORRECTION-IS-DECIDED-BY-THE-SERVICE-THAT-OWNS-IT
+    statement: >-
+      A contact corrected on a call is validated, authorized and applied by the owning services — the call
+      centre's verification gate and patient-service's one-primary rule — never by the workspace. An invalid
+      value and an unverified call are told apart, because only one of them is fixed by retyping.
+    source: 11-permission-matrix.md §3.1; doc 51 §2.9
+    severity: High
+    tests:
+      - apps/web/test/callcentre-contacts.test.tsx::sends the correction to the service
+      - apps/web/test/callcentre-contacts.test.tsx::re-reads the file rather than patching the row it edited
+      - apps/web/test/callcentre-contacts.test.tsx::tells an invalid value apart from an unverified call
+      - apps/web/test/callcentre-contacts.test.tsx::says the call is not open on that file when the server refuses

@@ -162,28 +162,6 @@
         }
       }
     },
-    "/api/v1/encounters/queue": {
-      "get": {
-        "tags": [
-          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/QueueItemResponse"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/appointment-slots": {
       "post": {
         "tags": [
@@ -836,7 +814,6 @@
           {
             "name": "locationId",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -845,7 +822,6 @@
           {
             "name": "providerId",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -974,7 +950,6 @@
           {
             "name": "locationId",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -983,7 +958,6 @@
           {
             "name": "providerId",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -2695,37 +2669,6 @@
         ],
         "type": "integer",
         "format": "int32"
-      },
-      "QueueItemResponse": {
-        "type": "object",
-        "properties": {
-          "queueEntryId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "encounterId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "beneficiaryId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "providerId": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true
-          },
-          "state": {
-            "type": "string",
-            "nullable": true
-          },
-          "enqueuedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "additionalProperties": false
       },
       "QueueItemView": {
         "type": "object",

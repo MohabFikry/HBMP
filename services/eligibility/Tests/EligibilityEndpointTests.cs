@@ -35,17 +35,119 @@ public class EligibilityEndpointTests
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// 32.6 — THIS TEST USED TO ASSERT A 400, and the assertion was right about the rule and wrong about
+    /// what the rule cost.
+    ///
+    /// <para>Its reasoning was that "is this member covered" is not a question without naming what for, which
+    /// is true. What happened in the product was not that callers named one: the reception desk stopped
+    /// calling this endpoint at all and computed a verdict in the browser from a cached member status. So the
+    /// tier, the plan version in force, the waiting period, the limits and the audit event were all absent
+    /// from what a beneficiary was told at the desk — and the check that was supposed to be refused was
+    /// simply never made.</para>
+    ///
+    /// <para>The category-less question is now ANSWERED, at membership scope, labelled as such. The old
+    /// assertion is not deleted quietly: it is recorded here, because a future reader who reinstates the 400
+    /// on the strength of its reasoning would reinstate the defect with it.</para>
+    /// </summary>
     [SkippableFact]
-    public async Task A_check_without_a_benefit_category_is_refused()
+    public async Task A_check_without_a_benefit_category_answers_about_the_membership_and_says_so()
     {
         Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
         await using var app = new EligibilityApiFactory();
         using var reception = app.CheckerClient();
+        var beneficiaryId = Guid.NewGuid();
+        await app.SeedMemberAsync(beneficiaryId, "Active");
 
-        var r = await reception.PostAsJsonAsync("/api/v1/eligibility/check",
-            new EligibilityCheckRequest(Guid.NewGuid(), "  ", null, null, null, null, null, null, null), Web);
-        r.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "'is this member covered' is not a question without naming what for");
+        try
+        {
+            var r = await reception.PostAsJsonAsync("/api/v1/eligibility/check",
+                new EligibilityCheckRequest(beneficiaryId, "  ", null, null, null, null, null, null, null), Web);
+            r.StatusCode.Should().Be(HttpStatusCode.OK, "{0}", await r.Content.ReadAsStringAsync());
+
+            using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
+            doc.RootElement.GetProperty("decisionScope").GetString().Should().Be("Membership",
+                "the answer and what it is ABOUT travel together — 'Eligible' means two different things "
+                + "at the two scopes and renders as the same word");
+            doc.RootElement.GetProperty("decision").GetString().Should().Be("Eligible");
+
+            // The bound on the answer is IN the answer, not left to the reader.
+            doc.RootElement.GetProperty("reasons").EnumerateArray()
+                .Select(x => x.GetString()).Should()
+                .Contain(x => x!.Contains("no benefit category", StringComparison.Ordinal));
+
+            // And no cost share is quoted — with the reason attached, so "no copay shown" cannot be read as
+            // "no copay due".
+            var share = doc.RootElement.GetProperty("costShare");
+            share.GetProperty("determinate").GetBoolean().Should().BeFalse();
+            share.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+        }
+        finally { await app.CleanupMemberAsync(beneficiaryId); }
+    }
+
+    [SkippableFact]
+    public async Task A_membership_check_on_a_suspended_member_is_ineligible()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        using var reception = app.CheckerClient();
+        var beneficiaryId = Guid.NewGuid();
+        await app.SeedMemberAsync(beneficiaryId, "Suspended");
+
+        try
+        {
+            var r = await reception.PostAsJsonAsync("/api/v1/eligibility/check",
+                new EligibilityCheckRequest(beneficiaryId, null, null, null, null, null, null, null, null), Web);
+            r.StatusCode.Should().Be(HttpStatusCode.OK, "{0}", await r.Content.ReadAsStringAsync());
+
+            using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
+            doc.RootElement.GetProperty("decision").GetString().Should().Be("Ineligible");
+            doc.RootElement.GetProperty("decisionScope").GetString().Should().Be("Membership");
+        }
+        finally { await app.CleanupMemberAsync(beneficiaryId); }
+    }
+
+    [SkippableFact]
+    public async Task A_membership_check_writes_no_snapshot()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        using var reception = app.CheckerClient();
+        var beneficiaryId = Guid.NewGuid();
+        await app.SeedMemberAsync(beneficiaryId, "Active");
+
+        try
+        {
+            (await reception.PostAsJsonAsync("/api/v1/eligibility/check",
+                new EligibilityCheckRequest(beneficiaryId, null, null, null, null, null, null, null, null), Web))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            // A snapshot row is keyed by beneficiary AND category. Writing one under an invented category —
+            // or under the empty string — would corrupt the next real check for it.
+            await using var db = EligibilityApiFactory.Ctx();
+            (await db.Snapshots.CountAsync(x => x.BeneficiaryId == beneficiaryId)).Should().Be(0);
+        }
+        finally { await app.CleanupMemberAsync(beneficiaryId); }
+    }
+
+    [SkippableFact]
+    public async Task A_benefit_check_still_says_which_scope_it_answered_at()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        using var reception = app.CheckerClient();
+        var beneficiaryId = Guid.NewGuid();
+        await app.SeedMemberAsync(beneficiaryId, "Active");
+
+        try
+        {
+            var r = await reception.PostAsJsonAsync("/api/v1/eligibility/check",
+                new EligibilityCheckRequest(beneficiaryId, "LAB", null, null, null, null, null, null, null), Web);
+
+            using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
+            doc.RootElement.GetProperty("decisionScope").GetString().Should().Be("Benefit");
+        }
+        finally { await app.CleanupMemberAsync(beneficiaryId); }
     }
 
     /// <summary>
@@ -152,6 +254,27 @@ public sealed class EligibilityApiFactory : WebApplicationFactory<Program>
         c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
         return c;
+    }
+
+    /// <summary>32.6 — a member projection at a named lifecycle status. The membership check reads this row
+    /// and nothing else, so the status is the whole input.</summary>
+    public async Task SeedMemberAsync(Guid beneficiaryId, string status)
+    {
+        await using var db = Ctx();
+        db.Members.Add(new MemberProjection
+        {
+            TenantId = Tenant, BeneficiaryId = beneficiaryId, GivenName = "Walk", FamilyName = "In",
+            Status = status, UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    public async Task CleanupMemberAsync(Guid beneficiaryId)
+    {
+        await using var db = Ctx();
+        await db.Snapshots.Where(s => s.BeneficiaryId == beneficiaryId).ExecuteDeleteAsync();
+        await db.Coverages.Where(c => c.BeneficiaryId == beneficiaryId).ExecuteDeleteAsync();
+        await db.Members.Where(m => m.BeneficiaryId == beneficiaryId).ExecuteDeleteAsync();
     }
 
     public static EligibilityDbContext Ctx() =>

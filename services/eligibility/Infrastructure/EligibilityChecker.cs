@@ -77,6 +77,49 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
         return new CheckOutcome(result, expires, FromCache: false);
     }
 
+    /// <summary>
+    /// 32.6 — the answer when no benefit category was named.
+    ///
+    /// <para>This is a MEMBERSHIP verdict, and the caller is told so in
+    /// <c>EligibilityCheckResponse.DecisionScope</c>. It runs the first of the engine's rules — only an Active
+    /// member can ever be Eligible — and stops there, because every rule after it needs a category. It
+    /// deliberately does not guess one: picking "CONSULTATION" for a walk-in would answer a question nobody
+    /// asked and answer it about a specific benefit.</para>
+    ///
+    /// <para>NO SNAPSHOT IS WRITTEN. A snapshot row is per beneficiary AND category (that is its key), so
+    /// there is no row this belongs in; writing one under an invented category would corrupt the next real
+    /// check for it. The expiry still comes back so the caller knows how long the answer stands.</para>
+    /// </summary>
+    public async Task<CheckOutcome> CheckMembershipAsync(Guid beneficiaryId, CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow();
+        var expires = now.Add(Ttl);
+
+        var member = await db.Members.AsNoTracking().FirstOrDefaultAsync(m => m.BeneficiaryId == beneficiaryId, ct);
+        if (member is null)
+            return new CheckOutcome(
+                new EligibilityResult(EligibilityDecision.Ineligible, null, ["unknown beneficiary"], null),
+                expires, FromCache: false);
+
+        var status = Enum.TryParse<MemberStatus>(member.Status, out var s) ? s : MemberStatus.Inactive;
+
+        // An unparseable status falls to Inactive, as it does on the category path. A status this service
+        // cannot read is not a reason to say yes.
+        return status == MemberStatus.Active
+            ? new CheckOutcome(
+                new EligibilityResult(EligibilityDecision.Eligible, null,
+                    [
+                        "member status is Active",
+                        // Said in the payload, not left to the reader. The desk sees "Eligible" and the
+                        // sentence that bounds it in the same breath.
+                        "no benefit category was named, so nothing here says whether a particular service is covered",
+                    ], null),
+                expires, FromCache: false)
+            : new CheckOutcome(
+                new EligibilityResult(EligibilityDecision.Ineligible, null, [$"member status is {status}"], null),
+                expires, FromCache: false);
+    }
+
     private async Task<EligibilityResult> ComputeAsync(
         Guid beneficiaryId, string benefitCategory, string? serviceCode, bool serviceRequiresPreAuth, CancellationToken ct)
     {

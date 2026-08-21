@@ -731,6 +731,11 @@ public sealed class MasterDataApiFactory : WebApplicationFactory<Program>
     public Guid StandardExamId { get; } = Guid.NewGuid();
     public Guid RetiredExamId { get; } = Guid.NewGuid();
 
+    /// <summary>The retired type's own short code. Exposed so a test can ask the catalogue about it BY CODE —
+    /// the price route is keyed on codes, not on ids, because an order line carries a code and only carries an
+    /// examination_type_id if it was written after 14.6.</summary>
+    public string RetiredExamCode => $"EXR-{Suffix}";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);

@@ -46,6 +46,16 @@ public static class EncounterWorkflow
 }
 
 /// <summary>A worklist entry so the checked-in beneficiary appears for the clinician.</summary>
+/// <summary>
+/// The encounter's open/closed bookkeeping — <b>not a queue</b>, despite the name.
+///
+/// <para>32.6 — one row is written per encounter and closed by EndVisit, so "Waiting" here means "this visit
+/// is open", not "this person is in the waiting room". The platform's waiting room is
+/// <see cref="QueueTicket"/>, issued at CHECK-IN and carrying branch scope, priority ordering and an audited
+/// call-next. <c>GET /encounters/queue</c> presented this table as the second thing and was retired for it;
+/// the name is left alone because renaming a persisted entity is a migration, and a comment that says what it
+/// is costs nothing and reaches the next reader either way.</para>
+/// </summary>
 public sealed class QueueEntry
 {
     public Guid QueueEntryId { get; set; }

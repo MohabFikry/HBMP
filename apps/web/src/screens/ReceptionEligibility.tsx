@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, ComboboxField, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityResult, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { ApiError } from "../api/http";
@@ -19,8 +19,10 @@ const S = {
   // the thing the field cannot: what the check ANSWERS, so an operator knows before running it whether this
   // is the screen that settles the question in front of them.
   idle: {
-    en: "A check returns the plan, benefit band, copay, annual cap remaining, and whether a visit is allowed today.",
-    ar: "يعرض التحقق الخطة وفئة المنفعة والمساهمة والمتبقي من الحد السنوي، وما إذا كانت الزيارة مسموحة اليوم.",
+    en: "A check returns the plan, benefit band, annual cap remaining, and whether a visit is allowed today. "
+      + "Name the benefit category and it also returns the copay for it.",
+    ar: "يعرض التحقق الخطة وفئة المنفعة والمتبقي من الحد السنوي، وما إذا كانت الزيارة مسموحة اليوم. "
+      + "وإذا حدّدت فئة المنفعة فسيعرض أيضاً المساهمة الخاصة بها.",
   },
   loading: { en: "Checking…", ar: "جارٍ التحقق…" },
   error: { en: "Couldn't check eligibility. Try again.", ar: "تعذّر التحقق من الأهلية. حاول مجدداً." },
@@ -41,12 +43,57 @@ const S = {
   visitNo: { en: "Visit not allowed", ar: "الزيارة غير مسموحة" },
   card: { en: "Card", ar: "البطاقة" },
   dob: { en: "Date of birth", ar: "تاريخ الميلاد" },
+
+  // ---- 32.6 — the benefit category, and what the answer is about ----
+  category: { en: "Benefit category (optional)", ar: "فئة المنفعة (اختياري)" },
+  categoryHelp: {
+    en: "What the visit is for. Naming it gets a coverage verdict and a copay for that benefit; leaving it "
+      + "blank checks the membership only.",
+    ar: "الغرض من الزيارة. تحديدها يعطي قراراً بالتغطية ومساهمة لتلك المنفعة؛ وتركها فارغة يتحقق من العضوية فقط.",
+  },
+  categoryAny: { en: "Not decided yet", ar: "لم تُحدَّد بعد" },
+  catConsult: { en: "Consultation", ar: "كشف" },
+  catLab: { en: "Laboratory", ar: "مختبر" },
+  catImaging: { en: "Imaging", ar: "أشعة" },
+  catPharmacy: { en: "Pharmacy", ar: "صيدلية" },
+  catReferral: { en: "Referral", ar: "إحالة" },
+
+  scopeMembership: {
+    en: "Membership only — no benefit category was named, so nothing here says whether a particular service "
+      + "is covered.",
+    ar: "العضوية فقط — لم تُحدَّد فئة منفعة، لذا لا شيء هنا يقول ما إذا كانت خدمة بعينها مغطاة.",
+  },
+  scopeBenefit: { en: "Coverage for", ar: "التغطية لـ" },
+  copayTier: { en: "Tier", ar: "الشريحة" },
+  copayFixed: { en: "Copay (fixed)", ar: "المساهمة (مبلغ ثابت)" },
+  coinsurance: { en: "Coinsurance", ar: "نسبة المشاركة" },
+  copayNone: {
+    en: "This benefit carries no copay at the resolved tier.",
+    ar: "لا توجد مساهمة على هذه المنفعة عند الشريحة المحددة.",
+  },
 } satisfies Record<string, Localized>;
+
+/**
+ * 32.6 — the walk-in categories, as eligibility migration 0006 CHECK-constrains them.
+ *
+ * <p>Five values and no free text, because the category is a coverage vocabulary the server validates: a
+ * typed-in "Xray" would come back as "no active coverage for Xray" and read at the desk as a member without
+ * cover. The empty choice is a real option, not a prompt — "not decided yet" is the honest state of a walk-in
+ * who has not been triaged, and it is what the membership-only check is for.</p>
+ */
+const CATEGORIES = [
+  { value: "CONSULT", label: "catConsult" },
+  { value: "LAB", label: "catLab" },
+  { value: "IMAGING", label: "catImaging" },
+  { value: "PHARMACY", label: "catPharmacy" },
+  { value: "REFERRAL", label: "catReferral" },
+] as const;
 
 export function ReceptionEligibility() {
   const api = useApi();
   const t = useLoc();
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [result, setResult] = useState<EligibilityResult | null>(null);
 
@@ -60,7 +107,10 @@ export function ReceptionEligibility() {
         setStatus("success");
         return;
       }
-      const res = await api.checkEligibility(hits[0].id);
+      // The category rides along when the desk knows it. Both the verdict and the copay are decided by
+      // eligibility-service either way — this screen used to decide the verdict itself, from a cached
+      // member status, and never called the service at all.
+      const res = await api.checkEligibility(hits[0].id, category ?? undefined);
       setResult(res);
       setStatus("success");
     } catch (err) {
@@ -85,6 +135,14 @@ export function ReceptionEligibility() {
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
             autoComplete="off"
+          />
+          <ComboboxField
+            label={t(S.category)}
+            help={t(S.categoryHelp)}
+            options={CATEGORIES.map((c) => ({ value: c.value, label: t(S[c.label]) }))}
+            value={category}
+            onChange={(v) => setCategory(v || null)}
+            placeholder={t(S.categoryAny)}
           />
           <div>
             <Button type="submit" variant="primary"
@@ -162,15 +220,27 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         <StatusChip kind={result.status.kind} label={t(result.status.label)} />
       </div>
 
+      {/* 32.6 — WHAT this verdict is about, said before the numbers under it.
+          "Eligible" at membership scope and "Eligible" for LAB are the same word and different facts, and
+          the desk reads whichever one it is told. */}
+      {result.scope === "membership" ? (
+        <InlineAlert tone="info">{t(S.scopeMembership)}</InlineAlert>
+      ) : (
+        <p className="muted" style={{ margin: 0 }}>
+          {t(S.scopeBenefit)} <strong>{result.benefitCategory}</strong>
+        </p>
+      )}
+
       {c && (
         <dl className="kv-grid" aria-label={t(S.coverage)}>
           <div><dt>{t(S.plan)}</dt><dd>{t(c.planName)}</dd></div>
           <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
-          {c.copayPercent != null && <div><dt>{t(S.copay)}</dt><dd className="tnum">{c.copayPercent}%</dd></div>}
           {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
           {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{fmt.money(c.annualCapRemaining)}</dd></div>}
         </dl>
       )}
+
+      <CostShareBlock share={result.costShare} t={t} S={S} fmt={fmt} />
 
       <div>
         {result.visitGate.allowed ? (
@@ -180,5 +250,45 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * 32.6 — what the member pays, or the sentence that says why nobody can tell them.
+ *
+ * <p>There is no branch here that renders a blank or a zero. The idle text on this screen has promised a
+ * copay since phase 2 and the code could not produce one: `checkEligibility` never called the service, so
+ * `copayPercent` was `undefined` on every result and the row was skipped every time. A promise on a screen
+ * with no code path behind it is worse than a missing feature, because nobody looking at the screen can tell.</p>
+ */
+function CostShareBlock({
+  share, t, S, fmt,
+}: {
+  share: EligibilityResult["costShare"];
+  t: (l: Localized) => string;
+  S: Record<string, Localized>;
+  fmt: ReturnType<typeof useFormat>;
+}) {
+  if (!share.known) return <InlineAlert tone="info">{t(share.why)}</InlineAlert>;
+
+  const nothingToPay =
+    share.copayPercent == null && share.copayFixed == null && share.coinsurancePercent == null;
+
+  return (
+    <dl className="kv-grid" aria-label={t(S.copay)}>
+      {share.tierCode && <div><dt>{t(S.copayTier)}</dt><dd className="tnum">{share.tierCode}</dd></div>}
+      {share.copayPercent != null && (
+        <div><dt>{t(S.copay)}</dt><dd className="tnum">{share.copayPercent}%</dd></div>
+      )}
+      {share.copayFixed != null && (
+        <div><dt>{t(S.copayFixed)}</dt><dd className="tnum">{fmt.money(share.copayFixed)}</dd></div>
+      )}
+      {share.coinsurancePercent != null && (
+        <div><dt>{t(S.coinsurance)}</dt><dd className="tnum">{share.coinsurancePercent}%</dd></div>
+      )}
+      {/* A quote that resolved and came back with no charge is a REAL answer, and it is said in words. An
+          empty list here would look identical to the case above, which is the opposite answer. */}
+      {nothingToPay && <div><dt>{t(S.copay)}</dt><dd>{t(S.copayNone)}</dd></div>}
+    </dl>
   );
 }
