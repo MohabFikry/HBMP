@@ -2805,3 +2805,29 @@ invariants:
       - apps/web/test/reception-booking.test.tsx::says the list was cut, before the operator picks from it
       - apps/web/test/reception-booking.test.tsx::labels the reopen control 25+ rather than claiming exactly 25 matched
       - apps/web/test/reception-booking.test.tsx::does not cry truncation on a complete list
+
+  - id: INV-THE-NUMBER-ON-THE-CARD-FINDS-THE-MEMBER
+    statement: >-
+      The number printed on a beneficiary's card resolves that beneficiary, and so does their member number.
+      They are different identifiers — the first is patient-service's, the second is policy-service's
+      enrolment key — and a desk holding the card must not have to know which one it is looking at, because
+      the only alternative is to search by name.
+    source: 13-ux-flows.md §2; 32-user-stories.md US-010; doc 54 §2
+    severity: High
+    tests:
+      - Mersal.Eligibility.Tests.PresentedIdentifierTests.The_card_number_and_the_member_number_both_resolve_and_are_not_the_same_field
+      - Mersal.Eligibility.Tests.PresentedIdentifierTests.Each_thing_a_beneficiary_can_present_resolves_the_member
+      - Mersal.Eligibility.Tests.ReceptionVerifyTests.The_number_on_the_card_resolves_the_member_and_is_not_the_member_number
+
+  - id: INV-A-COVERAGE-CARD-SHOWS-THE-COVERAGE-IT-HAS
+    statement: >-
+      The eligibility card renders every benefit limit the reception projection carries, at either scope, and
+      renders no field it does not have. A summary that collapses four limits into one number cannot answer
+      the question the desk opened it to ask, and a fabricated plan name cannot be told from a real one.
+    source: 11-permission-matrix.md §3.2; 13-ux-flows.md §2; doc 54 §2
+    severity: High
+    tests:
+      - apps/web/test/reception-eligibility-verified.test.tsx::lists every benefit limit, with its own kind of quantity
+      - apps/web/test/reception-eligibility-verified.test.tsx::shows them at BENEFIT scope too, not only at membership scope
+      - apps/web/test/reception-eligibility-verified.test.tsx::shows the policy, and no plan name it does not have
+      - apps/web/test/reception-eligibility-verified.test.tsx::shows the card and the member number as the different identifiers they are

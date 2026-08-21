@@ -794,8 +794,18 @@ export class DevApiClient implements ApiClient {
         coverage: {
           planName: loc("Mersal Essential", "مرسال الأساسية"),
           band: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
+          policyNo: "POL-2026-000318",
           validUntil: "2026-12-31",
           annualCapRemaining: 8400,
+          // 33.9b — more than one limit, and more than one KIND of limit. A fixture with a single monetary
+          // cap is one where "show every limit" and "show the annual cap" render identically, which is how
+          // the client dropping the rest went unnoticed.
+          limits: [
+            { category: "CONSULT", limitType: "Count", remaining: 4 },
+            { category: "LAB", limitType: "Amount", remaining: 3200 },
+            { category: "PHARMACY", limitType: "Amount", remaining: 5200 },
+            { category: "IMAGING", limitType: "Count", remaining: 1 },
+          ],
         },
         costShare: category
           ? { known: true, tierCode: "IN", copayPercent: 10, copayFixed: null, coinsurancePercent: null }

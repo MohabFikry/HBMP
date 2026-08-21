@@ -45,6 +45,11 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         m.GivenName = Str(p, "givenName") ?? m.GivenName;
         m.FamilyName = Str(p, "familyName") ?? m.FamilyName;
         m.MemberNo = Str(p, "memberNo") ?? m.MemberNo;
+        // 33.9b — `cardNumber` has been on this event since the intake path was written, from BOTH of
+        // patient-service's registration entry points, and every other field of it was read while this one
+        // was dropped. A card number and a member number are different identifiers, and the card is the one
+        // the beneficiary is holding.
+        m.CardNumber = Str(p, "cardNumber") ?? m.CardNumber;
         m.PrimaryPhone = Str(p, "primaryPhone") ?? m.PrimaryPhone;
         m.Status = Str(p, "status") ?? m.Status;
         ApplyIdentifiers(m, p);

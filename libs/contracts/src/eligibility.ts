@@ -16,7 +16,17 @@ export type EligibilityQuery = z.infer<typeof zEligibilityQuery>;
 export const zBeneficiaryIdentity = z.object({
   id: zId,
   name: zLocalized,
+  /**
+   * What the beneficiary is holding — the number printed on the card where it is known, and the member
+   * number otherwise.
+   *
+   * These are two different identifiers (33.9b): `memberNo` is the enrolment key policy-service issues,
+   * `cardNumber` is what patient-service normalizes and prints. This field is the one a desk compares
+   * against the object in front of them, so the card wins where the projection has it.
+   */
   cardNumber: z.string(),
+  /** The enrolment key, when it differs from the card. Rendered beside it, never instead of it. */
+  memberNo: z.string().optional(),
   // DOB + gender are optional: the reception min-necessary card omits them by design (they are not needed to
   // confirm coverage at the desk). Full-demographic zones supply them; reception renders them only if present.
   dateOfBirth: zDate.optional(),
@@ -24,14 +34,48 @@ export const zBeneficiaryIdentity = z.object({
 });
 export type BeneficiaryIdentity = z.infer<typeof zBeneficiaryIdentity>;
 
+/**
+ * One benefit limit and what is left of it (33.9b).
+ *
+ * The reception card has always carried the FULL list — a `{category, limitType, remaining}` row per limit
+ * per active coverage — and the client picked the first monetary one for the headline and discarded the
+ * rest. So a member with a visit count on CONSULT, a cap on PHARMACY and an amount on LAB was summarised as
+ * one number, and the desk could not answer "how many consultations do they have left?" from the screen the
+ * question belongs on.
+ */
+export const zCoverageLimit = z.object({
+  category: z.string(),
+  /** `Amount`, `Count`, `Days`… — the service's own vocabulary, rendered as-is rather than guessed at. */
+  limitType: z.string(),
+  remaining: z.number(),
+});
+export type CoverageLimit = z.infer<typeof zCoverageLimit>;
+
 export const zCoverage = z.object({
-  planName: zLocalized,
+  /**
+   * Nullable, and null is the normal case.
+   *
+   * The client used to send the literal `"Benefit coverage"` here, so every card printed a plan name that
+   * was not a plan name — the reception projection carries no plan, and inventing a label for the field is
+   * worse than leaving it out, because a reader cannot tell a placeholder from a real plan. The row is
+   * rendered only when this is genuinely known.
+   */
+  planName: zLocalized.nullable(),
   band: zLocalized,
+  /** The policy the active coverage sits under. Real data the reception card held and dropped. */
+  policyNo: z.string().optional(),
   // validUntil is optional: the reception card summarises active benefit categories + remaining limits, and
   // does not always carry a policy end-date. Screens render it only when present.
   validUntil: zDate.optional(),
   // 18.D2 (U7): raw number; formatted as EGP in the active locale at render.
   annualCapRemaining: z.number().optional(),
+  /**
+   * Every limit on every active coverage — see zCoverageLimit. Empty when the card carries none.
+   *
+   * Required, not defaulted: a producer that forgets it should fail validation rather than quietly render a
+   * member as having no limits, which reads at a desk as "nothing left to spend" being unknowable.
+   */
+  limits: z.array(zCoverageLimit),
 });
 export type Coverage = z.infer<typeof zCoverage>;
 

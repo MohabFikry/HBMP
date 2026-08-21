@@ -14,6 +14,8 @@ public sealed record ReceptionDocument
 {
     public Guid BeneficiaryId { get; init; }
     public string? MemberNo { get; init; }
+    /// <summary>The number printed on the card — NOT <see cref="MemberNo"/>. See MemberProjection.</summary>
+    public string? CardNumber { get; init; }
     public string GivenName { get; init; } = "";
     public string FamilyName { get; init; } = "";
     public string Status { get; init; } = "Pending";
@@ -45,6 +47,11 @@ public interface IReceptionIndex
     /// ILIKE and returns whatever the database happened to order first — which is exactly how the eligibility
     /// screen came to check the wrong Ahmed. This one is an EXACT match on a unique identifier: it returns
     /// the member or it returns nothing, and there is no first-of-several to pick.</para>
+    ///
+    /// <para><b>Both the member number and the card number.</b> They are different identifiers — the first
+    /// is the enrolment key policy-service issues, the second is what is printed on the object the
+    /// beneficiary hands across the counter — and a desk holding a card must not have to know which is
+    /// which.</para>
     ///
     /// <para><b>Phone is not on the list.</b> A household shares one number, so a phone identifies a family
     /// and not a person — the one thing this method exists to do. Nor is a beneficiary GUID: it is a system
@@ -84,7 +91,7 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
         {
             var like = $"%{term}%";
             query = db.Members.AsNoTracking().Where(m =>
-                m.MemberNo == term || m.NationalId == term || m.Passport == term
+                m.MemberNo == term || m.CardNumber == term || m.NationalId == term || m.Passport == term
                 || m.RefugeeId == term || m.UnhcrNo == term || m.PrimaryPhone == term
                 || EF.Functions.ILike(m.GivenName, like) || EF.Functions.ILike(m.FamilyName, like));
         }
@@ -123,7 +130,7 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
         // the planner returned first is the failure this whole endpoint replaces, and it would reappear here
         // in the one place nobody would look for it.
         var candidates = await db.Members.AsNoTracking().Where(x =>
-            x.MemberNo == id || x.NationalId == id || x.Passport == id
+            x.MemberNo == id || x.CardNumber == id || x.NationalId == id || x.Passport == id
             || x.RefugeeId == id || x.UnhcrNo == id).Take(2).ToListAsync(ct);
         if (candidates.Count > 1) return null;
         var m = candidates.FirstOrDefault();
@@ -159,7 +166,7 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
         }
         return new ReceptionDocument
         {
-            BeneficiaryId = m.BeneficiaryId, MemberNo = m.MemberNo,
+            BeneficiaryId = m.BeneficiaryId, MemberNo = m.MemberNo, CardNumber = m.CardNumber,
             GivenName = m.GivenName, FamilyName = m.FamilyName, Status = m.Status,
             NationalId = m.NationalId, Passport = m.Passport, RefugeeId = m.RefugeeId, UnhcrNo = m.UnhcrNo,
             PolicyNo = active.FirstOrDefault()?.PolicyNo, PrimaryPhone = m.PrimaryPhone,
@@ -183,7 +190,7 @@ public sealed class InMemoryReceptionIndex : IReceptionIndex
             return Task.FromResult<IReadOnlyList<ReceptionDocument>>(
                 _docs.TryGetValue(byId, out var only) ? [only] : []);
         bool Match(ReceptionDocument d) =>
-            d.MemberNo == term || d.NationalId == term || d.Passport == term || d.RefugeeId == term
+            d.MemberNo == term || d.CardNumber == term || d.NationalId == term || d.Passport == term || d.RefugeeId == term
             || d.UnhcrNo == term || d.PolicyNo == term || d.PrimaryPhone == term
             || d.GivenName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || d.FamilyName.Contains(term, StringComparison.OrdinalIgnoreCase);
@@ -195,7 +202,8 @@ public sealed class InMemoryReceptionIndex : IReceptionIndex
         var id = identifier.Trim();
         if (id.Length == 0) return Task.FromResult<ReceptionDocument?>(null);
         bool Exact(ReceptionDocument d) =>
-            d.MemberNo == id || d.NationalId == id || d.Passport == id || d.RefugeeId == id || d.UnhcrNo == id;
+            d.MemberNo == id || d.CardNumber == id || d.NationalId == id || d.Passport == id
+            || d.RefugeeId == id || d.UnhcrNo == id;
         var hit = _docs.Values.Where(Exact).Take(2).ToList();
         if (hit.Count == 1) return Task.FromResult<ReceptionDocument?>(hit[0]);
         if (hit.Count > 1) return Task.FromResult<ReceptionDocument?>(null);

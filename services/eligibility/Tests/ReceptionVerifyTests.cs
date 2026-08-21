@@ -198,6 +198,43 @@ public class ReceptionVerifyTests
     }
 
     /// <summary>
+    /// 33.9b — the number on the card resolves the member, over HTTP and through the projection.
+    /// </summary>
+    /// <remarks>
+    /// <para>Pinned end to end rather than only against the index, because the value has to survive a
+    /// migration column, an EF mapping and the projection updater before the lookup can see it — and the
+    /// reason it was missing in the first place is that ProjectionUpdater read every other field of
+    /// <c>BeneficiaryRegistered</c> and dropped this one. A test below HTTP would pass with the column
+    /// unmapped.</para>
+    /// </remarks>
+    [SkippableFact]
+    public async Task The_number_on_the_card_resolves_the_member_and_is_not_the_member_number()
+    {
+        Skip.If(EligibilityApiFactory.Db is null, "ELIGIBILITY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EligibilityApiFactory();
+        var id = Guid.NewGuid();
+        try
+        {
+            await SeedAsync(app, id, "MRS-M-2026-CARD1", "Amal", "Hassan", "29001019876548",
+                cardNumber: "MRS-CARD-4821");
+
+            using var desk = Desk(app);
+            var r = await desk.PostAsync(new Uri("/api/v1/reception/verify", UriKind.Relative),
+                Body("MRS-CARD-4821", "Hassan"));
+
+            var body = await r.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("verified").GetBoolean().Should().BeTrue("the desk is handed the CARD");
+            var identity = body.GetProperty("card").GetProperty("identity");
+            identity.GetProperty("beneficiaryId").GetGuid().Should().Be(id);
+            // Both travel, because they are different identifiers and the card is the one in the operator's
+            // hand while the member number is what every other screen keys on.
+            identity.GetProperty("cardNumber").GetString().Should().Be("MRS-CARD-4821");
+            identity.GetProperty("memberNo").GetString().Should().Be("MRS-M-2026-CARD1");
+        }
+        finally { await CleanupAsync(app, id); }
+    }
+
+    /// <summary>
     /// 33.9 — a page that was cut says so.
     /// </summary>
     /// <remarks>
@@ -264,12 +301,13 @@ public class ReceptionVerifyTests
     }
 
     private static async Task SeedAsync(
-        EligibilityApiFactory app, Guid id, string memberNo, string given, string family, string nationalId)
+        EligibilityApiFactory app, Guid id, string memberNo, string given, string family, string nationalId,
+        string? cardNumber = null)
     {
         await using var db = EligibilityApiFactory.Ctx();
         db.Members.Add(new MemberProjection
         {
-            TenantId = app.Tenant, BeneficiaryId = id, MemberNo = memberNo,
+            TenantId = app.Tenant, BeneficiaryId = id, MemberNo = memberNo, CardNumber = cardNumber,
             GivenName = given, FamilyName = family, NationalId = nationalId,
             Status = "Active", UpdatedAt = DateTimeOffset.UtcNow,
         });

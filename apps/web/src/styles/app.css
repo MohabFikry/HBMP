@@ -2973,6 +2973,26 @@ iframe.ben-doc-preview { block-size: var(--scroll-sheet); }
 
 /* ── Reception dashboard (14.5) ──────────────────────────────────────────────
    Three cards, then the arrivals table, then the day laid out in hour bands. */
+/*
+ * The eligibility lookup's two halves, on one line.
+ *
+ * They are the two parts of a single question — what the beneficiary presented, and who they say they are —
+ * and stacking them read as two unrelated steps, with the second easy to skip past. `1fr 1fr` rather than
+ * auto: the identifier and the name are equally important and a wider box on either would say otherwise.
+ *
+ * Stacks below 640px. Two half-width fields on a phone are two boxes neither of which fits a 14-digit
+ * national ID, and a field you cannot read what you typed into is worse than a second row.
+ */
+.elig-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp4);
+  align-items: start;
+}
+@media (max-width: 640px) {
+  .elig-pair { grid-template-columns: minmax(0, 1fr); }
+}
+
 .dash-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

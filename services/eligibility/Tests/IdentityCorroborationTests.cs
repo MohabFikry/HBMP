@@ -120,6 +120,8 @@ public class PresentedIdentifierTests
         await idx.UpsertAsync(new ReceptionDocument
         {
             BeneficiaryId = Guid.NewGuid(), MemberNo = "MRS-M-2026-000001",
+            // 33.9b — the number on the CARD, which is not the member number.
+            CardNumber = "MRS-CARD-4821",
             GivenName = "Layla", FamilyName = "Haddad", Status = "Active",
             NationalId = "29001011234567", Passport = "A1234567", RefugeeId = "REF-99",
             UnhcrNo = "UNHCR-42", PolicyNo = "POL-1", PrimaryPhone = "+201000000001",
@@ -128,7 +130,8 @@ public class PresentedIdentifierTests
     }
 
     [Theory]
-    [InlineData("MRS-M-2026-000001")]  // the member card
+    [InlineData("MRS-M-2026-000001")]  // the member number — the enrolment key
+    [InlineData("MRS-CARD-4821")]      // the CARD number — a different identifier, and the one they hand over
     [InlineData("29001011234567")]     // national ID
     [InlineData("A1234567")]           // passport
     [InlineData("REF-99")]             // refugee ID
@@ -160,6 +163,26 @@ public class PresentedIdentifierTests
     [InlineData("   ")]
     public async Task Something_that_is_not_an_individual_identifier_resolves_nobody(string presented) =>
         (await (await Seed()).FindByPresentedIdentifierAsync(presented)).Should().BeNull();
+
+    /// <summary>
+    /// The card number and the member number are both accepted, and they are not the same string.
+    /// </summary>
+    /// <remarks>
+    /// <c>member_no</c> is the enrolment key policy-service issues; <c>card_number</c> is what
+    /// patient-service normalizes and prints on the object a beneficiary carries. The lookup matched every
+    /// identifier except the second, so a desk typing what was in front of them found nobody and fell back
+    /// to searching by name — which is the thing the verified lookup exists to stop.
+    /// </remarks>
+    [Fact]
+    public async Task The_card_number_and_the_member_number_both_resolve_and_are_not_the_same_field()
+    {
+        var idx = await Seed();
+        var byCard = await idx.FindByPresentedIdentifierAsync("MRS-CARD-4821");
+        var byMember = await idx.FindByPresentedIdentifierAsync("MRS-M-2026-000001");
+
+        byCard!.BeneficiaryId.Should().Be(byMember!.BeneficiaryId, "they name one person");
+        byCard.CardNumber.Should().NotBe(byCard.MemberNo, "and they are two different identifiers");
+    }
 
     [Fact]
     public async Task A_policy_covering_more_than_one_person_resolves_nobody()

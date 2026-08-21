@@ -11,6 +11,17 @@ public sealed class MemberProjection
     public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public string? MemberNo { get; set; }
+
+    /// <summary>
+    /// The number PRINTED ON THE CARD (33.9b) — distinct from <see cref="MemberNo"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>member_no</c> is the enrolment key policy-service issues; this is what patient-service normalizes
+    /// and prints, and it is what a beneficiary hands across a counter. The reception search matched every
+    /// identifier except this one, so a desk typing the card number found nobody and fell back to searching
+    /// by name — which is what the verified lookup exists to stop.
+    /// </remarks>
+    public string? CardNumber { get; set; }
     public string GivenName { get; set; } = "";
     public string FamilyName { get; set; } = "";
     public string Status { get; set; } = "Pending";        // MemberStatus name

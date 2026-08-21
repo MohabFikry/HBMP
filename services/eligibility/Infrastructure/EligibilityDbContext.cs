@@ -23,6 +23,7 @@ public sealed class EligibilityDbContext(DbContextOptions<EligibilityDbContext> 
             e.ToTable("member_projection");
             e.HasKey(x => x.BeneficiaryId);
             e.HasIndex(x => x.MemberNo);
+            e.HasIndex(x => x.CardNumber);
             e.HasIndex(x => x.NationalId);
             e.HasIndex(x => x.Passport);
             e.HasIndex(x => x.PrimaryPhone);

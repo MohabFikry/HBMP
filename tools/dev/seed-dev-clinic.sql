@@ -244,9 +244,14 @@ WHERE p.status <> 'Pending' AND bc.code IN ('CONSULT', 'LAB', 'PHARMACY', 'IMAGI
 ON CONFLICT (coverage_limit_id) DO UPDATE SET consumed_value = EXCLUDED.consumed_value;
 
 -- ── Eligibility projections — what reception and the call centre actually SEARCH ────────────────────────────
+-- card_number alongside member_no, because they are two DIFFERENT identifiers: the member number is
+-- policy-service's enrolment key, the card number is what patient-service prints on the object a beneficiary
+-- carries. In production this arrives on BeneficiaryRegistered; here the projection is seeded directly, and a
+-- seed that omitted it would give a dev environment where typing the card number in front of you finds
+-- nobody — which is the exact defect 33.9b fixed.
 INSERT INTO eligibility.member_projection
-  (beneficiary_id, member_no, given_name, family_name, status, primary_phone, national_id, unhcr_no, tenant_id)
-SELECT b.beneficiary_id, b.member_no, b.given_name, b.family_name, b.status,
+  (beneficiary_id, member_no, card_number, given_name, family_name, status, primary_phone, national_id, unhcr_no, tenant_id)
+SELECT b.beneficiary_id, b.member_no, b.card_number, b.given_name, b.family_name, b.status,
        (SELECT c.value FROM patient.contact c
          WHERE c.beneficiary_id = b.beneficiary_id AND c.contact_type = 'Phone' AND c.is_primary LIMIT 1),
        (SELECT i.identifier_value FROM patient.beneficiary_identifier i
@@ -256,7 +261,8 @@ SELECT b.beneficiary_id, b.member_no, b.given_name, b.family_name, b.status,
        b.tenant_id
 FROM patient.beneficiary b
 ON CONFLICT (beneficiary_id) DO UPDATE
-  SET member_no = EXCLUDED.member_no, given_name = EXCLUDED.given_name, family_name = EXCLUDED.family_name,
+  SET member_no = EXCLUDED.member_no, card_number = EXCLUDED.card_number,
+      given_name = EXCLUDED.given_name, family_name = EXCLUDED.family_name,
       status = EXCLUDED.status, primary_phone = EXCLUDED.primary_phone, national_id = EXCLUDED.national_id,
       unhcr_no = EXCLUDED.unhcr_no, updated_at = now();
 

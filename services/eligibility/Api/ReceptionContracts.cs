@@ -20,21 +20,36 @@ public sealed record StatusSemantics(string Label, string Icon, string Shape, st
     };
 }
 
-public sealed record ReceptionIdentity(Guid BeneficiaryId, string? MemberNo, string DisplayName, string Status, StatusSemantics StatusSemantics);
+/// <param name="MemberNo">The enrolment key policy-service issues (MRS-M-…).</param>
+/// <param name="CardNumber">
+/// The number printed on the card the beneficiary carries — a DIFFERENT identifier, owned by
+/// patient-service. Both are sent because the desk is handed the card and must not have to know which
+/// number it is looking at. Null until that beneficiary's next projection event (migration 0007).
+/// </param>
+public sealed record ReceptionIdentity(
+    Guid BeneficiaryId, string? MemberNo, string DisplayName, string Status, StatusSemantics StatusSemantics,
+    string? CardNumber = null);
 public sealed record VisitHistorySummary(int Count, DateOnly? LastVisitDate, string? LastVisitType);
 
+/// <param name="PolicyNo">
+/// The policy the active coverage sits under. Present on <see cref="ReceptionDocument"/> since 2.2 and not
+/// projected onto this card until 33.9b — so the desk was shown a coverage summary that could not say which
+/// policy it summarised. Identity-free: a policy number names a contract, not a person.
+/// </param>
 public sealed record ReceptionResultCard(
     ReceptionIdentity Identity,
     IReadOnlyList<string> Coverage,
     IReadOnlyList<RemainingLimit> RemainingLimits,
-    VisitHistorySummary VisitHistory)
+    VisitHistorySummary VisitHistory,
+    string? PolicyNo = null)
 {
     public static ReceptionResultCard From(ReceptionDocument d) => new(
         new ReceptionIdentity(d.BeneficiaryId, d.MemberNo,
-            $"{d.GivenName} {d.FamilyName}".Trim(), d.Status, StatusSemantics.For(d.Status)),
+            $"{d.GivenName} {d.FamilyName}".Trim(), d.Status, StatusSemantics.For(d.Status), d.CardNumber),
         d.ActiveCategories,
         d.RemainingLimits,
-        new VisitHistorySummary(d.VisitCount, d.LastVisitDate, d.LastVisitType));
+        new VisitHistorySummary(d.VisitCount, d.LastVisitDate, d.LastVisitType),
+        d.PolicyNo);
 }
 
 /// <summary>The reception search response — result cards, or an empty state with guidance.</summary>

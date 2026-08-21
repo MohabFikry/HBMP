@@ -15,24 +15,12 @@ const S = {
   // first hit it came back with. "Ahmed" matched every Ahmed on the platform and one of them was shown, with
   // nothing to say there had been others — so the plan, the remaining cap and the visit verdict on screen
   // could belong to a person nobody had picked.
-  fieldId: { en: "Card or ID number", ar: "رقم البطاقة أو الهوية" },
-  fieldIdHelp: {
-    en: "Whatever they presented: member card, national ID, refugee ID, UNHCR number, passport or policy "
-      + "number. It must match in full — a partial number finds nobody.",
-    ar: "ما قدّموه: بطاقة العضوية أو الرقم القومي أو رقم اللاجئ أو رقم المفوضية أو جواز السفر أو رقم الوثيقة. "
-      + "يجب أن يطابق بالكامل — الرقم الناقص لا يجد أحداً.",
-  },
+  // The labels carry the instruction. Three paragraphs of help under three fields is a form nobody reads —
+  // and the two rules that MATTER (an identifier must match in full, a name fragment needs two letters) are
+  // enforced by the service and reported as refusals with their own wording, so the help text was restating
+  // in advance what the screen says precisely at the moment it applies.
+  fieldId: { en: "Card, member or ID number", ar: "رقم البطاقة أو العضوية أو الهوية" },
   fieldName: { en: "Part of their name", ar: "جزء من اسمهم" },
-  fieldNameHelp: {
-    en: "A given or family name is enough — it confirms the card belongs to the person in front of you. "
-      + "At least two letters.",
-    ar: "الاسم الأول أو اسم العائلة يكفي — للتأكد من أن البطاقة تخص الشخص الذي أمامك. حرفان على الأقل.",
-  },
-  // This screen is mounted under BOTH /reception/eligibility and /beneficiaries/eligibility (see
-  // screens/registry.tsx), so it cannot name reception: a registration officer reading "reception sees
-  // coverage only" is being told about somebody else's permissions, not their own. The rule is a property
-  // of the LOOKUP, not of who is running it, so it is stated that way and is true for every caller.
-  help: { en: "Minimum necessary — this lookup returns coverage only, never clinical data.", ar: "الحد الأدنى — يعرض هذا البحث التغطية فقط دون بيانات سريرية." },
   check: { en: "Check eligibility", ar: "تحقق من الأهلية" },
   // The idle card used to repeat the instruction already sitting on the field above it. What it says now is
   // the thing the field cannot: what the check ANSWERS, so an operator knows before running it whether this
@@ -81,14 +69,23 @@ const S = {
   visitOk: { en: "Visit allowed today", ar: "الزيارة مسموحة اليوم" },
   visitNo: { en: "Visit not allowed", ar: "الزيارة غير مسموحة" },
   card: { en: "Card", ar: "البطاقة" },
+  memberNo: { en: "Member no.", ar: "رقم العضوية" },
+  policyNo: { en: "Policy", ar: "الوثيقة" },
+  limitsHeading: { en: "Remaining by benefit", ar: "المتبقي حسب المنفعة" },
+  limitCategory: { en: "Benefit", ar: "المنفعة" },
+  limitType: { en: "Limit", ar: "نوع الحد" },
+  limitRemaining: { en: "Remaining", ar: "المتبقي" },
+  limitsNone: {
+    en: "This coverage carries no per-benefit limits.",
+    ar: "لا توجد حدود لكل منفعة على هذه التغطية.",
+  },
   dob: { en: "Date of birth", ar: "تاريخ الميلاد" },
 
   // ---- 32.6 — the benefit category, and what the answer is about ----
   category: { en: "Benefit category (optional)", ar: "فئة المنفعة (اختياري)" },
   categoryHelp: {
-    en: "What the visit is for. Naming it gets a coverage verdict and a copay for that benefit; leaving it "
-      + "blank checks the membership only.",
-    ar: "الغرض من الزيارة. تحديدها يعطي قراراً بالتغطية ومساهمة لتلك المنفعة؛ وتركها فارغة يتحقق من العضوية فقط.",
+    en: "Naming it also returns the copay for that benefit.",
+    ar: "تحديدها يعرض أيضاً المساهمة الخاصة بتلك المنفعة.",
   },
   categoryAny: { en: "Not decided yet", ar: "لم تُحدَّد بعد" },
   catConsult: { en: "Consultation", ar: "كشف" },
@@ -187,24 +184,26 @@ export function ReceptionEligibility() {
       <PageHeader title={t(S.title)} />
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <form onSubmit={onSubmit} className="stack" aria-label={t(S.title)}>
-          <InputField
-            label={t(S.fieldId)}
-            help={t(S.fieldIdHelp)}
-            value={identifier}
-            onChange={(e) => setIdentifier(e.currentTarget.value)}
-            autoComplete="off"
-            inputMode="text"
-            required
-          />
-          <InputField
-            label={t(S.fieldName)}
-            help={t(S.fieldNameHelp)}
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            autoComplete="off"
-            required
-          />
-          <p className="muted" style={{ margin: 0 }}>{t(S.help)}</p>
+          {/* The two halves of one question — what they presented, and who they say they are — so they read
+              as a pair rather than as two unrelated steps. Stacks below 640px: side-by-side fields on a
+              phone are two half-width boxes neither of which fits a national ID. */}
+          <div className="elig-pair">
+            <InputField
+              label={t(S.fieldId)}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.currentTarget.value)}
+              autoComplete="off"
+              inputMode="text"
+              required
+            />
+            <InputField
+              label={t(S.fieldName)}
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+              autoComplete="off"
+              required
+            />
+          </div>
           <ComboboxField
             label={t(S.category)}
             help={t(S.categoryHelp)}
@@ -304,8 +303,14 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
       <div className="result-head">
         <div>
           <h2 style={{ margin: 0 }}>{t(b.name)}</h2>
+          {/* Card and member number are DIFFERENT identifiers (33.9b), and the desk is holding one of them.
+              The member number is shown beside the card only when it differs — printing the same string
+              twice under two labels teaches a reader that the labels do not mean anything. */}
           <p className="muted" style={{ margin: "4px 0 0" }}>
             {t(S.card)}: <span className="tnum">{b.cardNumber}</span>
+            {b.memberNo && b.memberNo !== b.cardNumber && (
+              <> · {t(S.memberNo)}: <span className="tnum">{b.memberNo}</span></>
+            )}
             {b.dateOfBirth && <> · {t(S.dob)}: <span className="tnum">{b.dateOfBirth}</span></>}
           </p>
         </div>
@@ -323,13 +328,33 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         </p>
       )}
 
+      {/*
+        The coverage details are shown in FULL, at either scope.
+
+        <p>They used to be three rows — a plan name, the category list, and one monetary limit — and the
+        plan name was a hardcoded literal, so the card printed a plan that was not a plan while the per-
+        benefit limits the projection actually carries were dropped on the way in. A member with four
+        consultations and EGP 3,200 of laboratory cover left was summarised as one number, and the desk
+        could not answer "how many consultations do they have?" from the screen that question belongs on.</p>
+
+        <p>Not gated on scope. Naming a benefit category asks an ADDITIONAL question — is this service
+        covered, and what does it cost — it does not make the rest of the coverage less true, and a desk
+        that has to run the check twice to see the whole picture will run it once.</p>
+      */}
       {c && (
-        <dl className="kv-grid" aria-label={t(S.coverage)}>
-          <div><dt>{t(S.plan)}</dt><dd>{t(c.planName)}</dd></div>
-          <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
-          {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
-          {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{fmt.money(c.annualCapRemaining)}</dd></div>}
-        </dl>
+        <>
+          <dl className="kv-grid" aria-label={t(S.coverage)}>
+            {/* Rendered only when a plan is genuinely known — see zCoverage.planName. */}
+            {c.planName && <div><dt>{t(S.plan)}</dt><dd>{t(c.planName)}</dd></div>}
+            {c.policyNo && <div><dt>{t(S.policyNo)}</dt><dd className="tnum">{c.policyNo}</dd></div>}
+            <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
+            {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
+            {c.annualCapRemaining != null && (
+              <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{fmt.money(c.annualCapRemaining)}</dd></div>
+            )}
+          </dl>
+          <CoverageLimits limits={c.limits} t={t} fmt={fmt} />
+        </>
       )}
 
       <CostShareBlock share={result.costShare} t={t} S={S} fmt={fmt} />
@@ -342,6 +367,54 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * 33.9b — every limit on the coverage, not the one the client happened to pick.
+ *
+ * <p>The reception card has always carried a `{category, limitType, remaining}` row per limit per active
+ * coverage. The api client took the first monetary one for the headline and discarded the rest, so the
+ * screen could show a member's annual cap and nothing about the four consultations or the one imaging study
+ * they had left.</p>
+ *
+ * <p><b>The limit TYPE is rendered, not inferred.</b> `Count` and `Amount` are different quantities and the
+ * only thing that distinguishes "4" from "EGP 4" is which one this says. Money is formatted as money;
+ * everything else is shown as the plain number it is, because guessing a unit for a vocabulary the service
+ * owns is how a count of visits becomes a currency figure on a desk.</p>
+ */
+function CoverageLimits({
+  limits, t, fmt,
+}: {
+  limits: EligibilityResult["coverage"] extends infer C ? C extends { limits: infer L } ? L : never : never;
+  t: (l: Localized) => string;
+  fmt: ReturnType<typeof useFormat>;
+}) {
+  if (limits.length === 0) return <p className="muted" style={{ margin: 0 }}>{t(S.limitsNone)}</p>;
+  return (
+    <table className="mini-table" aria-label={t(S.limitsHeading)}>
+      <caption className="section-h" style={{ textAlign: "start", marginBottom: "var(--sp2)" }}>
+        {t(S.limitsHeading)}
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">{t(S.limitCategory)}</th>
+          <th scope="col">{t(S.limitType)}</th>
+          <th scope="col">{t(S.limitRemaining)}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {limits.map((l, i) => (
+          <tr key={`${l.category}-${l.limitType}-${i}`}>
+            <td>{l.category}</td>
+            <td>{l.limitType}</td>
+            <td className="tnum">
+              {/^amount|money|cap$/i.test(l.limitType) ? fmt.money(l.remaining) : l.remaining}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

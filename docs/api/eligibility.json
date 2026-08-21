@@ -389,6 +389,10 @@
           },
           "statusSemantics": {
             "$ref": "#/components/schemas/StatusSemantics"
+          },
+          "cardNumber": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -415,6 +419,10 @@
           },
           "visitHistory": {
             "$ref": "#/components/schemas/VisitHistorySummary"
+          },
+          "policyNo": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

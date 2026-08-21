@@ -1010,7 +1010,10 @@ export class HttpApiClient implements ApiClient {
     const identity = c?.identity ?? {};
     const categories: string[] = c?.coverage ?? [];
     const limits: any[] = c?.remainingLimits ?? [];
-    // Pick a monetary remaining-limit (annual cap) for the coverage summary, if the card carries one.
+    // The monetary limit is the HEADLINE, not the whole answer. Every limit the card carries is passed on
+    // below — this used to pick one and drop the rest, so a member with a visit count on CONSULT and a cap
+    // on PHARMACY was summarised as a single number and the desk could not answer "how many consultations
+    // are left?" from the screen that question belongs on.
     const cap = limits.find((l) => /amount|annual/i.test(String(l.limitType)));
 
     const membership = (await postRaw(`/eligibility/check`, { beneficiaryId })) as any;
@@ -1033,13 +1036,27 @@ export class HttpApiClient implements ApiClient {
       beneficiary: {
         id: identity.beneficiaryId ?? beneficiaryId,
         name: neutral(identity.displayName),
-        cardNumber: identity.memberNo ?? "",
+        // The CARD number where the projection has it, the member number otherwise. They are different
+        // identifiers (33.9b) and this field is what the desk compares against the object in their hand, so
+        // the card wins; the fallback keeps a member whose projection predates migration 0007 legible
+        // rather than blank.
+        cardNumber: identity.cardNumber ?? identity.memberNo ?? "",
+        memberNo: identity.memberNo ?? undefined,
       },
       coverage: categories.length
         ? {
-            planName: { en: "Benefit coverage", ar: "التغطية التأمينية" },
+            // No plan name is known here — the reception projection carries none. This used to send the
+            // literal "Benefit coverage", so every card printed a plan name that was not one, and a reader
+            // could not tell the placeholder from a real plan. Null omits the row.
+            planName: null,
             band: neutral(categories.join(" · ")),
+            policyNo: c?.policyNo ?? undefined,
             annualCapRemaining: cap ? money(cap.remaining, "coverage.annualCapRemaining") : undefined,
+            limits: limits.map((l) => ({
+              category: String(l.category ?? ""),
+              limitType: String(l.limitType ?? ""),
+              remaining: Number(l.remaining ?? 0),
+            })),
           }
         : null,
       costShare: toCostShare(benefit?.costShare, category),
