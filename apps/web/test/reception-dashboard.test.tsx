@@ -21,9 +21,13 @@ freezeClock();
  */
 describe("Reception dashboard", () => {
   const visitsTable = () => within(screen.getByRole("table", { name: /^visits$/i }));
+  /** One KPI tile by its label — scoped to the card row, because status words also appear in the table. */
+  const card = (label: string) =>
+    within(document.querySelector(".dash-kpis") as HTMLElement)
+      .getByText(label).closest(".mrs-kpi") as HTMLElement;
 
   it("takes the card figures from the server, not from counting the board", async () => {
-    const counts = vi.fn().mockResolvedValue({ total: 137, checkedIn: 12, noShow: 4 });
+    const counts = vi.fn().mockResolvedValue({ total: 137, checkedIn: 12, noShow: 4, cancelled: 9 });
     const api = new DevApiClient({ latencyMs: 0 });
     (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
     renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
@@ -32,7 +36,43 @@ describe("Reception dashboard", () => {
     expect(await screen.findByText("137")).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument();
     expect(counts).toHaveBeenCalled();
+  });
+
+  /**
+   * Cancelled is its own card, and it is not the no-shows card.
+   *
+   * Both count appointments nobody attended, and they are different facts about the day: a cancellation is
+   * given up in advance, so the slot is freed and the waitlist can promote into it, where a no-show consumes
+   * a slot nobody else could use. The desk can chase one of those and not the other. Pinned by VALUE and not
+   * only by label, because the way this goes wrong is the two tiles being fed from one field.
+   */
+  it("counts cancellations apart from no-shows", async () => {
+    const counts = vi.fn().mockResolvedValue({ total: 40, checkedIn: 21, noShow: 3, cancelled: 7 });
+    const api = new DevApiClient({ latencyMs: 0 });
+    (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
+    renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
+
+    await screen.findByText("40");
+    expect(within(card("Cancelled")).getByText("7")).toBeInTheDocument();
+    expect(within(card("No-shows")).getByText("3")).toBeInTheDocument();
+
+    // `total` is the whole book for the day, not the sum of the named states — 21 + 3 + 7 is 31 and the card
+    // says 40, because Booked and Completed are none of the three. Nothing here invites a reader to subtract.
+    expect(within(card("Appointments")).getByText("40")).toBeInTheDocument();
+  });
+
+  it("reads a genuine zero as 0 on the new card, not as a dash", async () => {
+    // The rule the other three cards already follow, extended to this one: "—" would collapse "no
+    // cancellations today" into the same glyph as "the figure never arrived", and a desk cannot tell those
+    // apart. A failed load is said in words by the alert below the row instead.
+    const api = new DevApiClient({ latencyMs: 0 });
+    (api as unknown as { appointmentCounts: unknown }).appointmentCounts =
+      vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0, cancelled: 0 });
+    renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
+
+    await waitFor(() => expect(within(card("Cancelled")).getByText("0")).toBeInTheDocument());
   });
 
   it("lists only patients who have ARRIVED, by name", async () => {
@@ -143,7 +183,7 @@ describe("Reception dashboard", () => {
   it("steps to another day, shows its DATE, and offers a way back inside the picker", async () => {
     const user = userEvent.setup();
     const api = new DevApiClient({ latencyMs: 0 });
-    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0 });
+    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0, cancelled: 0 });
     (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
     const board = vi.fn().mockResolvedValue([]);
     (api as unknown as { appointments: unknown }).appointments = board;
@@ -169,7 +209,7 @@ describe("Reception dashboard", () => {
   it("asks the server for the SAME day across the cards and the board", async () => {
     const user = userEvent.setup();
     const api = new DevApiClient({ latencyMs: 0 });
-    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0 });
+    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0, cancelled: 0 });
     const board = vi.fn().mockResolvedValue([]);
     (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
     (api as unknown as { appointments: unknown }).appointments = board;

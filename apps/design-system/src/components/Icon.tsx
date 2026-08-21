@@ -56,6 +56,16 @@ export const iconPaths = {
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   /** A date, and by extension an age. */
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  /**
+   * Struck from the day's book — a cancelled appointment.
+   *
+   * Deliberately the `calendar` body with a stroke through it, so the pair reads as one family: the
+   * Appointments tile is the book, this one is the part taken out of it. And deliberately NOT `cross`, which
+   * the no-shows tile beside it already owns — those two figures are the ones most easily confused for each
+   * other, and the tiles are found by shape before the label is read (0B §8b).
+   */
+  "calendar-off": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'
+      + '<path d="m3 3 18 18"/>',
   /** Sex. The combined venus/mars mark rather than a second person glyph. */
   sex: '<circle cx="11" cy="13" r="4"/><path d="m14 10 5-5M15 5h4v4"/><path d="M11 17v4M9 19h4"/>',
   /** Nationality — a globe, not a flag: there is one glyph for the field, and flags would need 200. */

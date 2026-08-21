@@ -2198,6 +2198,10 @@
           "noShow": {
             "type": "integer",
             "format": "int32"
+          },
+          "cancelled": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false

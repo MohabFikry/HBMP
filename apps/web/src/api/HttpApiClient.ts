@@ -4577,6 +4577,7 @@ export class HttpApiClient implements ApiClient {
       total: Number(r?.total ?? 0),
       checkedIn: Number(r?.checkedIn ?? 0),
       noShow: Number(r?.noShow ?? 0),
+      cancelled: Number(r?.cancelled ?? 0),
     });
   }
 

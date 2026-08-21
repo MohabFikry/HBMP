@@ -251,15 +251,26 @@ export const zAppointmentDay = z.object({
 export type AppointmentDay = z.infer<typeof zAppointmentDay>;
 
 /**
- * The reception dashboard's three cards for one Cairo day, counted SERVER-side.
+ * The reception dashboard's cards for one Cairo day, counted SERVER-side.
  *
  * Not tallied from the board: that read is capped at 200 rows, so on a busy day the cards would have
  * disagreed with reality — and disagreed downwards, which is the direction nobody notices.
+ *
+ * `total` is every appointment on the day's book and is NOT the sum of the named states: Booked and Completed
+ * are neither checked-in-right-now nor missed nor cancelled, and a cancelled appointment stays counted in the
+ * book it was struck from. Reading `total - checkedIn - noShow - cancelled` as "still to arrive" is therefore
+ * wrong, and the four figures are shown as four figures for that reason.
+ *
+ * `cancelled` and `noShow` are deliberately separate. Both are appointments nobody attended, and they are not
+ * the same fact about the day: one was given up in advance, freeing the slot and often promoting somebody off
+ * the waitlist, and the other consumed a slot that could not be reused. Folding them together would hide the
+ * only one of the two the desk can do anything about.
  */
 export const zAppointmentCounts = z.object({
   total: z.number().int().nonnegative(),
   checkedIn: z.number().int().nonnegative(),
   noShow: z.number().int().nonnegative(),
+  cancelled: z.number().int().nonnegative(),
 });
 export type AppointmentCounts = z.infer<typeof zAppointmentCounts>;
 

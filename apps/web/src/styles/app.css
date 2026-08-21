@@ -2975,6 +2975,23 @@ iframe.ben-doc-preview { block-size: var(--scroll-sheet); }
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--sp3);
 }
+/*
+ * The waiting room's heading row — `.result-head` plus the two things it was missing here.
+ *
+ * The `h2` in this row carries `margin: 0`, because `.section-h`'s own bottom margin would push the row's
+ * two items apart; nothing put that spacing back, so the row had NO bottom margin at all and Call next — a
+ * 44px control against a 12.5px label — sat flush on top of the table beneath it while hugging the card's
+ * top-right corner. The card's padding was never the problem: it is `--sp3` on all four sides, the same as
+ * the Visits card above. What was missing was the gap BELOW the row.
+ *
+ * `center` rather than `.result-head`'s `flex-start`: that default is right where the left-hand side is a
+ * heading with a sentence under it, and wrong here, where a small-caps label and a button are read as one
+ * line. The button is four times the label's height, so top-aligning them reads as the label having slipped.
+ */
+.wait-head {
+  align-items: center;
+  margin-block-end: var(--sp3);
+}
 .dash-day {
   list-style: none;
   margin: 0;

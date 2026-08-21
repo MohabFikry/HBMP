@@ -796,7 +796,7 @@ public static class AppointmentsModule
             });
         });
 
-        // GET /appointments/summary — the three counts the reception dashboard's cards show.
+        // GET /appointments/summary — the counts the reception dashboard's cards show.
         //
         // Counted HERE rather than by tallying the board client-side. The board is capped at 200 rows, so a
         // busy branch would have produced cards that quietly disagreed with reality — and disagreed in the
@@ -821,10 +821,14 @@ public static class AppointmentsModule
                 .ToListAsync(ct);
 
             int Of(AppointmentStatus s) => byStatus.FirstOrDefault(x => x.Status == s)?.Count ?? 0;
+            // `Total` is the whole book for the day, cancellations included — it is not the sum of the named
+            // states, and Booked and Completed are neither of them. Cancelled is counted apart from NoShow
+            // because only one of the two frees the slot; see AppointmentSummaryResponse.
             return Results.Ok(new AppointmentSummaryResponse(
                 Total: byStatus.Sum(x => x.Count),
                 CheckedIn: Of(AppointmentStatus.CheckedIn),
-                NoShow: Of(AppointmentStatus.NoShow)));
+                NoShow: Of(AppointmentStatus.NoShow),
+                Cancelled: Of(AppointmentStatus.Cancelled)));
         })
         .Produces<AppointmentSummaryResponse>();
 

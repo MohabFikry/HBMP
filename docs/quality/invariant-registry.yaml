@@ -2743,3 +2743,18 @@ invariants:
       - Mersal.Orders.Tests.LineResultViewTests.The_readable_projection_carries_the_line_context_the_dialog_renders
       - apps/web/test/result-detail.test.tsx::fails loudly if the endpoint ever answers with an array again
       - apps/web/test/result-detail.test.tsx::takes the value, code, category and status from the response rather than from defaults
+
+  - id: INV-A-SUMMARY-NAMES-EVERY-STATE-IT-COUNTS
+    statement: >-
+      The day's summary reports cancellations as their own figure rather than absorbing them into the total.
+      A cancellation frees its slot and can promote somebody off the waitlist; a no-show consumes one nobody
+      could reuse. A count that names one and not the other leaves the desk unable to see the half it can act
+      on, and unable to tell a morning of eleven cancellations from a morning of none.
+    source: 07-functional-requirements.md FR-APT-004; 23-state-machines.md §664; 46-order-amendment-and-cancellation.md
+    severity: High
+    tests:
+      - Mersal.Emr.Tests.AppointmentSummaryTests.Cancellations_are_counted_and_named_rather_than_folded_into_the_total
+      - Mersal.Emr.Tests.AppointmentSummaryTests.A_day_of_cancellations_reports_no_no_shows
+      - Mersal.Emr.Tests.AppointmentSummaryTests.Another_branchs_cancellations_are_not_on_this_desks_card
+      - apps/web/test/reception-dashboard.test.tsx::counts cancellations apart from no-shows
+      - apps/web/test/reception-dashboard.test.tsx::reads a genuine zero as 0 on the new card, not as a dash

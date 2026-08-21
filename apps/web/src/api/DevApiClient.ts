@@ -811,7 +811,9 @@ export class DevApiClient implements ApiClient {
   }
   appointmentCounts(_date?: string) {
     void _date;
-    return this.gate(() => ok(zAppointmentCounts, { total: 4, checkedIn: 1, noShow: 1 }));
+    // Four on the book, of which one arrived, one never did and one rang ahead — so the fixture exercises
+    // all four cards, and `total` is visibly not the sum of the three named states.
+    return this.gate(() => ok(zAppointmentCounts, { total: 4, checkedIn: 1, noShow: 1, cancelled: 1 }));
   }
   cancelAppointment(appointmentId: string, _reason: string) {
     void _reason;

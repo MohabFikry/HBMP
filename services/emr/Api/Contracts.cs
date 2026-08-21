@@ -186,10 +186,19 @@ public sealed record DoctorAvailabilityResponse(
 /// cell to the left.</summary>
 public sealed record AppointmentDayResponse(DateOnly Day, int OpenSlots);
 
-/// <summary>The reception dashboard's three cards, for one Cairo day in the caller's branch. Counts only —
+/// <summary>The reception dashboard's cards, for one Cairo day in the caller's branch. Counts only —
 /// this is a summary, and a summary that carried identity would be a way to read the board without the
 /// board's scoping.</summary>
-public sealed record AppointmentSummaryResponse(int Total, int CheckedIn, int NoShow);
+/// <remarks>
+/// <para><see cref="Total"/> is every appointment on that day's book and is NOT the sum of the three named
+/// states: Booked and Completed are none of them, and a cancelled appointment stays counted in the book it
+/// was struck from.</para>
+/// <para><see cref="Cancelled"/> is reported apart from <see cref="NoShow"/> because they are different facts
+/// about the day. A cancellation is given up in advance — the slot is freed and the waitlist may promote into
+/// it — where a no-show consumes a slot nobody else could use. Summing them into one "did not attend" figure
+/// would hide the half a desk can act on.</para>
+/// </remarks>
+public sealed record AppointmentSummaryResponse(int Total, int CheckedIn, int NoShow, int Cancelled);
 
 /// <summary>One step in an appointment's operational timeline: the status it moved INTO, when, and who did it.
 /// Minimum-necessary by construction — the row snapshots in emr.appointment_history hold the whole appointment,

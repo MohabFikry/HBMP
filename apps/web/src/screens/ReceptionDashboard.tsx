@@ -23,6 +23,7 @@ const S = {
   nextMonth: { en: "Next month", ar: "الشهر التالي" },
   close: { en: "Close", ar: "إغلاق" },
   cardCheckedIn: { en: "Checked in", ar: "تم الوصول" },
+  cardCancelled: { en: "Cancelled", ar: "ملغاة" },
   cardNoShow: { en: "No-shows", ar: "لم يحضروا" },
   countsFailed: {
     en: "Couldn't load today's figures — the cards below are not current.",
@@ -304,9 +305,13 @@ export function ReceptionDashboard() {
 
       {/* ── Cards ──────────────────────────────────────────────────────
           Counted server-side. Tallying the board here would be capped at its 200-row page and would
-          undercount a busy day, in the direction nobody checks. */}
+          undercount a busy day, in the direction nobody checks.
+
+          `total` is the whole book for the day and is NOT the sum of the three named states — Booked and
+          Completed are none of them, and a cancelled appointment stays counted in the book it was struck
+          from. Four figures, shown as four figures, rather than one the desk has to do arithmetic on. */}
       {/* The glyphs are decorative and marked so: the label names each figure in words, and the icon is what
-          lets the desk find the right tile by shape on a board of three identical white cards. */}
+          lets the desk find the right tile by shape on a board of identical white cards. */}
       <div className="dash-kpis">
         <KpiCard
           label={t(S.cardTotal)} value={cardValue(counts.data?.total)}
@@ -316,8 +321,18 @@ export function ReceptionDashboard() {
           label={t(S.cardCheckedIn)} value={cardValue(counts.data?.checkedIn)}
           icon={<Icon name="check2" />}
         />
-        {/* The only one of the three that counts something going WRONG, and it looked exactly like the other
-            two. The tone marks the subject, not the figure — it stays red on a morning that reads 0, because
+        {/* Cancelled sits BEFORE no-shows, and apart from it. Both are appointments nobody attended, and
+            they are not the same fact about the day: a cancellation is given up in advance, so the slot is
+            freed and the waitlist can promote into it, where a no-show consumes a slot nobody else could
+            use. `warn`, not `bad` — the tone names the category, and a patient who rang ahead did the right
+            thing. On a narrow desk the row wraps two-and-two, which puts what was on the book above what
+            came off it. */}
+        <KpiCard
+          label={t(S.cardCancelled)} value={cardValue(counts.data?.cancelled)}
+          icon={<Icon name="calendar-off" />} tone="warn"
+        />
+        {/* The only one of the four that counts something going WRONG, and it looked exactly like the others.
+            The tone marks the subject, not the figure — it stays red on a morning that reads 0, because
             the desk finds this tile by colour and a card that changes identity with its value cannot be
             found that way. The number itself stays in body colour for the same reason. */}
         <KpiCard
@@ -328,7 +343,7 @@ export function ReceptionDashboard() {
       {/*
         A failed count is SAID, not implied by a dash.
 
-        These three cards previously rendered `?? "—"`, which collapsed three different situations into one
+        These cards previously rendered `?? "—"`, which collapsed three different situations into one
         glyph: still loading, failed to load, and a genuinely quiet morning with zero appointments. A desk
         reading "—" cannot tell "we don't know" from "there are none", and the second reading is the
         dangerous one — it invites someone to conclude the day is empty when the figure simply never arrived.
@@ -474,7 +489,7 @@ function WaitingRoom({ t }: { t: (l: Localized) => string }) {
 
   return (
     <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp4)" }}>
-      <div className="result-head">
+      <div className="result-head wait-head">
         <h2 className="section-h" style={{ margin: 0 }}>{t(S.waitingHeading)}</h2>
         <Button variant="primary" size="sm" loading={busy === "call-next"}
           onClick={() => void act("call-next", () => api.callNextWaiting())}>
