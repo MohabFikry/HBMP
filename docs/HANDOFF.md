@@ -42,22 +42,29 @@ cd apps/web && npx vitest run          # 377 tests
 
 Infrastructure: `infra/compose` (Tier 1, single node). Postgres is published on **55432**, not 5432.
 
-## Measured state, 2026-08-20 — `master`, after the stack landed
+## Measured state, 2026-08-21 — after pass 6 and the standing-debt pass
 
 | | |
 |---|---|
-| Backend suite | **3,988 passed, 0 failed, 0 skipped** (38 assemblies, `--with-db`) — measured 2026-08-20, after pass 6 |
+| Backend suite | **3,916 passed, 0 failed, 0 skipped** (38 assemblies, `--with-db`) — measured 2026-08-21, after the debt pass |
 | Web suite | **1,535 passed, 0 failed** (125 files, incl. axe over every route x locale x theme) — measured 2026-08-20, after pass 6 |
 | OpenAPI drift | **22 specs match the running services** — measured 2026-08-20, after pass 6 |
 | Migration replay | **247 files, two consecutive passes, exit 0 both** — measured 2026-08-20 |
-| Tenant-isolation fuzzer | **153 tenant-scoped tables proven**, 2 declared RLS-free — measured 2026-08-20, after pass 6 |
-| Domain coverage | **85.6%** against an enforced floor of 58 — measured 2026-08-20, after pass 6 |
-| Overall coverage | **65.2%** against an enforced floor of 45 — measured 2026-08-20, after pass 6 |
-| Gate scripts in `tools/ci/` | 20 |
+| Tenant-isolation fuzzer | **153 tenant-scoped tables proven**, 2 declared RLS-free — measured 2026-08-21 |
+| Tenant-stamping census | **167 `tenant_id` columns**, 1 sanctioned sentinel, every other row stamped — measured 2026-08-21 |
+| Domain coverage | **86.4%** against an enforced floor of 58 — measured 2026-08-21 on a CLEARED `./coverage` |
+| Overall coverage | **68.6%** against an enforced floor of 45 — measured 2026-08-21 on a CLEARED `./coverage` |
+| Gate scripts in `tools/ci/` | 21 |
 
-**Pass 6 (the counters, design doc `51-the-counters.md`) is stacked on the prescriber pass** as
-`feat/counter-portals-audit` → `feat/prescriber-portal-audit`. Both coverage rows above were re-measured for
-this update and are no longer carried forward under a stale date.
+**Pass 6 (the counters, design doc `51-the-counters.md`) and the standing-debt pass after it are stacked on
+the prescriber pass** as `feat/counter-portals-audit` → `feat/prescriber-portal-audit`.
+
+**Every row above was re-measured for this update, and one of them changed meaning in the process.** The two
+coverage rows are taken from a **cleared** `./coverage`, which is what CI does on a fresh checkout and what
+nobody local had been doing: a results directory that accumulates across runs only ever reports coverage going
+UP, and the previous figures (65.2% / 85.6%) came from an accumulated one. Clearing it exposed
+`services/masterdata:Api` sitting fourteen points under its floor. If you take one habit from this file: clear
+`./coverage` before you believe it.
 
 **Seven stacked branches landed on `master` on 2026-08-20** (`2a19354`, `ed659a3`) after the whole gauntlet
 above ran on the merged tree. Everything below the finance pass is now in `master` and nothing is stacked.
@@ -87,16 +94,21 @@ expensive way.
   `tools/ci/`. Two of those cannot run locally at all (see `gate-freshness` below), so "green locally" is a
   strictly smaller claim than "green in CI" and should be written as the smaller one.
 
-- **`tenant_id = ''` is down to 341 rows in ONE table, and the survivor may not be debt at all.** Measured
-  against the Compose database on 2026-08-20 by asking `information_schema` for every column named
-  `tenant_id` and counting: **`identity.role_scope` = 341, every other table 0.** The entry used to read
-  1,191 rows across 7 tables. `role_scope` is the platform-wide role-to-scope catalogue — reference data
-  that is the same for every tenant — so an empty tenant there is plausibly *correct* and the six real
-  offenders are gone. **That is a question, not a conclusion:** nobody has decided in writing whether
-  `role_scope` is tenant-scoped, and until someone does, the `CHECK (tenant_id <> '')` cannot be written
-  because it would either be wrong or need an exemption nobody has justified. The upstream cause is
-  unchanged and still worth knowing — 64 entities declare `public string TenantId { get; set; } = "";`, so
-  a write path that forgets to set it stores an unscoped row.
+- ~~**`tenant_id = ''` is down to 341 rows in ONE table, and the survivor may not be debt at all.**~~
+  **CLOSED 2026-08-21 — and the survivor was never debt.** The question this entry posed — *is `role_scope`
+  tenant-scoped?* — had been answered before the entry was written. `tenant_id = ''` there is
+  `RoleScope.PlatformDefault`, a named constant in `services/identity/Domain/Scope.cs`, and the fallback
+  bucket `RoleScopeResolver` reads for any tenant not yet provisioned its own grants; identity migration
+  0011's banner establishes it in as many words. The remedy this entry proposed — `CHECK (tenant_id <> '')`
+  — would have deleted the fallback and left every unprovisioned tenant's users holding no scopes at all.
+  What was genuinely missing was enforcement that `''` appears nowhere ELSE, and a one-off census cannot
+  provide it. So: `tools/ci/check-tenant-stamping.py` (167 `tenant_id` columns, one named exemption, a
+  selftest that plants an unstamped row, in `REQUIRED_GATES` and in backend-ci), identity `0041` (a column
+  comment, so `\d+ identity.role_scope` states it), and `HousePatternTests` (which pins the exemption
+  register, because that list is the one part of a control that can be edited to make the control pass).
+  The upstream cause is unchanged and still worth knowing — 64 entities declare
+  `public string TenantId { get; set; } = "";`, so a write path that forgets to set it stores an unscoped
+  row. **That is now a red gate rather than a thing somebody has to remember to look for.**
 - **Outbox atomicity: 55 call sites became 6, in 4 files.** The ratchet in
   `docs/quality/outbox-atomicity-debt.txt` worked exactly as intended — the number can only go down, and it
   went down by 49. What is left, verified against the register on 2026-08-20:
@@ -122,12 +134,19 @@ expensive way.
   `EmrApiFactory` pattern this entry prescribed — and its floor in `coverage-floors.json` reads **83.0**,
   not the 0 that enforced nothing. Left struck through rather than deleted, per this list's own rule.
   The fix is an endpoint test host (emr's `EmrApiFactory` is the pattern), not a number.
-- **`services/notification:Api`: the 85% floor is now 66.0, and I have NOT re-measured the actual.** The
-  entry below described a red gate at 60.1% against 85. The floor moved, and `check-floor-monotonicity.py`
-  passes, so the decrease was documented as that gate requires. What nobody has re-run is the coverage
-  measurement itself — it needs a full instrumented suite, which was not part of the 2026-08-20 landing.
-  **So the honest status is "unknown", not "green".** The original finding, kept because it explains what
-  the number is about:
+- ~~**`services/notification:Api`: the 85% floor is now 66.0, and I have NOT re-measured the actual.**~~
+  **CLOSED 2026-08-21. Measured 66.8%, then raised to 87.1%; floor ratcheted 66 → 84.** The 300 lines this
+  entry names still had tests only on the parse seam, because everything else was wrapped in transport.
+  `HandleAsync` is now extracted from the RabbitMQ receive handler — the same move `BuildEnvelope` got — so
+  the consumer's judgement is testable without a broker, and the sweep runs over a real DI scope with TWO
+  tenants, because a loop that runs exactly once passes the single-tenant version and escalates nothing for
+  everybody else while reporting success.
+  **Measuring it honestly turned up a red gate nobody could see:** `coverage-gate.sh` reads whatever is in
+  `./coverage`, and a local directory that accumulates across runs only ever reports coverage going UP.
+  Cleared and re-run — which is what CI does on a fresh checkout — `services/masterdata:Api` came out at
+  **65.9% against a 77% floor**, a fourteen-point regression since 2026-07-31 that nothing could report while
+  CI is billing-blocked. Now 91.7%, floor 88. **If you take one habit from this entry: clear `./coverage`
+  before you believe it.** The original finding, kept because it explains what the number is about:
   Caused by commit `fe164b6`, which added `DomainEventConsumer.cs` (198 lines) and `EscalationSweeper.cs`
   (102 lines) — 300 of that layer's 550 lines — with tests covering only the parse seam. Verified independent
   of the floor work above: the same failure occurs with `coverage-floors.json` at its previous contents. Two

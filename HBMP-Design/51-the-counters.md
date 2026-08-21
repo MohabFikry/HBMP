@@ -253,8 +253,12 @@ request.
 **Seven roles remain un-audited:** `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`, `case_manager`,
 `provider_admin`, `policy_admin`, `org_admin`, `super_admin`.
 
-**The standing debt is unchanged** and is not this pass's: `admin/0007`, the `inventory:Api` test project,
-the `notification:Api` coverage floor, and the `tenant_id = ''` rows in `identity.role_scope`.
+**The standing debt was cleared straight after this pass** — and two of the four items this document listed
+were already closed and were being carried forward stale. See `docs/BUILD-STATUS.md`, "2026-08-21 — the
+standing debt, measured": `admin/0007` was fixed on 2026-08-20 (parity test green, 250-file replay clean),
+`inventory:Api` measured 86.5% against a floor of 83, `identity.role_scope`'s empty tenant turned out to be a
+named constant the resolver reads rather than debt, and only the `notification:Api` floor was what the list
+said it was.
 
 **The procedure counter's photo.** Named in §2.5 rather than left as an empty field with no explanation: the
 contract carries `beneficiaryPhotoUrl` and it is null on every path, because the endpoint that could fill it

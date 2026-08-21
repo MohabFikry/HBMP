@@ -1321,4 +1321,54 @@ test in that suite could exercise a branch-scoped read at all.
 **Still un-audited: seven roles** — `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`, `case_manager`,
 `provider_admin`, `policy_admin`, `org_admin`, `super_admin`. The standing debt is unchanged and is not this
 pass's: `admin/0007`, the `inventory:Api` test project, the `notification:Api` coverage floor, and the
-`tenant_id = ''` rows in `identity.role_scope`.
+`tenant_id = ''` rows in `identity.role_scope`. **All four were taken up the next day — see below. Two of
+them were already closed and were being carried forward on the strength of the list rather than of a
+measurement.**
+
+
+### 2026-08-21 — the standing debt, measured
+
+The four-item list had been carried from pass to pass. Measuring each one first changed what the work was:
+
+| The list said | What measuring it found |
+|---|---|
+| `admin/0007` — open | `BranchScopeGrantParityTests` green and a 250-file replay at exit 0. Fixed on 2026-08-20; nothing to do. |
+| `inventory:Api` — no tests | 86.5% against a floor of 83. Closed by 24.x; nothing to do. |
+| `notification:Api` — floor lowered 85 → 66, actual "unknown" | 66.8%. The only item that was what the list said. Tests, then a ratchet. |
+| `identity.role_scope` `tenant_id = ''` — "is it tenant-scoped?" | 341 rows, and the question had been answered all along — in identity migration 0011's banner and in a named domain constant. It needed a gate, not a cleanup. |
+
+**Two of the four were stale.** They had been repeated across three documents because each pass copied the
+previous pass's list forward. That is the same defect class every audit pass has been finding in code — a
+claim that outlives the thing it describes — arriving in the tracking rather than in the product, which is a
+worse place for it: a debt list nobody has re-measured teaches its reader to skim.
+
+**The empty tenant was never debt.** `identity.role_scope.tenant_id = ''` is `RoleScope.PlatformDefault`, the
+fallback bucket `RoleScopeResolver` reads for any tenant not yet provisioned its own grants; migration 0011's
+banner established it. The remedy proposed twice — `CHECK (tenant_id <> '')` — would not have cleaned anything
+up. It would have deleted the fallback and left every unprovisioned tenant's users holding no scopes at all.
+What was actually missing was enforcement that `''` appears nowhere ELSE, so the answer now lives in three
+places instead of a note: `tools/ci/check-tenant-stamping.py` (a census over all 167 `tenant_id` columns, with
+one named exemption and a selftest), identity `0041` (a column comment, so `\d+` states it), and
+`HousePatternTests` (which pins the exemption register itself — an exemption list is the one part of a control
+that can be edited to make the control pass).
+
+**Measuring the coverage item honestly turned up a red gate nobody could see.** `coverage-gate.sh` reads
+whatever is in `./coverage`, and a local directory that accumulates across runs only ever reports coverage
+going up. Cleared and re-run — which is what CI does on a fresh checkout — `services/masterdata:Api` came out
+at **65.9% against a 77% floor**: a fourteen-point regression since 2026-07-31, invisible because CI has been
+billing-blocked since 2026-08-11. Nineteen of its thirty-seven endpoints had no test. Now 91.7%.
+
+Three of the tests written for it failed against correct code, and each is now pinned as the contract it
+really is — a retired examination comes back *unpriced* rather than missing, `procedure-types/{code}/validate`
+refuses with a typed bilingual 422 rather than `200 {ok:false}`, and `/drugs/pack-facts/by-ids` deliberately
+OMITS an id the catalogue cannot describe, which is the opposite convention from its sibling price route
+because the quantity check needs the absence to mean `NotChecked`.
+
+Final state, on a cleared coverage directory: 38 assemblies pass; overall **68.6%** (floor 45), domain
+**86.4%** (floor 58); 73 per-module floors all met; `notification:Api` 66 → 84 and `masterdata:Api` 77 → 88.
+
+**Left deliberately undone, and recorded rather than done quietly.** `raise-floors.py` proposes tightening 71
+further floors, including the aggregates (domain 58 → 80, overall 45 → 67). Those numbers are right and the
+ratchet is advisory precisely so a human decides: raising them all at once, with no CI able to validate the
+result, would make the next run's failure mode "which of 71 floors moved" rather than "what regressed". It is
+a one-command change when CI is back.
