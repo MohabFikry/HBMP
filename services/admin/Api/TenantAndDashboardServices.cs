@@ -39,7 +39,19 @@ public sealed class TenantAdminService(AdminDbContext db, IAuditClient audit, Ti
 }
 
 /// <summary>The break-glass dashboard rows (grants + their access counts + review status).</summary>
-public sealed record BreakGlassDashboardRow(Guid GrantId, string Requester, string? Approver, string Status,
+/// <param name="RequesterToken">
+/// A governance TOKEN, not a user id — 33.7.
+/// <para>This field used to carry <c>RequesterUserId</c> verbatim, and the SPA truncated it to
+/// <c>•••</c> plus the last four characters before rendering. Its own on-screen note explains why the
+/// truncation exists: "pairing a name with each one would make it a directory of who reached what." That
+/// reasoning is right and the implementation put it in the wrong tier — the whole identifier still crossed
+/// the wire, so the minimisation held for anybody reading the table and not for anybody reading the
+/// response. Design 18 §2 puts min-necessary projection on the server, and this is the server.</para>
+/// <para>Deliberately the opposite decision from <see cref="AccessReviewItemView"/>, where the subject IS a
+/// user id: that surface asks "does this person still need this role", which nobody can answer about a
+/// token.</para>
+/// </param>
+public sealed record BreakGlassDashboardRow(Guid GrantId, string RequesterToken, string? ApproverToken, string Status,
     string ReasonCode, int AccessCount, int OutOfScopeCount, DateTimeOffset? ExpiresAt, bool PostReviewDone);
 
 /// <summary>A latent SoD conflict detected among a user's currently-held active bindings.</summary>
@@ -65,7 +77,8 @@ public sealed class DashboardService(AdminDbContext db, IAuditClient audit)
         var rows = grants.Select(g =>
         {
             var acc = byGrant.TryGetValue(g.GrantId, out var l) ? l : [];
-            return new BreakGlassDashboardRow(g.GrantId, g.RequesterUserId, g.ApproverUserId, g.Status.ToString(),
+            return new BreakGlassDashboardRow(g.GrantId, GovernanceToken.Of(g.RequesterUserId) ?? GovernanceToken.Withheld,
+                GovernanceToken.Of(g.ApproverUserId), g.Status.ToString(),
                 g.ReasonCode, acc.Count, acc.Count(a => !a.WithinScope), g.ExpiresAt, g.PostReviewDone);
         }).ToList();
 

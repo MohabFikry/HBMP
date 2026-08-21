@@ -100,14 +100,25 @@ def main() -> int:
         raised = {name: max(floors.get(name, 0), declared) for name, (declared, _) in current.items()}
         for name in floors:
             raised.setdefault(name, floors[name])
+        # 33.7 — carry `_lowered` FORWARD. This writer rebuilt the file from two keys, so any run of
+        # `--update` silently deleted the block recording WHY a floor had ever been lowered. That block is
+        # the only place those reasons live: a floor that drops with an explanation is a decision, and the
+        # same drop with the explanation erased is indistinguishable from a regression somebody hid.
+        existing: dict = {}
+        if os.path.exists(args.floors):
+            with open(args.floors, encoding="utf-8") as fh:
+                existing = json.load(fh)
+        out = {
+            "_comment": "Per-service count of operations declaring a response body. RATCHET: these only "
+                        "go up. Raise them with --update after declaring more; a change that lowers one "
+                        "fails the build. See check-response-schemas.py for why this is a floor and not "
+                        "a target.",
+            "declared": dict(sorted(raised.items())),
+        }
+        if existing.get("_lowered"):
+            out["_lowered"] = existing["_lowered"]
         with open(args.floors, "w", encoding="utf-8") as fh:
-            json.dump({
-                "_comment": "Per-service count of operations declaring a response body. RATCHET: these only "
-                            "go up. Raise them with --update after declaring more; a change that lowers one "
-                            "fails the build. See check-response-schemas.py for why this is a floor and not "
-                            "a target.",
-                "declared": dict(sorted(raised.items())),
-            }, fh, indent=2)
+            json.dump(out, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
         print(f"floors written to {args.floors}")
         return 0

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, InlineAlert, InputField, Modal, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 
@@ -46,6 +46,23 @@ export interface ConfirmActionProps {
    * a dialog that overstates on the reversible cases is one nobody reads on the irreversible ones.
    */
   description?: Localized;
+  /**
+   * Extra fields the confirmation itself needs — a reason, a date, a choice.
+   *
+   * Added in 33.7 for refusing a break-glass request, where the reason is REQUIRED and lands on the audit
+   * trail. The alternative was a bare `Modal` beside this one, which would have put a destructive action
+   * behind a dialog that does not carry any of the guarantees here: the dismiss-weighting rule, the
+   * consequence line, the busy state on the confirm.
+   */
+  children?: ReactNode;
+  /**
+   * Whether the confirm button may be pressed. Defaults to true.
+   *
+   * Needed because `onConfirm` cannot refuse: this component closes the dialog once the callback resolves,
+   * so a callback that validates and returns early would dismiss the dialog having done nothing — which
+   * reads as success. Validity is decided by whoever owns the fields, which is the caller.
+   */
+  canConfirm?: boolean;
 }
 
 const S = {
@@ -57,6 +74,7 @@ const S = {
 
 export function ConfirmAction({
   open, onOpenChange, title, body, requireText, confirmLabel, onConfirm, destructive = true, description,
+  children, canConfirm = true,
 }: ConfirmActionProps) {
   const { lang } = useTheme();
   const t = (l: Localized) => (lang === "ar" ? l.ar : l.en);
@@ -64,7 +82,7 @@ export function ConfirmAction({
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  const matches = !requireText || typed.trim().toLowerCase() === requireText.trim().toLowerCase();
+  const matches = (!requireText || typed.trim().toLowerCase() === requireText.trim().toLowerCase()) && canConfirm;
 
   async function confirm() {
     if (!matches) { setTouched(true); return; }
@@ -109,6 +127,7 @@ export function ConfirmAction({
       }
     >
       <p>{t(body)}</p>
+      {children}
       {requireText && (
         <>
           <InputField

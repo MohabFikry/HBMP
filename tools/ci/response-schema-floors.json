@@ -1,7 +1,7 @@
 {
   "_comment": "Per-service count of operations declaring a response body. RATCHET: these only go up. Raise them with --update after declaring more; a change that lowers one fails the build. See check-response-schemas.py for why this is a floor and not a target.",
   "declared": {
-    "admin": 28,
+    "admin": 30,
     "approvals": 19,
     "audit": 0,
     "callcentre": 7,

@@ -234,6 +234,46 @@
         }
       }
     },
+    "/api/v1/admin/access-reviews/{campaignId}/items": {
+      "get": {
+        "tags": [
+          "admin-access-review"
+        ],
+        "parameters": [
+          {
+            "name": "campaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccessReviewItemView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/users/{subject}/branches": {
       "post": {
         "tags": [
@@ -599,7 +639,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SodViolationRow"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1377,6 +1427,45 @@
         },
         "additionalProperties": false
       },
+      "AccessReviewItemView": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bindingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subjectUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          },
+          "decision": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "AccessReviewSweepView": {
         "type": "object",
         "properties": {
@@ -1593,11 +1682,11 @@
             "type": "string",
             "format": "uuid"
           },
-          "requester": {
+          "requesterToken": {
             "type": "string",
             "nullable": true
           },
-          "approver": {
+          "approverToken": {
             "type": "string",
             "nullable": true
           },
@@ -2434,6 +2523,28 @@
             "nullable": true
           },
           "tokenB": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SodViolationRow": {
+        "type": "object",
+        "properties": {
+          "subjectUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "heldRole": {
+            "type": "string",
+            "nullable": true
+          },
+          "conflictingRole": {
             "type": "string",
             "nullable": true
           },

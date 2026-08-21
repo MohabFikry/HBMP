@@ -10,23 +10,28 @@ import {
   Modal,
   StatusChip,
   useTableQuery,
+  useTheme,
 } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
 import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   AccessReviewCampaign,
+  AccessReviewItem,
   BreakGlassGrant,
   ConfigValueType,
   Localized,
   MasterDataVersion,
+  ReviewDecision,
+  SodViolation,
   SystemConfigEntry,
   TenantSummary,
 } from "@mersal/contracts";
 import { CONFIG_VALUE_TYPES, canonicaliseConfigValue } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
-import { useWrite } from "../api/useWrite";
-import { AsyncSection, PageHeader, tenantLabel, useLoc, useTenantNames } from "./_shared";
+import { useWrite, writeErrorText } from "../api/useWrite";
+import { AsyncSection, PageHeader, fillLocalized, tenantLabel, useLoc, useTenantNames } from "./_shared";
+import { ConfirmAction } from "./ConfirmAction";
 
 /*
  * ============================================================================================================
@@ -72,6 +77,110 @@ const S = {
   reasonCode: { en: "Reason", ar: "السبب" },
   requested: { en: "Requested", ar: "وقت الطلب" },
   expires: { en: "Expires", ar: "ينتهي" },
+
+  // ---- 33.7 — the campaign counts admin-service always returned and this screen never showed ----
+  outstanding: { en: "Outstanding", ar: "المتبقّي" },
+  decided: { en: "Decided", ar: "تم البتّ فيه" },
+  lapsed: { en: "Lapsed", ar: "انقضت" },
+  lapsedNote: {
+    en: "Lapsed grants were removed because the deadline passed, not because anybody reviewed them. They are counted apart from revoked ones for that reason.",
+    ar: "المنح المنقضية أُزيلت لانقضاء الموعد لا لأن أحداً راجعها. ولهذا تُحصى منفصلة عن المسحوبة.",
+  },
+  openCampaign: { en: "Review", ar: "مراجعة" },
+  closeWorklist: { en: "← Back to campaigns", ar: "→ العودة إلى الحملات" },
+
+  // ---- 33.7 — the reviewer's worklist ----
+  worklist: { en: "Grants under review", ar: "المنح قيد المراجعة" },
+  worklistEmpty: { en: "This campaign has no grants under review.", ar: "لا توجد منح قيد المراجعة في هذه الحملة." },
+  worklistSearchHint: { en: "Person or role", ar: "الشخص أو الدور" },
+  person: { en: "Person", ar: "الشخص" },
+  roleH: { en: "Role", ar: "الدور" },
+  decision: { en: "Decision", ar: "القرار" },
+  decidedAt: { en: "Decided", ar: "وقت القرار" },
+  reviewActions: { en: "Actions", ar: "إجراءات" },
+  recertify: { en: "Keep", ar: "إبقاء" },
+  revokeGrant: { en: "Remove", ar: "إزالة" },
+  dPending: { en: "Outstanding", ar: "لم يُبتّ" },
+  dRecertified: { en: "Kept", ar: "أُبقي" },
+  dRevoked: { en: "Removed", ar: "أُزيل" },
+  dAutoExpired: { en: "Lapsed", ar: "انقضت" },
+  /*
+    The name is resolved through identity, and when that lookup fails the id is shown instead. Said out loud
+    rather than left as a bare uuid: a reviewer is being asked whether a PERSON still needs a role, and a row
+    that silently shows an identifier where every other row shows a name reads as a different kind of row.
+  */
+  unnamedSubject: { en: "Name unavailable — shown by id", ar: "الاسم غير متاح — يُعرض بالمعرّف" },
+  recertifyTitle: { en: "Keep this access?", ar: "إبقاء هذا الوصول؟" },
+  recertifyBody: {
+    en: "{0} keeps the {1} role. This confirms they still need it, and stops the sweep removing it at the deadline.",
+    ar: "يحتفظ {0} بدور {1}. يؤكد هذا استمرار حاجته إليه، ويمنع إزالته عند انقضاء الموعد.",
+  },
+  recertifyReversible: {
+    en: "The grant can still be removed later, here or by a new campaign.",
+    ar: "يمكن إزالة المنحة لاحقاً، من هنا أو عبر حملة جديدة.",
+  },
+  revokeTitle: { en: "Remove this access?", ar: "إزالة هذا الوصول؟" },
+  revokeBody: {
+    en: "{0} loses the {1} role immediately. Anything that role opened stops opening for them on their next request.",
+    ar: "يفقد {0} دور {1} فوراً. وكل ما يفتحه هذا الدور يتوقف عن الفتح له عند طلبه التالي.",
+  },
+  revokeReversible: {
+    en: "An administrator can grant the role again, and the removal stays on the audit trail either way.",
+    ar: "يمكن لمسؤول منح الدور مجدداً، وتبقى الإزالة في سجل التدقيق في الحالتين.",
+  },
+  sweep: { en: "Lapse the rest", ar: "إنهاء المتبقّي" },
+  sweepTitle: { en: "Lapse every outstanding grant?", ar: "إنهاء كل منحة متبقّية؟" },
+  sweepBody: {
+    en: "{0} grants nobody has decided will be REMOVED, and the campaign closes. This is what the deadline is for — but it removes access from people whose need was never actually assessed.",
+    ar: "ستُزال {0} منحة لم يبتّ فيها أحد، وتُغلق الحملة. هذا هو الغرض من الموعد النهائي — لكنه يزيل الوصول عمّن لم تُقيَّم حاجته فعلياً.",
+  },
+  sweepNotDue: {
+    en: "The deadline has not passed. The server refuses a sweep before it does.",
+    ar: "لم ينقضِ الموعد بعد. يرفض الخادم الإنهاء قبل انقضائه.",
+  },
+  swept: { en: "{0} grants lapsed. The campaign is closed.", ar: "انقضت {0} منحة. أُغلقت الحملة." },
+
+  // ---- 33.7 — break-glass: the numbers, and the decision ----
+  approver: { en: "Approved by", ar: "اعتمدها" },
+  accesses: { en: "Uses", ar: "مرات الاستخدام" },
+  outOfScope: { en: "Out of scope", ar: "خارج النطاق" },
+  outOfScopeNote: {
+    en: "\"Out of scope\" counts the times a grant was used to reach something it was not granted for. A grant with any is the reason this register exists.",
+    ar: "\"خارج النطاق\" يحصي مرات استخدام المنحة للوصول إلى ما لم تُمنح لأجله. وجود أيٍّ منها هو سبب وجود هذا السجل.",
+  },
+  postReview: { en: "Reviewed after", ar: "روجعت بعدها" },
+  reviewed: { en: "Reviewed", ar: "روجعت" },
+  notReviewed: { en: "Not reviewed", ar: "لم تُراجع" },
+  approve: { en: "Approve", ar: "اعتماد" },
+  reject: { en: "Refuse", ar: "رفض" },
+  approveTitle: { en: "Approve this emergency access?", ar: "اعتماد هذا الوصول الطارئ؟" },
+  approveBody: {
+    en: "The requester may then open records this grant covers, for its window, under {0}. Every one of those reads is recorded here.",
+    ar: "سيتمكن الطالب من فتح السجلات التي تغطيها هذه المنحة، خلال مدتها، تحت {0}. وتُسجَّل كل عملية اطلاع هنا.",
+  },
+  approveNote: {
+    en: "You cannot approve your own request — the server refuses it as a dual-control breach.",
+    ar: "لا يمكنك اعتماد طلبك أنت — يرفضه الخادم كخرق للرقابة المزدوجة.",
+  },
+  rejectTitle: { en: "Refuse this emergency access?", ar: "رفض هذا الوصول الطارئ؟" },
+  rejectBody: {
+    en: "The requester gets no elevated access under {0}. If they are with a patient now, they will need another route.",
+    ar: "لن يحصل الطالب على وصول موسّع تحت {0}. وإن كان مع مريض الآن فسيحتاج مساراً آخر.",
+  },
+  rejectReason: { en: "Why (recorded on the audit trail)", ar: "السبب (يُسجَّل في سجل التدقيق)" },
+  rejectNeedsReason: { en: "A reason is required.", ar: "السبب مطلوب." },
+
+  // ---- 33.7 — SoD: the breaches, not the rules ----
+  sodTitle: { en: "Duties held together", ar: "مهام مجتمعة" },
+  sodEmpty: { en: "Nobody currently holds a conflicting pair of roles.", ar: "لا أحد يجمع حالياً بين دورين متعارضين." },
+  sodLede: {
+    en: "Pairs of roles somebody holds RIGHT NOW that the separation-of-duties rules say must not be held together. The rules themselves are in the Access Catalogue; this is where they are being broken.",
+    ar: "أزواج أدوار يجمعها شخص ما الآن وتمنع قواعد فصل المهام الجمع بينها. القواعد نفسها في دليل الصلاحيات؛ وهنا حيث تُخرق.",
+  },
+  sodSearchHint: { en: "Person or role", ar: "الشخص أو الدور" },
+  heldRole: { en: "Holds", ar: "يشغل" },
+  conflictingRole: { en: "Together with", ar: "مع" },
+  reason: { en: "Why that matters", ar: "لماذا يهم" },
 
   mdTitle: { en: "Master Data", ar: "البيانات المرجعية" },
   mdEmpty: { en: "No master-data versions in force.", ar: "لا توجد إصدارات بيانات مرجعية فعّالة." },
@@ -202,34 +311,119 @@ export function AdminTenants() {
   );
 }
 
-/** Audit & access reviews — recertification campaigns + the break-glass governance dashboard. */
+/**
+ * Audit & access reviews — recertification campaigns, the break-glass register, and the duties people hold
+ * together right now.
+ *
+ * ============================================================================================================
+ * 33.7 — A GOVERNANCE SCREEN THAT COULD NOT GOVERN
+ * ============================================================================================================
+ * Three things were wrong here, and they were the same thing three times: admin-service computed the answer
+ * and this screen either dropped it or had no way to act on it.
+ *
+ * **A campaign could not be reviewed.** `POST /admin/access-reviews/items/{itemId}/recertify` and its
+ * `revoke` twin are keyed by an item id, and NO endpoint on any service listed items — so the two decisions
+ * an access review consists of were addressable only by somebody who already knew a uuid. The campaign row
+ * showed a name, a tier and a due date, and dropped all five counts the service returns, so it could not even
+ * say how much was outstanding. FR-IAM-007 was satisfied on paper by a surface nobody could complete.
+ *
+ * **The break-glass register left out the alarming number.** `outOfScopeCount` counts the times an emergency
+ * grant was used to reach something it did not cover. The service computes it; `zBreakGlassGrant` had no
+ * field for it, nor for the use count, the approver, or whether anyone reviewed the grant after it lapsed.
+ * And an org admin — who holds `BreakGlassApprove` — had no approve or refuse button, so a clinician's
+ * request sat at `Requested` with nobody able to answer it from the console that lists it.
+ *
+ * **The SoD rules were shown and the breaches were not.** The Access Catalogue renders the pairs that must
+ * not be held together. `GET /admin/dashboards/sod-violations` returns the people currently holding one, and
+ * nothing called it, so the whole policy could be read without learning it was being broken.
+ */
 export function AdminGovernance() {
-  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
-  const api = useApi();
   const t = useLoc();
+  const api = useApi();
   const campaigns = useAsync<AccessReviewCampaign[]>(() => api.accessReviewCampaigns(), []);
-  const grants = useAsync<BreakGlassGrant[]>(() => api.breakGlassGrants(), []);
+  /** The campaign whose worklist is open. Null = the campaign list. */
+  const [reviewing, setReviewing] = useState<AccessReviewCampaign | null>(null);
 
-  const campCols: Column<AccessReviewCampaign>[] = [
+  return (
+    <>
+      <PageHeader title={t(S.govTitle)} />
+      <div className="stack" style={{ gap: "var(--sp4)" }}>
+        {reviewing ? (
+          <ReviewWorklist
+            key={reviewing.id}
+            campaign={reviewing}
+            onBack={() => setReviewing(null)}
+            onDecided={campaigns.reload}
+          />
+        ) : (
+          <CampaignsCard state={campaigns} onReview={setReviewing} />
+        )}
+        <BreakGlassCard />
+        <SodBreachesCard />
+      </div>
+    </>
+  );
+}
+
+/** The campaigns, each with where its items actually stand. */
+function CampaignsCard({
+  state,
+  onReview,
+}: {
+  state: ReturnType<typeof useAsync<AccessReviewCampaign[]>>;
+  onReview: (c: AccessReviewCampaign) => void;
+}) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
+  const t = useLoc();
+
+  const cols: Column<AccessReviewCampaign>[] = [
     { key: "name", header: t(S.campaign), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
     { key: "minTier", header: t(S.minTier), cell: (r) => <StatusChip kind="neu" label={r.minTier ?? "—"} /> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    /*
+      Outstanding is a WARNING chip when there is any, and neutral at zero. It is the only number on this row
+      that means work: `decided` and `lapsed` are history, and rendering all three the same way is how "412
+      pending" reads as reassuringly busy rather than as nobody having started.
+    */
+    {
+      key: "pending",
+      header: t(S.outstanding),
+      numeric: true,
+      cell: (r) => <StatusChip kind={r.pending > 0 ? "warn" : "ok"} label={`${r.pending} / ${r.total}`} />,
+      sortable: true,
+      sortValue: (r) => r.pending,
+    },
+    {
+      key: "decided",
+      header: t(S.decided),
+      numeric: true,
+      cell: (r) => <span className="tnum">{fmt.number(r.recertified + r.revoked)}</span>,
+      sortable: true,
+      sortValue: (r) => r.recertified + r.revoked,
+    },
+    {
+      key: "lapsed",
+      header: t(S.lapsed),
+      numeric: true,
+      cell: (r) => (r.autoExpired > 0
+        ? <StatusChip kind="bad" label={String(r.autoExpired)} />
+        : <span className="tnum">0</span>),
+      sortable: true,
+      sortValue: (r) => r.autoExpired,
+    },
     { key: "due", header: t(S.due), cell: (r) => <span className="tnum">{r.dueAt ? fmt.date(r.dueAt) : "—"}</span>, sortable: true, sortValue: (r) => r.dueAt ?? "" },
-  ];
-  const bgCols: Column<BreakGlassGrant>[] = [
-    // A governance TOKEN, and it stays one — see `requesterNote` under the heading. This is the one place in
-    // the portal where an opaque identifier is the right answer rather than a leak, so it is explained on
-    // screen instead of being left for the reader to mistake for an unresolved id.
-    { key: "requester", header: t(S.requester), cell: (r) => <span className="tnum">{r.requesterToken}</span>, sortable: true, sortValue: (r) => r.requesterToken },
-    { key: "reasonCode", header: t(S.reasonCode), cell: (r) => r.reasonCode, sortable: true, sortValue: (r) => r.reasonCode },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
-    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span>, sortable: true, sortValue: (r) => r.requestedAt },
-    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{r.expiresAt ? fmt.date(r.expiresAt) : "—"}</span>, sortable: true, sortValue: (r) => r.expiresAt ?? "" },
+    {
+      key: "actions",
+      header: t(S.reviewActions),
+      cell: (r) => (
+        <Button size="sm" variant="secondary" onClick={() => onReview(r)}>{t(S.openCampaign)}</Button>
+      ),
+    },
   ];
 
-  const campQuery = useTableQuery<AccessReviewCampaign>({
-    rows: campaigns.data ?? [],
-    columns: campCols,
+  const query = useTableQuery<AccessReviewCampaign>({
+    rows: state.data ?? [],
+    columns: cols,
     searchText: (r) => [r.name, r.minTier ?? ""].join(" "),
     searchLabel: t(S.search),
     searchPlaceholder: t(S.campaign),
@@ -238,57 +432,411 @@ export function AdminGovernance() {
     initialSortKey: "due",
     persistKey: "admin-campaigns",
   });
-  const bgQuery = useTableQuery<BreakGlassGrant>({
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp3)" }}>
+      {/* `panel-h`, matching every other card title in the portal. These two used `section-h` — the
+          11.5px uppercase eyebrow — so the same level of heading was rendered two different sizes on
+          adjacent admin screens. */}
+      <h2 className="panel-h">{t(S.campaigns)}</h2>
+      <p className="lede">{t(S.lapsedNote)}</p>
+      <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.campaignsEmpty}>
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(r) => r.id}
+            caption={t(S.campaigns)}
+            emptyLabel={t(S.campaignsEmpty)}
+            noMatchesLabel={t(S.noMatches)}
+          />
+        )}
+      </AsyncSection>
+    </Card>
+  );
+}
+
+const DECISION_CHIP: Record<ReviewDecision, { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: Localized }> = {
+  pending: { kind: "warn", label: S.dPending },
+  recertified: { kind: "ok", label: S.dRecertified },
+  revoked: { kind: "neu", label: S.dRevoked },
+  // Removed with nobody having looked at it. Not the same fact as `revoked`, and not shown as if it were.
+  autoExpired: { kind: "bad", label: S.dAutoExpired },
+};
+
+/** One campaign's grants — the list the two decision endpoints were always keyed by and nothing produced. */
+function ReviewWorklist({
+  campaign,
+  onBack,
+  onDecided,
+}: {
+  campaign: AccessReviewCampaign;
+  onBack: () => void;
+  onDecided: () => void;
+}) {
+  const fmt = useFormat();
+  const t = useLoc();
+  const api = useApi();
+  const { lang } = useTheme();
+  const items = useAsync<AccessReviewItem[]>(() => api.accessReviewItems(campaign.id), [campaign.id]);
+  const write = useWrite();
+  /** The item awaiting confirmation, and which way. */
+  const [deciding, setDeciding] = useState<{ item: AccessReviewItem; keep: boolean } | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweptCount, setSweptCount] = useState<number | null>(null);
+
+  const who = (r: AccessReviewItem) => r.subjectName ?? r.subjectUserId;
+
+  const cols: Column<AccessReviewItem>[] = [
+    {
+      key: "person",
+      header: t(S.person),
+      cell: (r) => (
+        <span>
+          {r.subjectName ?? <span className="tnum">{r.subjectUserId}</span>}
+          {r.subjectName === null && <> <span className="muted">· {t(S.unnamedSubject)}</span></>}
+        </span>
+      ),
+      sortable: true,
+      sortValue: (r) => who(r),
+    },
+    { key: "role", header: t(S.roleH), cell: (r) => <span className="tnum">{r.role}</span>, sortable: true, sortValue: (r) => r.role },
+    {
+      key: "decision",
+      header: t(S.decision),
+      cell: (r) => <StatusChip kind={DECISION_CHIP[r.decision].kind} label={t(DECISION_CHIP[r.decision].label)} />,
+      sortable: true,
+      sortValue: (r) => r.decision,
+    },
+    {
+      key: "decidedAt",
+      header: t(S.decidedAt),
+      cell: (r) => <span className="tnum">{r.decidedAt ? fmt.dateTime(r.decidedAt) : "—"}</span>,
+      sortable: true,
+      sortValue: (r) => r.decidedAt ?? "",
+    },
+    {
+      key: "actions",
+      header: t(S.reviewActions),
+      // Only a PENDING item can be decided — the server returns 404 for any other state, and offering a
+      // button that is refused teaches an administrator that the surface is unreliable rather than that the
+      // decision is already made.
+      cell: (r) => (r.decision !== "pending" ? <span className="muted">{r.note ?? "—"}</span> : (
+        <span className="row-actions">
+          <Button size="sm" variant="secondary" onClick={() => setDeciding({ item: r, keep: true })}>
+            {t(S.recertify)}
+          </Button>{" "}
+          <Button size="sm" variant="danger" onClick={() => setDeciding({ item: r, keep: false })}>
+            {t(S.revokeGrant)}
+          </Button>
+        </span>
+      )),
+    },
+  ];
+
+  const filters: TableFilterSpec<AccessReviewItem>[] = useMemo(() => [
+    {
+      key: "decision",
+      label: t(S.decision),
+      options: [
+        { value: "pending", label: t(S.dPending) },
+        { value: "recertified", label: t(S.dRecertified) },
+        { value: "revoked", label: t(S.dRevoked) },
+        { value: "autoExpired", label: t(S.dAutoExpired) },
+      ],
+      match: (r, value) => r.decision === value,
+    },
+  ], [t]);
+
+  const query = useTableQuery<AccessReviewItem>({
+    rows: items.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.subjectName ?? "", r.subjectUserId, r.role].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.worklistSearchHint),
+    filters,
+    pageSize: 25,
+    persistKey: "admin-review-items",
+  });
+
+  const pending = (items.data ?? []).filter((i) => i.decision === "pending").length;
+  const due = campaign.dueAt != null && new Date(campaign.dueAt).getTime() <= Date.now();
+
+  async function decide() {
+    if (deciding === null) return;
+    const { item, keep } = deciding;
+    const ok = await write.run(() => (keep
+      ? api.recertifyAccessItem(item.id)
+      : api.revokeAccessItem(item.id)));
+    setDeciding(null);
+    if (ok) { items.reload(); onDecided(); }
+  }
+
+  async function sweep() {
+    // `write.run` reports success as a boolean, so the count comes out through this. It is the whole point
+    // of the response: "the campaign closed" and "the campaign closed having removed nine people's access"
+    // are different sentences, and only one of them tells the administrator what they just did.
+    let expired = 0;
+    const ok = await write.run(async () => { expired = (await api.sweepAccessCampaign(campaign.id)).autoExpired; });
+    setSweeping(false);
+    if (ok) {
+      setSweptCount(expired);
+      items.reload();
+      onDecided();
+    }
+  }
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp3)" }}>
+      <div className="result-head">
+        <h2 className="panel-h" style={{ margin: 0 }}>{campaign.name}</h2>
+        <Button variant="ghost" size="sm" onClick={onBack}>{t(S.closeWorklist)}</Button>
+      </div>
+      <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
+        {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+        {sweptCount !== null && (
+          <InlineAlert tone="info">{t(S.swept).replace("{0}", String(sweptCount))}</InlineAlert>
+        )}
+      </div>
+      <AsyncSection state={items} isEmpty={(d) => d.length === 0} emptyLabel={S.worklistEmpty}>
+        {() => (
+          <>
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.worklist)}
+              emptyLabel={t(S.worklistEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+            {pending > 0 && (
+              <div style={{ paddingInline: "var(--sp2)", paddingBlockStart: "var(--sp3)" }}>
+                <Button variant="danger" disabled={!due} onClick={() => setSweeping(true)}>
+                  {t(S.sweep)}
+                </Button>
+                {/* The button is disabled BEFORE the deadline and the reason is stated. The server refuses a
+                    premature sweep by returning 0 expired, which is indistinguishable on screen from a
+                    campaign with nothing outstanding — so the client says why rather than letting a
+                    successful-looking no-op stand in for a refusal. */}
+                {!due && <p className="muted" style={{ margin: "var(--sp2) 0 0" }}>{t(S.sweepNotDue)}</p>}
+              </div>
+            )}
+          </>
+        )}
+      </AsyncSection>
+
+      <ConfirmAction
+        open={deciding !== null}
+        onOpenChange={(o) => !o && setDeciding(null)}
+        destructive={deciding?.keep === false}
+        title={deciding?.keep === false ? S.revokeTitle : S.recertifyTitle}
+        body={fillLocalized(deciding?.keep === false ? S.revokeBody : S.recertifyBody,
+          deciding ? who(deciding.item) : "", deciding?.item.role ?? "")}
+        description={deciding?.keep === false ? S.revokeReversible : S.recertifyReversible}
+        confirmLabel={deciding?.keep === false ? S.revokeGrant : S.recertify}
+        onConfirm={decide}
+      />
+      <ConfirmAction
+        open={sweeping}
+        onOpenChange={setSweeping}
+        destructive
+        title={S.sweepTitle}
+        body={fillLocalized(S.sweepBody, String(pending))}
+        confirmLabel={S.sweep}
+        onConfirm={sweep}
+      />
+    </Card>
+  );
+}
+
+/** The emergency-access register — with the numbers that make it one, and the decision it was missing. */
+function BreakGlassCard() {
+  const fmt = useFormat();
+  const t = useLoc();
+  const api = useApi();
+  const { lang } = useTheme();
+  const grants = useAsync<BreakGlassGrant[]>(() => api.breakGlassGrants(), []);
+  const write = useWrite();
+  const [deciding, setDeciding] = useState<{ grant: BreakGlassGrant; approve: boolean } | null>(null);
+  const [reason, setReason] = useState("");
+
+  const cols: Column<BreakGlassGrant>[] = [
+    // A governance TOKEN, and it stays one — see `requesterNote` under the heading. This is the one place in
+    // the portal where an opaque identifier is the right answer rather than a leak, so it is explained on
+    // screen instead of being left for the reader to mistake for an unresolved id. Since 33.7 the token is
+    // produced by admin-service, so the full subject id no longer reaches the browser at all.
+    { key: "requester", header: t(S.requester), cell: (r) => <span className="tnum">{r.requesterToken}</span>, sortable: true, sortValue: (r) => r.requesterToken },
+    { key: "approver", header: t(S.approver), cell: (r) => <span className="tnum">{r.approverToken ?? "—"}</span> },
+    { key: "reasonCode", header: t(S.reasonCode), cell: (r) => r.reasonCode, sortable: true, sortValue: (r) => r.reasonCode },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "accesses", header: t(S.accesses), numeric: true, cell: (r) => <span className="tnum">{fmt.number(r.accessCount)}</span>, sortable: true, sortValue: (r) => r.accessCount },
+    /*
+      The number this register exists for. A grant with any out-of-scope use is a BAD chip and sorts to the
+      top by default — the four-cue rule applies with unusual force here, because "4" and "0" in the same
+      grey column is exactly how a breach reads as a statistic.
+    */
+    {
+      key: "outOfScope",
+      header: t(S.outOfScope),
+      numeric: true,
+      cell: (r) => (r.outOfScopeCount > 0
+        ? <StatusChip kind="bad" label={String(r.outOfScopeCount)} />
+        : <span className="tnum">0</span>),
+      sortable: true,
+      sortValue: (r) => r.outOfScopeCount,
+    },
+    {
+      key: "postReview",
+      header: t(S.postReview),
+      cell: (r) => (r.postReviewDone
+        ? <StatusChip kind="ok" label={t(S.reviewed)} />
+        : <StatusChip kind="warn" label={t(S.notReviewed)} />),
+      sortable: true,
+      sortValue: (r) => (r.postReviewDone ? 1 : 0),
+    },
+    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span>, sortable: true, sortValue: (r) => r.requestedAt },
+    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{r.expiresAt ? fmt.date(r.expiresAt) : "—"}</span>, sortable: true, sortValue: (r) => r.expiresAt ?? "" },
+    {
+      key: "actions",
+      header: t(S.reviewActions),
+      // Only an unanswered request can be decided. An active or expired grant is past the point where
+      // approving means anything, and the server would refuse it.
+      cell: (r) => (r.status.label.en !== "Requested" ? <span className="muted">—</span> : (
+        <span className="row-actions">
+          <Button size="sm" variant="secondary" onClick={() => setDeciding({ grant: r, approve: true })}>
+            {t(S.approve)}
+          </Button>{" "}
+          <Button size="sm" variant="danger" onClick={() => { setReason(""); setDeciding({ grant: r, approve: false }); }}>
+            {t(S.reject)}
+          </Button>
+        </span>
+      )),
+    },
+  ];
+
+  const query = useTableQuery<BreakGlassGrant>({
     rows: grants.data ?? [],
-    columns: bgCols,
+    columns: cols,
     searchText: (r) => [r.requesterToken, r.reasonCode].join(" "),
     searchLabel: t(S.search),
     searchPlaceholder: t(S.reasonCode),
     pageSize: 25,
-    initialSortKey: "requested",
+    // Out-of-scope uses first, then the most recent. The register is opened to find abuse, and abuse does not
+    // sort by date.
+    initialSortKey: "outOfScope",
+    initialSortDir: "descending",
     persistKey: "admin-breakglass",
   });
 
+  async function decide() {
+    if (deciding === null) return;
+    const ok = await write.run(() => (deciding.approve
+      ? api.approveBreakGlass(deciding.grant.id)
+      : api.rejectBreakGlass(deciding.grant.id, reason.trim())));
+    setDeciding(null);
+    if (ok) grants.reload();
+  }
+
   return (
-    <>
-      <PageHeader title={t(S.govTitle)} />
-      <div className="stack" style={{ gap: "var(--sp4)" }}>
-        <Card as="section" style={{ padding: "var(--sp3)" }}>
-          {/* `panel-h`, matching every other card title in the portal. These two used `section-h` — the
-              11.5px uppercase eyebrow — so the same level of heading was rendered two different sizes on
-              adjacent admin screens. */}
-          <h2 className="panel-h">{t(S.campaigns)}</h2>
-          <AsyncSection state={campaigns} isEmpty={(d) => d.length === 0} emptyLabel={S.campaignsEmpty}>
-            {() => (
-              <DataTableView
-                query={campQuery}
-                columns={campCols}
-                rowKey={(r) => r.id}
-                caption={t(S.campaigns)}
-                emptyLabel={t(S.campaignsEmpty)}
-                noMatchesLabel={t(S.noMatches)}
-              />
-            )}
-          </AsyncSection>
-        </Card>
-        <Card as="section" style={{ padding: "var(--sp3)" }}>
-          <h2 className="panel-h">{t(S.breakGlass)}</h2>
-          <p className="lede">{t(S.requesterNote)}</p>
-          <AsyncSection state={grants} isEmpty={(d) => d.length === 0} emptyLabel={S.breakGlassEmpty}>
-            {() => (
-              <DataTableView
-                query={bgQuery}
-                columns={bgCols}
-                rowKey={(r) => r.id}
-                caption={t(S.breakGlass)}
-                emptyLabel={t(S.breakGlassEmpty)}
-                noMatchesLabel={t(S.noMatches)}
-              />
-            )}
-          </AsyncSection>
-        </Card>
+    <Card as="section" style={{ padding: "var(--sp3)" }}>
+      <h2 className="panel-h">{t(S.breakGlass)}</h2>
+      <p className="lede">{t(S.requesterNote)}</p>
+      <p className="lede">{t(S.outOfScopeNote)}</p>
+      <div aria-live="polite">
+        {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
       </div>
-    </>
+      <AsyncSection state={grants} isEmpty={(d) => d.length === 0} emptyLabel={S.breakGlassEmpty}>
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(r) => r.id}
+            caption={t(S.breakGlass)}
+            emptyLabel={t(S.breakGlassEmpty)}
+            noMatchesLabel={t(S.noMatches)}
+          />
+        )}
+      </AsyncSection>
+
+      <ConfirmAction
+        open={deciding !== null}
+        onOpenChange={(o) => !o && setDeciding(null)}
+        destructive={deciding?.approve === false}
+        title={deciding?.approve === false ? S.rejectTitle : S.approveTitle}
+        body={fillLocalized(deciding?.approve === false ? S.rejectBody : S.approveBody, deciding?.grant.reasonCode ?? "")}
+        description={deciding?.approve === false ? undefined : S.approveNote}
+        confirmLabel={deciding?.approve === false ? S.reject : S.approve}
+        // A refusal without a reason cannot be confirmed. Expressed as `canConfirm` rather than as a check
+        // inside `onConfirm`, because ConfirmAction closes once the callback resolves — a callback that
+        // validated and returned early would dismiss the dialog having done nothing, which reads as done.
+        canConfirm={deciding?.approve !== false || reason.trim() !== ""}
+        onConfirm={decide}
+      >
+        {deciding?.approve === false && (
+          <div className="stack" style={{ gap: "var(--sp2)" }}>
+            <InputField
+              label={t(S.rejectReason)}
+              value={reason}
+              onChange={(e) => setReason(e.currentTarget.value)}
+            />
+            {/* Shown while the reason is blank, because the confirm button is disabled until it is not and a
+                disabled control with no stated reason is a dead end rather than a rule. */}
+            <div aria-live="polite">
+              {reason.trim() === "" && <InlineAlert tone="info">{t(S.rejectNeedsReason)}</InlineAlert>}
+            </div>
+          </div>
+        )}
+      </ConfirmAction>
+    </Card>
+  );
+}
+
+/** Who is currently holding a pair of roles the SoD rules say must not be held together. */
+function SodBreachesCard() {
+  const t = useLoc();
+  const api = useApi();
+  const state = useAsync<SodViolation[]>(() => api.sodViolations(), []);
+
+  const cols: Column<SodViolation>[] = [
+    {
+      key: "person",
+      header: t(S.person),
+      cell: (r) => (r.subjectName ?? <span className="tnum">{r.subjectUserId}</span>),
+      sortable: true,
+      sortValue: (r) => r.subjectName ?? r.subjectUserId,
+    },
+    { key: "held", header: t(S.heldRole), cell: (r) => <StatusChip kind="bad" label={r.heldRole} />, sortable: true, sortValue: (r) => r.heldRole },
+    { key: "conflicting", header: t(S.conflictingRole), cell: (r) => <StatusChip kind="bad" label={r.conflictingRole} />, sortable: true, sortValue: (r) => r.conflictingRole },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
+  ];
+
+  const query = useTableQuery<SodViolation>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.subjectName ?? "", r.subjectUserId, r.heldRole, r.conflictingRole].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.sodSearchHint),
+    pageSize: 25,
+    persistKey: "admin-sod-breaches",
+  });
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp3)" }}>
+      <h2 className="panel-h">{t(S.sodTitle)}</h2>
+      <p className="lede">{t(S.sodLede)}</p>
+      <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.sodEmpty}>
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(r) => `${r.subjectUserId}:${r.heldRole}:${r.conflictingRole}`}
+            caption={t(S.sodTitle)}
+            emptyLabel={t(S.sodEmpty)}
+            noMatchesLabel={t(S.noMatches)}
+          />
+        )}
+      </AsyncSection>
+    </Card>
   );
 }
 

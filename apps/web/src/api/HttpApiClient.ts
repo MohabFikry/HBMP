@@ -1,5 +1,6 @@
 import {
   zAccessReviewCampaign,
+  zAccessReviewItem,
   zAppointmentRow,
   zWaitingTicket,
   zBookableClinic,
@@ -35,6 +36,7 @@ import {
   zCheckInResult,
   zRoleBinding,
   zSodConflict,
+  zSodViolation,
   zTenantSummary,
   zConsumeResult,
   zDecisionResult,
@@ -671,6 +673,21 @@ const breakGlassChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "n
   return { kind: "neu", label: { en: raw || "Expired", ar: "منتهٍ" } };
 };
 /**
+ * A review decision string → the contract's enum.
+ *
+ * <p>Default-PENDING on anything unrecognised, and that is the safe direction here rather than the lazy one:
+ * a decision the client cannot read must not render as decided, because a decided item is one the reviewer
+ * skips and the sweep leaves alone. An unknown value showing as outstanding costs somebody a second look; the
+ * other way round costs a grant nobody reviewed.</p>
+ */
+const reviewDecision = (d: unknown): "pending" | "recertified" | "revoked" | "autoExpired" => {
+  const k = String(d ?? "").toLowerCase();
+  if (k === "recertified") return "recertified";
+  if (k === "revoked") return "revoked";
+  if (k === "autoexpired") return "autoExpired";
+  return "pending";
+};
+/**
  * A settlement's lifecycle state → its chip.
  *
  * <p>All four states used to render an identical green "ok" chip, because this client wrote the literal
@@ -1273,20 +1290,7 @@ export class HttpApiClient implements ApiClient {
     // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
     // rebooked appointment repeats the same actor several times. A failure here degrades to the id rather than
     // failing the timeline: knowing when a no-show was marked is worth more than knowing nobody's name.
-    const ids = [...new Set(steps.map((x: any) => x.by).filter(Boolean).map(String))];
-    const names = new Map<string, string>();
-    if (ids.length > 0) {
-      try {
-        const rows = (await getAbsolute(
-          `${GATEWAY_BASE}/identity/user-labels?subjectIds=${encodeURIComponent(ids.join(","))}`,
-        )) as any[];
-        for (const row of rows ?? []) {
-          if (row?.subjectId && row?.displayName) names.set(String(row.subjectId), String(row.displayName));
-        }
-      } catch {
-        // Left unresolved on purpose — see above.
-      }
-    }
+    const names = await this.userLabels(steps.map((x: any) => x.by));
 
     return steps.map((x: any) =>
       parseOr(zTimelineStep, {
@@ -4067,21 +4071,97 @@ export class HttpApiClient implements ApiClient {
           : { kind: "neu" as const, label: t("Closed", "مغلق") },
         minTier: c.minTier ?? undefined,
         dueAt: c.dueAt ?? undefined,
+        // 33.7 — admin-service has returned all five since phase 8b and this mapping dropped every one, so a
+        // campaign row read "Open, due Friday" whether nobody had started it or somebody had finished it.
+        total: Number(c.total ?? 0),
+        pending: Number(c.pending ?? 0),
+        recertified: Number(c.recertified ?? 0),
+        revoked: Number(c.revoked ?? 0),
+        autoExpired: Number(c.autoExpired ?? 0),
       }),
     );
   }
+
+  /**
+   * 33.7 — the reviewer's worklist, and the read that made `recertify`/`revoke` reachable.
+   *
+   * <p>The subject id is resolved to a display name through identity's `/user-labels`, the same helper the
+   * appointment timeline uses. A failure there degrades to the id rather than failing the list: a reviewer
+   * who cannot see a name can still look the id up, and a blank worklist teaches them the campaign is
+   * empty.</p>
+   */
+  async accessReviewItems(campaignId: string) {
+    const r = (await getRaw(`/admin/access-reviews/${encodeURIComponent(campaignId)}/items`)) as any[];
+    const rows = Array.isArray(r) ? r : [];
+    const names = await this.userLabels(rows.map((i: any) => String(i.subjectUserId ?? "")));
+    return rows.map((i: any) => {
+      const subject = String(i.subjectUserId ?? "");
+      return parseOr(zAccessReviewItem, {
+        id: i.itemId ?? i.id,
+        bindingId: i.bindingId,
+        subjectUserId: subject,
+        subjectName: names.get(subject) ?? null,
+        role: String(i.role ?? ""),
+        decision: reviewDecision(i.decision),
+        decidedBy: i.decidedBy ?? null,
+        decidedAt: i.decidedAt ?? null,
+        note: i.note ?? null,
+      });
+    });
+  }
+  async recertifyAccessItem(itemId: string, note?: string) {
+    await postRaw(`/admin/access-reviews/items/${encodeURIComponent(itemId)}/recertify`, { note: note ?? null });
+  }
+  async revokeAccessItem(itemId: string, note?: string) {
+    await postRaw(`/admin/access-reviews/items/${encodeURIComponent(itemId)}/revoke`, { note: note ?? null });
+  }
+  async sweepAccessCampaign(campaignId: string) {
+    const r = (await postRaw(`/admin/access-reviews/${encodeURIComponent(campaignId)}/sweep`, {})) as any;
+    return { autoExpired: Number(r?.autoExpired ?? 0) };
+  }
+
   async breakGlassGrants() {
     const r = (await getRaw(`/admin/dashboards/break-glass`)) as any[];
     return (Array.isArray(r) ? r : []).map((g: any) =>
       parseOr(zBreakGlassGrant, {
         id: g.grantId ?? g.id,
-        requesterToken: `•••${String(g.requester ?? g.requesterUserId ?? "").replace(/-/g, "").slice(-4)}`,
+        // The TOKEN the server produced. This used to be `•••${requesterUserId.slice(-4)}` computed here,
+        // which meant the whole subject id crossed the wire and the minimisation the screen advertises held
+        // only for whoever was looking at the table (design 18 §2 — see admin-service's `GovernanceToken`).
+        requesterToken: String(g.requesterToken ?? ""),
+        approverToken: g.approverToken ?? null,
         reasonCode: String(g.reasonCode ?? ""),
         status: breakGlassChip(g.status),
         requestedAt: g.requestedAt ?? new Date().toISOString(),
         expiresAt: g.expiresAt ?? undefined,
+        accessCount: Number(g.accessCount ?? 0),
+        outOfScopeCount: Number(g.outOfScopeCount ?? 0),
+        postReviewDone: Boolean(g.postReviewDone),
       }),
     );
+  }
+  async approveBreakGlass(grantId: string) {
+    await postRaw(`/admin/break-glass/${encodeURIComponent(grantId)}/approve`, {});
+  }
+  async rejectBreakGlass(grantId: string, reason: string) {
+    await postRaw(`/admin/break-glass/${encodeURIComponent(grantId)}/reject`, { reason });
+  }
+
+  /** SoD conflicts users hold RIGHT NOW. `sodMatrix` above is the rule set; this is the breach list. */
+  async sodViolations() {
+    const r = (await getRaw(`/admin/dashboards/sod-violations`)) as any[];
+    const rows = Array.isArray(r) ? r : [];
+    const names = await this.userLabels(rows.map((v: any) => String(v.subjectUserId ?? "")));
+    return rows.map((v: any) => {
+      const subject = String(v.subjectUserId ?? "");
+      return parseOr(zSodViolation, {
+        subjectUserId: subject,
+        subjectName: names.get(subject) ?? null,
+        heldRole: String(v.heldRole ?? ""),
+        conflictingRole: String(v.conflictingRole ?? ""),
+        reason: String(v.reason ?? ""),
+      });
+    });
   }
   // Provider network (Phase 2b, US-018..021) — the Network Team's tenant-scoped directory (never provider-scoped
   // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads; performance is
@@ -4134,6 +4214,34 @@ export class HttpApiClient implements ApiClient {
       status: providerStatusChip(r?.status ?? "Suspended"),
       onboardingState: String(r?.onboardingState ?? "Draft"),
     });
+  }
+
+  /**
+   * Put names to subject ids, in ONE request for the distinct ids.
+   *
+   * <p>Extracted in 33.7 from the appointment timeline, which had the only copy, because the access-review
+   * worklist and the SoD breach list need exactly the same thing and a second copy is a second place for the
+   * degrade-to-the-id rule to be got wrong.</p>
+   *
+   * <p>A failure resolves to an empty map rather than throwing. Every caller renders the id when the name is
+   * missing: knowing that `•••4f2a` holds two conflicting roles is worth more than an empty table, and an
+   * identity outage must not read as "no violations".</p>
+   */
+  private async userLabels(subjectIds: readonly unknown[]) {
+    const out = new Map<string, string>();
+    const ids = [...new Set(subjectIds.filter(Boolean).map(String))];
+    if (ids.length === 0) return out;
+    try {
+      const rows = (await getAbsolute(
+        `${GATEWAY_BASE}/identity/user-labels?subjectIds=${encodeURIComponent(ids.join(","))}`,
+      )) as any[];
+      for (const row of rows ?? []) {
+        if (row?.subjectId && row?.displayName) out.set(String(row.subjectId), String(row.displayName));
+      }
+    } catch {
+      // Deliberately swallowed — see above.
+    }
+    return out;
   }
 
   // ---- Practitioners (Phase 14.5, design 37 §4) -----------------------------------------------------------

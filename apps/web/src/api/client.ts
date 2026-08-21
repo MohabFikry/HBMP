@@ -15,6 +15,7 @@ import type {
   OrderPricing,
   SubstitutionRequest,
   AccessReviewCampaign,
+  AccessReviewItem,
   AccessSession,
   BranchScopeGrant,
   EffectiveAccess,
@@ -129,6 +130,7 @@ import type {
   VitalInput,
   VitalsResult,
   SodConflict,
+  SodViolation,
   TenantSummary,
   PlaceOrderRequest,
   PlaceOrderResult,
@@ -943,7 +945,30 @@ export interface ApiClient {
   adminTenants(): Promise<TenantSummary[]>;
   sodMatrix(): Promise<SodConflict[]>;
   accessReviewCampaigns(): Promise<AccessReviewCampaign[]>;
+  /**
+   * The grants a campaign is reviewing — the reviewer's worklist.
+   *
+   * Until 33.7 there was no read behind `recertify`/`revoke` on any service, so the two decisions were keyed
+   * by an `itemId` nothing produced: the campaign's counts could say "412 pending" with no way to reach one
+   * of the 412.
+   */
+  accessReviewItems(campaignId: string): Promise<AccessReviewItem[]>;
+  /** Confirm continued need-to-know for one grant. Audited and linked to the binding. */
+  recertifyAccessItem(itemId: string, note?: string): Promise<void>;
+  /** Withdraw one grant. This REVOKES the underlying role binding, not just the review row. */
+  revokeAccessItem(itemId: string, note?: string): Promise<void>;
+  /**
+   * Auto-expire every item still pending past the deadline — which revokes each of their bindings — and
+   * close the campaign. Returns how many were expired, so the effect is visible without a re-read.
+   */
+  sweepAccessCampaign(campaignId: string): Promise<{ autoExpired: number }>;
   breakGlassGrants(): Promise<BreakGlassGrant[]>;
+  /** Approve an emergency grant. Dual control: the server refuses a self-approval with 409. */
+  approveBreakGlass(grantId: string): Promise<void>;
+  /** Refuse an emergency grant. The reason is required and is audited. */
+  rejectBreakGlass(grantId: string, reason: string): Promise<void>;
+  /** SoD conflicts users ACTUALLY hold right now — not the rules, the breaches (see `sodMatrix` for rules). */
+  sodViolations(): Promise<SodViolation[]>;
   /** The tenant's auto-decision kill switch (ADR-0035 §5.3). Never touched reads `enabled: false`. */
   autoDecisionSwitch(): Promise<AutoDecisionSwitch>;
   /** Turn auto-decision on or off. A reason is required in both directions, and it is audited. */
