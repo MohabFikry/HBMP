@@ -246,6 +246,61 @@ describe("the coverage details are shown in full", () => {
   });
 });
 
+describe("an eligible member can be booked from the verdict", () => {
+  const ELIGIBLE = {
+    scope: "membership" as const, benefitCategory: null,
+    status: { kind: "ok" as const, label: { en: "Eligible", ar: "مؤهل" } },
+    beneficiary: { id: "ben-1", name: { en: "Amal Hassan", ar: "أمل حسن" }, cardNumber: "MRS-CARD-4821" },
+    coverage: null,
+    costShare: { known: false as const, why: { en: "No category named.", ar: "لم تحدد فئة." } },
+    visitGate: { allowed: true },
+  };
+
+  async function check(over: Record<string, unknown> = {}, role: "reception" | "beneficiary_mgmt" = "reception") {
+    const user = userEvent.setup();
+    const api = new DevApiClient({ latencyMs: 0 }) as unknown as ApiClient;
+    (api as { verifyBeneficiary: unknown }).verifyBeneficiary = vi.fn().mockResolvedValue({
+      verified: true,
+      hit: { id: "ben-1", name: { en: "Amal Hassan", ar: "أمل حسن" }, cardNumber: "MRS-CARD-4821" },
+    });
+    (api as { checkEligibility: unknown }).checkEligibility =
+      vi.fn().mockResolvedValue({ ...ELIGIBLE, ...over });
+    seedSession(role);
+    renderNode(<ReceptionEligibility />, api);
+    await user.type(idField(), "MRS-CARD-4821");
+    await user.type(nameField(), "Hassan");
+    await user.click(checkButton());
+  }
+
+  it("offers booking, carrying the identifier the service resolved", async () => {
+    await check();
+    const link = await screen.findByRole("link", { name: /book appointment/i });
+    // The operator has just identified this person exactly. Sending them to a blank search box to type the
+    // same number again is work, and it is a second chance to land on the wrong record.
+    expect(link).toHaveAttribute("href", expect.stringContaining("q=MRS-CARD-4821"));
+    // Sibling of this screen, so the link is right under /reception, /branch and /beneficiaries alike —
+    // this screen is mounted under more than one portal.
+    expect(link.getAttribute("href")).toMatch(/\/book\?/);
+  });
+
+  it("does not offer it when the member may not be seen today", async () => {
+    await check({
+      visitGate: { allowed: false, reason: { en: "Coverage not active.", ar: "التغطية غير فعّالة." } },
+      status: { kind: "warn" as const, label: { en: "Suspended", ar: "موقوف" } },
+    });
+    await screen.findByText(/coverage not active/i);
+    expect(screen.queryByRole("link", { name: /book appointment/i })).toBeNull();
+  });
+
+  it("does not offer it to a caller who cannot book", async () => {
+    // A registration officer holds eligibility.check without appointments.book. Offering a control that
+    // leads to a route the caller cannot reach is worse than not offering it.
+    await check({}, "beneficiary_mgmt");
+    await screen.findByText("Amal Hassan");
+    expect(screen.queryByRole("link", { name: /book appointment/i })).toBeNull();
+  });
+});
+
 describe("the fixture client applies the same rule as the service", () => {
   it("verifies a real identifier with a matching name", async () => {
     const api = new DevApiClient({ latencyMs: 0 });

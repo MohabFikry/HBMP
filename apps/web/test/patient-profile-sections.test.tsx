@@ -623,13 +623,16 @@ describe("20.4 — the visit-details modal", () => {
     expect(await dialog.findByText(/reference was not included/i)).toBeInTheDocument();
   });
 
-  it("pins the View column so the control is reachable without scrolling sideways", async () => {
+  it("does NOT pin the View column — it scrolls with the rest of the row", async () => {
     renderSections([visible("encounters", { items: [ROW] })]);
     await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
-    // Seven columns overflow the card on a laptop, and the column that falls past the fold is the last —
-    // which is the one with the button in it.
-    expect(within(section).getByRole("columnheader", { name: /view/i })).toHaveClass("mrs-stickyend");
+
+    // This used to assert the opposite. Pinning kept the button reachable without scrolling sideways, which
+    // is a real convenience — and a sticky cell is an OPAQUE STRIP painted over whatever passes beneath it,
+    // so on any table wide enough to scroll it cut the neighbouring column in half. The reception board's
+    // Check-in button was permanently sliced down the middle by a panel of --surface-1.
+    expect(within(section).getByRole("columnheader", { name: /view/i })).not.toHaveClass("mrs-stickyend");
   });
 
   it("does not ask emr for a record whose id the projection withheld", async () => {

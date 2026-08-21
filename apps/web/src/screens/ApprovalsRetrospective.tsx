@@ -159,7 +159,6 @@ export function ApprovalsRetrospective() {
           {
             key: "act",
             header: t(S.action),
-            stickyEnd: true,
             cell: (r: RetrospectiveItem) => (
               <Button size="sm" variant="secondary" onClick={() => setActive(r.authorizationId)}>
                 {t(S.reviewAct)}

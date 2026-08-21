@@ -160,7 +160,6 @@ export function LabQueue({ kind }: { kind: "lab" | "radiology" }) {
     { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "action",
-      stickyEnd: true,
       header: t(S.action),
       // An expired order is IN the queue — dropping it left a technician with the patient in front of them
       // looking at an empty list and nothing to tell them. What changes is the action: consume is refused by

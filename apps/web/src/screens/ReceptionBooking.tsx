@@ -157,11 +157,15 @@ export function ReceptionBooking() {
   // Run the arrival search once, on mount. Not on every `query` change — that would fire a request per
   // keystroke for anyone typing in the box.
   useEffect(() => {
-    if (initialQuery.trim()) void runSearch(initialQuery.trim());
+    if (initialQuery.trim()) void runSearch(initialQuery.trim(), { arrival: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function runSearch(term: string) {
+  /**
+   * @param opts.arrival The caller ARRIVED with this patient — from the eligibility check, or the profile's
+   *   "Book appointment". See the pre-selection below.
+   */
+  async function runSearch(term: string, opts: { arrival?: boolean } = {}) {
     setSearching(true);
     setSearchError(null);
     try {
@@ -172,10 +176,24 @@ export function ReceptionBooking() {
       // from a truncated set presented as the complete one — and the patient they wanted could be among the
       // fifteen that were never sent.
       setTruncated(found.truncated);
-      // Ambiguity is what the dialog is FOR. One match answers the question on the spot and stays inline;
-      // several is a decision, and a decision made against a list wedged between the search box and the next
-      // step of the form is one made in the wrong place.
-      setPicking(found.hits.length > 1);
+      /*
+       * 33.9c — arriving WITH a patient means arriving with them chosen.
+       *
+       * The eligibility check has just resolved this person from an identifier and corroborated the name;
+       * the profile's action sends the member number off a record already open. Making the operator click
+       * the single row that comes back is asking them to re-identify somebody the platform identified a
+       * moment ago — and each re-identification is another chance to land on the wrong record.
+       *
+       * EXACTLY ONE, and only on arrival. Several matches still open the picker: an ambiguous query is a
+       * decision and stays one, whoever sent it. And a match that is not bookable is deliberately NOT
+       * pre-selected — the suspended-member row explains itself where it is, and silently selecting one
+       * would replace that explanation with a booking that fails at submit.
+       */
+      const only = opts.arrival && found.hits.length === 1 && found.hits[0].bookable !== false
+        ? found.hits[0]
+        : null;
+      if (only) setPatient(only);
+      setPicking(!only && found.hits.length > 1);
     } catch (err) {
       // 401/403 read differently from "nothing found" — say which one happened.
       setSearchError(readErrorMessage(err));

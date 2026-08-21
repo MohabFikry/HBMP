@@ -20,15 +20,6 @@ export interface Column<Row> {
    */
   sortValue?: (row: Row) => string | number | null | undefined;
   /**
-   * Pin this column to the trailing edge while the rest of the table scroll under it.
-   *
-   * For the ACTIONS column, and effectively only for it. A wide worklist overflows its card — that is what
-   * `.mrs-wl-scroll` is for — but the column that ends up past the fold is the last one, which is where the
-   * buttons are. An operator then has to scroll sideways to reach the control they came for, on every row.
-   * Pinning it means the columns that can be read at a glance are the ones that scroll.
-   */
-  stickyEnd?: boolean;
-  /**
    * This column holds a number — money, a quantity, a count, a percentage.
    *
    * <p>Aligns the cell AND its header to the end and sets tabular figures, so the digits stack. A money
@@ -287,7 +278,7 @@ export function DataTable<Row>({
                 key={c.key}
                 aria-sort={c.sortable ? (isSorted ? activeDir : "none") : undefined}
                 scope="col"
-                className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
+                className={cx(c.numeric && "mrs-num")}
               >
                 {/* Sortable now needs only `sortable` — not `sortable && onSort`. Requiring a handler meant a
                     column marked sortable rendered as inert text whenever the caller had not wired one, so
@@ -369,7 +360,7 @@ export function DataTable<Row>({
                       key={c.key}
                       scope={c.rowHeader ? "row" : undefined}
                       role={interactive ? "gridcell" : undefined}
-                      className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
+                      className={cx(c.numeric && "mrs-num")}
                     >
                       {c.cell(row)}
                     </Cell>

@@ -174,7 +174,6 @@ export function ReportAccessInbox() {
       sortable: true, sortValue: (r) => r.createdAt },
     {
       key: "actions",
-      stickyEnd: true,
       header: t(S.actions),
       cell: (r) => (
         <div style={{ display: "grid", gap: "var(--sp2)", minWidth: "18rem" }}>

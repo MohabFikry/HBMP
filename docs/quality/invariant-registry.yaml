@@ -2831,3 +2831,32 @@ invariants:
       - apps/web/test/reception-eligibility-verified.test.tsx::shows them at BENEFIT scope too, not only at membership scope
       - apps/web/test/reception-eligibility-verified.test.tsx::shows the policy, and no plan name it does not have
       - apps/web/test/reception-eligibility-verified.test.tsx::shows the card and the member number as the different identifiers they are
+
+  - id: INV-A-TABLE-CELL-DOES-NOT-PAINT-OVER-THE-ONE-BESIDE-IT
+    statement: >-
+      No worklist column is pinned to the trailing edge. A sticky cell is an opaque strip painted over
+      whatever scrolls beneath it, so on any table wide enough to scroll it cuts the neighbouring column —
+      and its z-index outranks unpositioned content beside the table, which is how a table header came to
+      render on top of a patient's vital signs.
+    source: 0B-DESIGN-SYSTEM-UI.md §10c; 21-accessibility-checklist.md
+    severity: High
+    tests:
+      - apps/web/test/grid-blowout.test.ts::has no pinned table cell left to paint over it
+      - apps/web/test/patient-profile-sections.test.tsx::does NOT pin the View column — it scrolls with the rest of the row
+
+  - id: INV-AN-IDENTIFIED-PATIENT-IS-NOT-IDENTIFIED-TWICE
+    statement: >-
+      A caller who arrives at booking with a patient — from an eligibility check, or from a record already
+      open — arrives with that patient chosen, provided the identifier names exactly one bookable member. An
+      ambiguous arrival still opens the picker, and a member who may not be booked is never pre-selected.
+      Every re-identification of somebody the platform has already identified is another chance to land on
+      the wrong record.
+    source: 13-ux-flows.md §2; 32-user-stories.md US-010, US-020; doc 54 §6
+    severity: High
+    tests:
+      - apps/web/test/reception-booking.test.tsx::arrives with the patient already chosen when ?q= names exactly one
+      - apps/web/test/reception-booking.test.tsx::still opens the picker when ?q= is ambiguous
+      - apps/web/test/reception-booking.test.tsx::does not pre-select a member who cannot be booked
+      - apps/web/test/reception-eligibility-verified.test.tsx::offers booking, carrying the identifier the service resolved
+      - apps/web/test/reception-eligibility-verified.test.tsx::does not offer it when the member may not be seen today
+      - apps/web/test/reception-eligibility-verified.test.tsx::does not offer it to a caller who cannot book

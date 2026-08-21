@@ -782,7 +782,6 @@ function EncountersView({ data, beneficiaryId }: { data: ProfileEncounters; bene
       // Pinned to the trailing edge. This table is seven columns wide and overflows its card on a laptop, so
       // the column that ends up past the fold is the last one — which is where the control lives. Without
       // this, reading a visit meant scrolling sideways first, on every row.
-      stickyEnd: true,
       cell: (r) => (
         <Button
           variant="ghost"

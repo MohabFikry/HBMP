@@ -107,7 +107,6 @@ function patientFileColumn(
     key: "file",
     // The board runs to ten columns and overflows its card; this is the last of them and the one reception
     // reaches for most, so it is pinned rather than being the first thing to fall past the fold.
-    stickyEnd: true,
     // A real header, not "": an empty <th> has no accessible name (axe empty-table-header). The fixture routes
     // render no rows, which is why the route-level sweep never surfaced this.
     header: t(S.openFile),

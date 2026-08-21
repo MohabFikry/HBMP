@@ -189,7 +189,6 @@ export function ClaimsAdjudication() {
     {
       key: "act",
       header: t(S.action),
-      stickyEnd: true,
       cell: (r) => (
         <Button size="sm" variant="secondary" onClick={() => setSelected(r.claimLineId)}>{t(S.decide)}</Button>
       ),

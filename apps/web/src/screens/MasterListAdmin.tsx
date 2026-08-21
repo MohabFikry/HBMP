@@ -177,8 +177,7 @@ export function MasterListAdmin() {
     { key: "effective", header: t(S.effective), sortable: true, cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span>, sortValue: (r) => r.effectiveFrom },
     { key: "rationale", header: t(S.rationale), cell: (r) => r.rationale ?? <span className="muted">—</span> },
     {
-      key: "edit", header: t(S.edit), stickyEnd: true,
-      cell: (r) => {
+      key: "edit", header: t(S.edit),      cell: (r) => {
         // Only the clinical systems are editable here; the rest are shown (they are in force and the
         // supervisor should see them) but carry no control, rather than a control that 403s.
         const clinical = (CLINICAL_CODE_SYSTEMS as readonly string[]).includes(r.system);

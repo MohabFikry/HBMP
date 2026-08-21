@@ -231,7 +231,58 @@ No total is returned. The only thing an operator can do about "too many" is narr
 
 ---
 
-## 7. What this is NOT
+## 7. The way on from a verdict
+
+An eligible member at the desk is there to be seen, and the next thing the operator does is book. That meant
+leaving this screen, opening Book Appointment, and typing the same identifier a second time into a search —
+after a lookup that had just resolved the person exactly.
+
+Re-identifying somebody the platform has already identified is not only work. It is a **second chance to land
+on the wrong record**, which is the failure the rest of this document is about.
+
+So an eligible result carries a booking link, and booking arrives with the patient chosen.
+
+**Gated on the visit gate, not the verdict.** `visitGate.allowed` is the membership answer — may this person
+be seen today — and that is the question booking asks. A benefit that needs authorisation is a soft no on the
+CARE and not a closed door at reception, so offering the control on the benefit verdict would hide it from
+someone who may perfectly well be booked in.
+
+**And on the permission.** The booking route is portal-relative and not every portal that checks eligibility
+carries it: a registration officer holds `eligibility.check` without `appointments.book`. A control that
+leads somewhere the caller cannot reach is worse than no control.
+
+**Pre-selection is for an UNAMBIGUOUS arrival only.** Exactly one match, and only when the caller arrived with
+a patient rather than typed a search. Several still open the picker — an ambiguous query is a decision and
+stays one, whoever sent it — and a member who cannot be booked is deliberately never pre-selected: the
+suspended row explains itself where it is, and silently selecting it would replace that explanation with a
+booking that fails at submit, after a doctor and a time have been chosen.
+
+---
+
+## 8. The pinned column, removed
+
+Not part of this story, found while looking at the same screens.
+
+`.mrs-stickyend` pinned a worklist's last column — the actions — to the trailing edge, so an operator did not
+have to scroll sideways to reach the control they came for. Sound reasoning, and the result was not: **a
+sticky cell is an opaque strip painted over whatever passes beneath it**, so on any table wide enough to
+scroll it cut the neighbouring column in half. On the reception board that neighbour is the Check-in button,
+permanently sliced down the middle by a panel of `--surface-1`.
+
+It also carried a `z-index`, which is how it came to paint over the encounter screen's vitals rail — a
+table's ACTIONS header rendering on top of a patient's readings — and needed a guard test of its own to keep
+it in its layer. A mechanism that needs a z-index guard to stop it covering clinical data, in order to save a
+horizontal scroll, is not paying for itself.
+
+Removed from the design system, from its CSS and from all fifteen call sites. `.mrs-wl-scroll` already gives
+a wide table its own horizontal scroll and its own focus ring, so the actions are reached by the same gesture
+as the rest of the row. The old guard test now asserts the **absence** of a pinned cell, which is stronger
+than ordering the layers: a cell that does not exist cannot be given the wrong z-index by the next person to
+touch it.
+
+---
+
+## 9. What this is NOT
 
 **Corroboration, not authentication.** It stops the wrong *record* being opened. It does not prove the person
 at the desk is the person on the card, and nothing downstream may lean on it as though it did. Somebody
@@ -243,7 +294,7 @@ weight it was never built to carry — a later decision leans on it, and the gap
 
 ---
 
-## 8. Left undone, deliberately
+## 10. Left undone, deliberately
 
 **`/reception/search` still matches names, phones and partial identifiers.** Booking, the call centre and the
 member directory need exactly that, and the operator there chooses from what comes back. What the eligibility

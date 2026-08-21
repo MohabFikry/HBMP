@@ -223,6 +223,70 @@ describe("Reception booking (US-020) — eligibility gate", () => {
     expect(await screen.findByRole("button", { name: /choose a patient \(25\+\)/i })).toBeInTheDocument();
   });
 
+  /**
+   * 33.9c — arriving WITH a patient means arriving with them chosen.
+   *
+   * <p>The eligibility check has just resolved this person from an identifier and corroborated the name; the
+   * profile's action sends the member number off a record already open. Making the operator click the single
+   * row that comes back asks them to re-identify somebody the platform identified a moment ago — and each
+   * re-identification is another chance to land on the wrong record.</p>
+   */
+  it("arrives with the patient already chosen when ?q= names exactly one", async () => {
+    renderNode(
+      <ReceptionBooking />,
+      new BookingApi({ latencyMs: 0 }) as unknown as ApiClient,
+      "/reception/book?q=MRS-M-014882",
+    );
+
+    // The chosen chip, not a row waiting to be clicked: the name is communicated and only the appointment
+    // details are left.
+    expect(await screen.findByText("Omar Khalil")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^change$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /omar khalil/i })).toBeNull();
+  });
+
+  it("still opens the picker when ?q= is ambiguous", async () => {
+    // Pre-selection is for an UNAMBIGUOUS arrival. Several matches is a decision and stays one, whoever
+    // sent the query — which is the whole distinction this screen already drew for a typed search.
+    class TwoApi extends BookingApi {
+      override searchEligibility() {
+        return Promise.resolve({
+          hits: [
+            { id: "a", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-1", bookable: true,
+              status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } } },
+            { id: "b", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-2", bookable: true,
+              status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } } },
+          ],
+          truncated: false,
+        });
+      }
+    }
+    renderNode(<ReceptionBooking />, new TwoApi({ latencyMs: 0 }) as unknown as ApiClient, "/reception/book?q=Omar");
+
+    expect(await screen.findByRole("dialog", { name: /choose a patient/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^change$/i })).toBeNull();
+  });
+
+  it("does not pre-select a member who cannot be booked", async () => {
+    // The suspended row explains itself where it is. Silently selecting it would replace that explanation
+    // with a booking that fails at submit, after the operator has picked a doctor and a time.
+    class SuspendedApi extends BookingApi {
+      override searchEligibility() {
+        return Promise.resolve({
+          hits: [{
+            id: "ben-s", name: { en: "Yusuf Haddad", ar: "يوسف حداد" }, cardNumber: "MRS-M-017702",
+            status: { kind: "warn" as const, label: { en: "Suspended", ar: "موقوف" } }, bookable: false,
+          }],
+          truncated: false,
+        });
+      }
+    }
+    renderNode(<ReceptionBooking />, new SuspendedApi({ latencyMs: 0 }) as unknown as ApiClient, "/reception/book?q=MRS-M-017702");
+
+    await screen.findByText("Yusuf Haddad");
+    expect(screen.queryByRole("button", { name: /^change$/i })).toBeNull();
+  });
+
   it("does not cry truncation on a complete list", async () => {
     const user = userEvent.setup();
     renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);

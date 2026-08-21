@@ -1,9 +1,13 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useFormat } from "../i18n/useFormat";
 import { Button, Card, ComboboxField, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityResult, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { ApiError } from "../api/http";
+import { useAuth } from "../auth/AuthProvider";
+import { hasPermission, permissionsForRole } from "../authz/permissions";
+import type { Role } from "../authz/permissions";
 import { PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -68,6 +72,11 @@ const S = {
   visit: { en: "Visit gating", ar: "أهلية الزيارة" },
   visitOk: { en: "Visit allowed today", ar: "الزيارة مسموحة اليوم" },
   visitNo: { en: "Visit not allowed", ar: "الزيارة غير مسموحة" },
+  book: { en: "Book appointment", ar: "احجز موعداً" },
+  bookHint: {
+    en: "Opens booking with this patient already chosen.",
+    ar: "يفتح الحجز والمريض محدَّد بالفعل.",
+  },
   card: { en: "Card", ar: "البطاقة" },
   memberNo: { en: "Member no.", ar: "رقم العضوية" },
   policyNo: { en: "Policy", ar: "الوثيقة" },
@@ -258,7 +267,9 @@ export function ReceptionEligibility() {
         {status === "success" && !result && refusal && (
           <RefusalCard reason={refusal} t={t} />
         )}
-        {status === "success" && result && <ResultCard result={result} t={t} S={S} />}
+        {status === "success" && result && (
+          <ResultCard result={result} t={t} S={S} identifier={identifier.trim()} />
+        )}
       </div>
     </>
   );
@@ -294,7 +305,59 @@ function RefusalCard({ reason, t }: { reason: Refusal; t: (l: Localized) => stri
   );
 }
 
-function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Localized) => string; S: Record<string, Localized> }) {
+/**
+ * 33.9c — the way on from a verdict.
+ *
+ * <p>An eligible member at the desk is there to be seen, and the next thing the operator does is book. That
+ * meant leaving this screen, opening Book Appointment, and typing the same identifier a second time into a
+ * search — after a lookup that had just resolved the person exactly. Re-identifying somebody the platform has
+ * already identified is not only work, it is a second chance to land on the wrong record.</p>
+ *
+ * <p><b>Gated on the VISIT GATE, not on the verdict.</b> `visitGate.allowed` is the membership answer — may
+ * this person be seen today — and it is the question booking asks. A benefit that needs authorisation is a
+ * soft no on the CARE and not a closed door at reception, so offering the booking on the benefit verdict
+ * would hide the button from someone who may perfectly well be booked in.</p>
+ *
+ * <p><b>And on the permission.</b> `/…/book` is portal-relative and not every portal that checks eligibility
+ * carries it — a registration officer holds `eligibility.check` without `appointments.book`. Offering a
+ * control that leads to a route the caller cannot reach is worse than not offering it.</p>
+ */
+function BookFromResult({ result, identifier, t }: {
+  result: EligibilityResult;
+  identifier: string;
+  t: (l: Localized) => string;
+}) {
+  const { session } = useAuth();
+  const { pathname } = useLocation();
+  const role = session?.role as Role | undefined;
+
+  if (!result.visitGate.allowed) return null;
+  if (!role || !hasPermission(permissionsForRole(role), "appointments.book")) return null;
+
+  // Sibling of this screen, so the link is right under /reception, /branch and /beneficiaries alike rather
+  // than hardcoding one portal's path — this screen is mounted under more than one.
+  const to = `${pathname.replace(/\/[^/]*$/, "")}/book`;
+  // The identifier the SERVICE resolved, not the string that was typed: it is the canonical one, and it is
+  // what booking's own lookup will match.
+  const q = result.beneficiary.cardNumber || identifier;
+
+  return (
+    <div className="stack" style={{ gap: "var(--sp1)" }}>
+      <Link className="mrs-btn mrs-primary" to={`${to}?q=${encodeURIComponent(q)}`}>
+        <Icon name="calendar" width={17} height={17} aria-hidden="true" />
+        {t(S.book)}
+      </Link>
+      <p className="muted" style={{ margin: 0, fontSize: "var(--fs-caption)" }}>{t(S.bookHint)}</p>
+    </div>
+  );
+}
+
+function ResultCard({ result, t, S, identifier }: {
+  result: EligibilityResult;
+  t: (l: Localized) => string;
+  S: Record<string, Localized>;
+  identifier: string;
+}) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const b = result.beneficiary;
   const c = result.coverage;
@@ -359,12 +422,13 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
 
       <CostShareBlock share={result.costShare} t={t} S={S} fmt={fmt} />
 
-      <div>
+      <div className="result-head" style={{ alignItems: "center" }}>
         {result.visitGate.allowed ? (
           <StatusChip kind="ok" label={t(S.visitOk)} />
         ) : (
           <StatusChip kind="warn" label={result.visitGate.reason ? t(result.visitGate.reason) : t(S.visitNo)} />
         )}
+        <BookFromResult result={result} identifier={identifier} t={t} />
       </div>
     </Card>
   );

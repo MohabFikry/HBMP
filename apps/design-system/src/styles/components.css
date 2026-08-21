@@ -1660,33 +1660,19 @@ nav.mrs-rail {
 [dir="rtl"] .mrs-pager-step:last-of-type  svg { transform: rotate(90deg); }
 
 /*
-  The pinned actions column (Column.stickyEnd).
-
-  A nine-column worklist overflows its card at 1440px, which `.mrs-wl-scroll` handles — but the column that
-  falls past the fold is the LAST one, and that is where the buttons are. So the operator had to scroll
-  sideways on every row to reach the control they came for. Pinned, the columns that can be read at a glance
-  are the ones that move.
-
-  The background is opaque and matches the surface the row is painted on, because the scrolled cells pass
-  UNDER this one; a transparent sticky cell shows two sets of text stacked on each other. The leading hairline
-  is what says "there is more to the left of this" once anything has scrolled beneath it.
-*/
-.mrs-wl th.mrs-stickyend,
-.mrs-wl td.mrs-stickyend {
-  position: sticky;
-  inset-inline-end: 0;
-  z-index: 1;
-  background: var(--surface-1);
-  border-inline-start: 1px solid var(--border);
-}
-/*
-  The header cell is sticky in BOTH axes — vertically from `.mrs-wl th` above, horizontally from the rule
-  before this one — so it stays in its corner.
-
-  `z-index: 6` and not 3: `.mrs-wl th` already sets 5, and a pinned header at 3 would have passed UNDER the
-  other header cells as they scrolled beneath it, which is the one place the stacking has to be right. It
-  keeps `--surface-2` from the base rule; stating it again here would be one more place to update.
-*/
-.mrs-wl thead th.mrs-stickyend {
-  z-index: 6;
-}
+ * THERE IS NO PINNED COLUMN.
+ *
+ * `.mrs-stickyend` pinned the last column — the actions — to the trailing edge so an operator did not have
+ * to scroll sideways to reach the control they came for. The reasoning was sound and the result was not: a
+ * sticky cell is an OPAQUE STRIP painted over whatever passes beneath it, so on any table wide enough to
+ * scroll it cut the neighbouring column in half. On the reception board that neighbour is the Check-in
+ * button, permanently sliced down the middle by a panel of `--surface-1`.
+ *
+ * It also carried a `z-index`, which is how it came to paint over the encounter screen's vitals rail —
+ * a table's ACTIONS header rendering on top of a patient's readings — and needed a guard test of its own to
+ * keep it in its layer. A mechanism that needs a z-index guard to stop it covering clinical data, in order
+ * to save a horizontal scroll, is not paying for itself.
+ *
+ * The columns scroll together now. `.mrs-wl-scroll` already gives the table its own horizontal scroll and
+ * its own focus ring, so the actions are reachable by the same gesture as everything else on the row.
+ */

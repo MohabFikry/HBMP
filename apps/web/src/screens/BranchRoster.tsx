@@ -277,7 +277,6 @@ function WeeklyPattern({
       { key: "offered", header: t(S.offered), cell: (r) => String(r.slotsPerDay) },
       {
         key: "actions",
-        stickyEnd: true,
         header: "",
         cell: (r) => (
           <>
@@ -465,7 +464,6 @@ function Exceptions({
       { key: "reason", header: t(S.reason), cell: (e) => e.reason, sortable: true, sortValue: (e) => e.reason },
       {
         key: "actions",
-        stickyEnd: true,
         header: "",
         cell: (e) => (
           <Button size="sm" variant="ghost" onClick={() => setConfirming(e)}>{t(S.withdraw)}</Button>

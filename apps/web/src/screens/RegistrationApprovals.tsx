@@ -411,7 +411,6 @@ export function RegistrationApprovals() {
       // Pinned to the trailing edge. With the selection column and the decision button the table is wider
       // than its card at 1440px, and the column that fell past the fold was this one — the operator had to
       // scroll sideways on every row to reach the control they had come for.
-      stickyEnd: true,
       cell: (r) => (
         <div className="reg-actions">
           {/* VIEW is available to both roles, which is what stops this column being empty for an officer. */}

@@ -68,10 +68,20 @@ export function renderApp(initialPath = "/", role?: Role, apiClient: ApiClient =
  * one, so a screen that reaches for `useNavigate` — as any worklist with a "Patient file" action must — threw
  * only in the test. That made the harness, not the code, the thing under test.
  */
-export function renderNode(ui: ReactElement, apiClient: ApiClient = new DevApiClient({ latencyMs: 0 })) {
+/**
+ * @param at The entry URL, for a screen that reads the location — a `?q=` the caller arrived with, or a
+ *   path a sibling link is built from. Defaults to `/`, which is what every test that does not care wants.
+ */
+export function renderNode(
+  ui: ReactElement,
+  apiClient: ApiClient = new DevApiClient({ latencyMs: 0 }),
+  at = "/",
+) {
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={apiClient}>
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[at]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {ui}
+      </MemoryRouter>
     </AppProviders>,
   );
 }

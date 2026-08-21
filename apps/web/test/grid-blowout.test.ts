@@ -68,23 +68,23 @@ describe("a single-column grid cannot blow out its container", () => {
 });
 
 describe("the vitals rail is never painted through", () => {
-  it("stacks above a worklist's pinned actions column", () => {
-    /*
-     * Two positioned elements with `z-index: auto` paint in DOM order, and the rail comes after the note
-     * column — so it wins by default. A PINNED table cell does not play by that rule: it carries an explicit
-     * `z-index: 1`, which beats `auto` outright. The moment a table beside the rail overflowed, its ACTIONS
-     * header rendered on top of a patient's readings.
-     *
-     * The overflow is fixed above. This is the guard that keeps the next one from landing on the rail.
-     */
-    const railZ = ruleBody(readFileSync(APP_CSS, "utf8"), ".enc-rail");
-    const stickyEnd = decls(readFileSync(DS_CSS, "utf8"))
-      .match(/\.mrs-wl th\.mrs-stickyend[\s\S]*?\{([^}]*)\}/);
-
-    const railValue = Number(/z-index:\s*(\d+)/.exec(railZ ?? "")?.[1] ?? NaN);
-    const cellValue = Number(/z-index:\s*(\d+)/.exec(stickyEnd?.[1] ?? "")?.[1] ?? NaN);
-
-    expect(railValue, ".enc-rail declares no z-index, so a pinned table cell will paint over it")
-      .toBeGreaterThan(cellValue);
+  /**
+   * The rail used to be guarded against a pinned table cell. There are no pinned table cells now.
+   *
+   * <p>A sticky column is an opaque strip with an explicit `z-index`, and `z-index: 1` beats the `auto` of
+   * two positioned elements paint-ordered by the DOM — so a table's ACTIONS header rendered on top of a
+   * patient's readings the moment the table beside the rail overflowed. The old test kept the two in the
+   * right order.</p>
+   *
+   * <p>Asserting the absence is stronger than ordering the layers, and it is the assertion that stays true:
+   * a cell that does not exist cannot be given the wrong z-index by the next person to touch it.</p>
+   */
+  it("has no pinned table cell left to paint over it", () => {
+    const ds = decls(readFileSync(DS_CSS, "utf8"));
+    expect(
+      ds,
+      "`.mrs-stickyend` is back — it is an opaque strip over the column beside it, and it carries a "
+        + "z-index that outranks the vitals rail",
+    ).not.toMatch(/\.mrs-wl\s+(?:thead\s+)?t[hd]\.mrs-stickyend/);
   });
 });

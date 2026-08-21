@@ -140,7 +140,6 @@ export function BranchPractitioners() {
       { key: "expiry", header: t(S.expiry), cell: (p) => p.licenseExpiry ?? t(S.none), sortable: true, sortValue: (p) => p.licenseExpiry },
       {
         key: "actions",
-        stickyEnd: true,
         header: "",
         cell: (p) => (
           <>
@@ -450,7 +449,6 @@ export function BranchLicenceAlerts() {
       { key: "clinics", header: t(S.clinics), cell: (a) => String(a.branches.length), sortable: true, sortValue: (a) => a.branches.length },
       {
         key: "actions",
-        stickyEnd: true,
         header: "",
         /*
           THE ACTION, on the worklist that identifies the work.
