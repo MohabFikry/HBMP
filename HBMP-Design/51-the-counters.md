@@ -253,6 +253,10 @@ request.
 **Seven roles remain un-audited:** `beneficiary_mgmt`, `beneficiary_mgmt_supervisor`, `case_manager`,
 `provider_admin`, `policy_admin`, `org_admin`, `super_admin`.
 
+> **Closed on 2026-08-21.** All seven were covered by pass 7 — see
+> [52](52-administration-and-coordination.md). Every portal in the catalog has now been through a
+> client-vs-service pass.
+
 **The standing debt was cleared straight after this pass** — and two of the four items this document listed
 were already closed and were being carried forward stale. See `docs/BUILD-STATUS.md`, "2026-08-21 — the
 standing debt, measured": `admin/0007` was fixed on 2026-08-20 (parity test green, 250-file replay clean),

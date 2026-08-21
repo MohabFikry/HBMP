@@ -1372,3 +1372,67 @@ further floors, including the aggregates (domain 58 → 80, overall 45 → 67). 
 ratchet is advisory precisely so a human decides: raising them all at once, with no CI able to validate the
 result, would make the next run's failure mode "which of 71 floors moved" rather than "what regressed". It is
 a one-command change when CI is back.
+
+---
+
+### 2026-08-21 — pass 7: administration and coordination
+
+The last seven un-audited roles: `org_admin`, `super_admin`, `provider_admin`, `policy_admin`,
+`case_manager`, `beneficiary_mgmt` and its supervisor. Six portals, thirty-three sections. Full write-up in
+[`HBMP-Design/52-administration-and-coordination.md`](../HBMP-Design/52-administration-and-coordination.md).
+**Every portal in the catalog has now been through a client-vs-service pass.**
+
+The sentence this pass generalises to:
+
+> An authority granted end to end in the token, and never given a door, is invisible from every side.
+
+The identity seed grants it, the service implements and tests it, the design document specifies it, the token
+carries it into every request — and nobody can do it, because no screen asks. Nothing fails. There is simply a
+job the platform was built to support and does not.
+
+**The two findings that are not about a portal.**
+
+`admin.access_review_item` carries no `tenant_id` and has no RLS policy. Migration `0005` lists it under
+"deliberately NOT tenant-isolated" because its rows are "reached only through their campaign, which IS
+isolated" — and `DecideAsync` looked the item up by id alone, so it did not reach it through the campaign. The
+underlying binding was never at risk (`role_binding` IS isolated, so the revoke half found nothing), which is
+what made it quiet: the act available was marking another tenant's grant **Recertified**, which is precisely
+what stops their sweep revoking it at the deadline. Now scoped through the campaign, with a test verified to
+fail against the old query.
+
+`check-kong-route-coverage.py` carried `IGNORE_SEGMENTS = {"health", "metrics"}`, meant for the Prometheus
+scrape and `/health/live`. Both of those are served **unversioned**, so neither ever reached that check — the
+set only ever did anything to `/api/v1/metrics`, provider-service's Network Team roll-up, which consequently
+had no gateway route and had never been called. The SPA counted the same four numbers in the browser instead,
+from a rendered status label, past the 403 the endpoint gives a provider-scoped caller. A guard's exemption
+list is a claim about what is safe to ignore, and this one had not been re-read against what it excluded.
+
+**Fixed:** the access-review worklist (`recertify`/`revoke` were keyed by an item id no read produced), the
+governance registers' dropped fields (`outOfScopeCount` above all — the count of uses that fell outside what
+an emergency grant covered), break-glass approve/refuse, the SoD breach list, server-side requester
+tokenisation, the network roll-up, the tier-administration authority mirror, tier assignment and renaming, and
+the case manager's whole loop — task completion, escalation raise/acknowledge/resolve, and closing a case.
+
+**Recorded as non-scope, with reasons, in doc 52 §5** — nine items, the largest being the provider onboarding
+lifecycle (eight endpoints and a workflow behind an Onboarding form whose success message names a
+credentialing step that has no screen) and the data-extract engine (design 38 §4.4b, built and doorless).
+
+**A correction from this pass's own audit.** `GET /cases/for-beneficiary/{id}` was first recorded as
+unreachable and is not: profile-service composes the patient profile's `cases` section from it. Recorded in
+doc 52 §4.3 rather than deleted, as C8 was in doc 51 — an audit that quietly removes its wrong answers is one
+whose right answers cannot be checked either.
+
+**Measured state after the pass**, on a cleared `./coverage`:
+
+| | |
+|---|---|
+| Backend | 38 assemblies · 3,928 passed · 0 failed · 0 skipped (`--with-db`) |
+| Web | 1,580 passed across 128 files |
+| Coverage | overall 68.6% (floor 45) · domain 86.4% (floor 58) · 73 per-module floors all met |
+| Static gates | 21, all green |
+| Invariants | 10 new (`docs/quality/invariant-registry.yaml`) |
+| Response-schema floors | admin 28 → 30 · provider 18 → 20 |
+
+**One observation not acted on.** `services/provider:Api` measures **4.3%** line coverage. It meets its floor,
+so no gate fires, and it is the reason the network roll-up endpoint had no test to notice it was unrouted for
+six phases. Raising that floor is part of the same decision as the 71 the previous entry defers.

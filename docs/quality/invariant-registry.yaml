@@ -2582,3 +2582,121 @@ invariants:
       - apps/web/test/callcentre-contacts.test.tsx::re-reads the file rather than patching the row it edited
       - apps/web/test/callcentre-contacts.test.tsx::tells an invalid value apart from an unverified call
       - apps/web/test/callcentre-contacts.test.tsx::says the call is not open on that file when the server refuses
+
+  # ── Pass 7 (33.7) — administration, coordination and the network ────────────────────────────────────────
+
+  - id: INV-AN-ACCESS-REVIEW-CAN-BE-REVIEWED
+    statement: >-
+      A recertification campaign's grants can be listed and decided by the administrator the campaign is
+      addressed to. A surface whose decisions are keyed by an identifier no read produces is not a control;
+      it is a compliance claim nobody can act on.
+    source: 07-functional-requirements.md FR-IAM-007; 19-audit-strategy.md §7; doc 52 §2.1
+    severity: High
+    tests:
+      - Mersal.Admin.Tests.AccessReviewWorklistTests.The_worklist_lists_every_grant_a_campaign_is_reviewing
+      - Mersal.Admin.Tests.AccessReviewWorklistTests.The_worklist_puts_the_outstanding_grants_first
+      - Mersal.Admin.Tests.AccessReviewWorklistTests.A_decided_grant_records_who_decided_it_when_and_why
+      - apps/web/test/admin-governance.test.tsx::opens the grants under review, which no screen could reach before
+      - apps/web/test/admin-governance.test.tsx::keeps a grant by posting the decision, not by redrawing the row
+      - apps/web/test/admin-governance.test.tsx::confirms a removal destructively, because it revokes the binding itself
+
+  - id: INV-A-REVIEW-DECISION-STAYS-INSIDE-ITS-OWN-TENANT
+    statement: >-
+      A review item is reached only through its campaign, which is the ground on which access_review_item is
+      exempted from row-level security. A query that does not join the campaign makes that exemption false —
+      and the reachable act is recertifying another tenant's grant, which is precisely what stops their sweep
+      revoking it at the deadline.
+    source: 18-security-model.md §4; services/admin/Infrastructure/Migrations/0005_tenant_rls_fail_closed.sql; doc 52 §2.2
+    severity: Critical
+    tests:
+      - Mersal.Admin.Tests.AccessReviewWorklistTests.One_tenant_cannot_recertify_another_tenants_grant_and_defeat_its_review
+      - Mersal.Admin.Tests.AccessReviewWorklistTests.Another_tenants_campaign_shows_no_items_rather_than_its_own
+
+  - id: INV-A-GOVERNANCE-REGISTER-REPORTS-THE-NUMBER-IT-EXISTS-FOR
+    statement: >-
+      The break-glass register carries how often each emergency grant was used and how many of those uses fell
+      OUTSIDE what it covered, and an access-review campaign carries how much of it is still outstanding. A
+      dashboard that computes the alarming figure and drops it before rendering is not reporting.
+    source: 19-audit-strategy.md §7; 18-security-model.md §2; doc 52 §2.3
+    severity: High
+    tests:
+      - apps/web/test/admin-governance.test.tsx::shows how many uses fell outside what the grant covered
+      - apps/web/test/admin-governance.test.tsx::shows outstanding against the total, not just a name and a due date
+      - apps/web/test/admin-governance.test.tsx::counts lapsed grants apart from revoked ones
+
+  - id: INV-AN-IDENTIFIER-IS-WITHHELD-BY-THE-SERVICE-NOT-BY-THE-SCREEN
+    statement: >-
+      Where a register deliberately shows a governance token instead of a person, the token is produced by the
+      service and the full identifier never crosses the wire. Minimisation performed in the browser holds for
+      whoever is looking at the table and for nobody looking at the response.
+    source: 18-security-model.md §2; doc 52 §2.4
+    severity: High
+    tests:
+      - Mersal.Admin.Tests.GovernanceTokenTests.A_token_reveals_only_the_last_four_characters_of_a_subject_id
+      - Mersal.Admin.Tests.GovernanceTokenTests.A_subject_with_no_id_gets_no_token_rather_than_an_empty_looking_one
+      - Mersal.Admin.Tests.BreakGlassIntegrationTests.Dashboards_are_tenant_scoped_and_audit_their_own_reads
+      - apps/web/test/admin-governance.test.tsx::never receives the requester's user id — only the token the server made
+
+  - id: INV-A-ROLL-UP-IS-COMPUTED-BY-THE-SERVICE-THAT-GATES-IT
+    statement: >-
+      A network-wide figure comes from the service that owns it and refuses it to callers who may not have it.
+      Counting the same figure in the browser from a list the caller can already read enforces no
+      authorization, and counting it from a rendered status LABEL makes the answer depend on a piece of
+      English prose.
+    source: 11-permission-matrix.md §3.3; 18-security-model.md §4; doc 52 §3.1
+    severity: High
+    tests:
+      - Mersal.Provider.Tests.NetworkRollupTests.The_roll_up_is_refused_to_a_caller_who_belongs_to_one_provider
+      - Mersal.Provider.Tests.NetworkRollupTests.The_network_team_is_not_provider_scoped_and_may_read_it
+      - apps/web/test/network-portal.test.tsx::asks provider-service rather than counting the directory
+      - apps/web/test/network-portal.test.tsx::does not fall to zero when a status label it does not recognise arrives
+      - apps/web/test/network-portal.test.tsx::does not show the roll-up to a provider's own administrator
+
+  - id: INV-A-CLIENT-AUTHORITY-MIRROR-USES-THE-NAMES-THE-SERVER-RULE-USES
+    statement: >-
+      Where the SPA mirrors a server authorization rule to decide whether to offer a control, it compares the
+      ISSUER's role names, which is what the rule names. Two issuer roles may share one portal, and a mirror
+      written against the portal name cannot tell them apart — so it offers the narrower role every control
+      the wider one holds.
+    source: 07-functional-requirements.md FR-IAM-003; 11-permission-matrix.md §3.3; doc 52 §3.2
+    severity: High
+    tests:
+      - apps/web/test/network-portal.test.tsx::offers no tier write to a provider's own administrator
+      - apps/web/test/network-portal.test.tsx::keeps every tier write for the Network Team, who do own it
+      - apps/web/test/policy-portal.test.tsx::offers none of it to a provider's own administrator, whom the server refuses
+
+  - id: INV-WHAT-CAN-BE-WITHDRAWN-CAN-BE-CREATED
+    statement: >-
+      A screen that removes a row offers a way to add one. A tier assignment could be revoked and never made,
+      by a screen whose own confirmation promised "the assignment can be re-created".
+    source: 38-policy-member-administration.md §4.1; doc 52 §3.3
+    severity: Medium
+    tests:
+      - apps/web/test/network-portal.test.tsx::posts the assignment the revoke dialog promised could be re-created
+      - apps/web/test/network-portal.test.tsx::says why a retired tier takes no assignment instead of letting the server refuse it
+      - apps/web/test/network-portal.test.tsx::saves a rename without retiring and re-creating the tier
+
+  - id: INV-A-CASE-LOAD-CAN-BE-WORKED-DOWN
+    statement: >-
+      A caseworker can complete a coordination task, raise and resolve an escalation, and close a case. An
+      authority granted in the token and given no door produces a list that only grows — and a count beside
+      somebody's name that stops meaning anything.
+    source: 10-role-matrix.md §3.11; 11-permission-matrix.md §3.3; doc 52 §4.1
+    severity: High
+    tests:
+      - apps/web/test/case-coordination.test.tsx::starts a task by posting the transition
+      - apps/web/test/case-coordination.test.tsx::completes one with the outcome note that is the point of recording it
+      - apps/web/test/case-coordination.test.tsx::posts the target role and the reason, which the server requires
+      - apps/web/test/case-coordination.test.tsx::resolves one with the note that is the only account of how it ended
+      - apps/web/test/case-coordination.test.tsx::names the consequence — the case leaves the load and the access goes with it
+
+  - id: INV-A-REGISTER-SHOWS-WHICH-ROWS-ARE-STILL-OPEN
+    statement: >-
+      A register of outstanding work renders each row's ACTUAL state. A status written as a client-side
+      literal makes every row look outstanding forever, in the one table whose purpose is telling them apart.
+    source: 05-business-process-maps.md X2; doc 52 §4.2
+    severity: High
+    tests:
+      - apps/web/test/case-coordination.test.tsx::renders the three states differently instead of one amber chip for all of them
+      - apps/web/test/case-coordination.test.tsx::acknowledges a raised escalation
+      - apps/web/test/case-coordination.test.tsx::shows a resolved escalation's note rather than a control it cannot use
