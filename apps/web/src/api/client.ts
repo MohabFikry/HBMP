@@ -15,6 +15,7 @@ import type {
   OrderPricing,
   SubstitutionRequest,
   AccessReviewCampaign,
+  AccessReviewItem,
   AccessSession,
   BranchScopeGrant,
   EffectiveAccess,
@@ -73,6 +74,8 @@ import type {
   ManualAuthResult,
   MasterDataVersion,
   ProviderSummary,
+  NetworkMetrics,
+  ProviderMetrics,
   ProviderLocation,
   ProviderContract,
   CreateProviderInput,
@@ -102,6 +105,9 @@ import type {
   IcdRef,
   Soap,
   Escalation,
+  EscalationState,
+  CaseState,
+  TaskState,
   ExecutiveDashboard,
   ExportRequest,
   ExportResult,
@@ -129,6 +135,7 @@ import type {
   VitalInput,
   VitalsResult,
   SodConflict,
+  SodViolation,
   TenantSummary,
   PlaceOrderRequest,
   PlaceOrderResult,
@@ -814,6 +821,20 @@ export interface ApiClient {
   // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
   myCases(): Promise<CaseListItem[]>;
   beneficiary360(caseId: string): Promise<Beneficiary360>;
+  /**
+   * 33.7 — the coordination WRITES.
+   *
+   * `case_manager` has held `case:read`, `case:write` and `case:manage` since the 0001 seed, and design 11
+   * §3.3 gives the role `C🟠ASG R🟠ASG U🟠ASG` on `approval_case`. case-service implements nine endpoints
+   * against those scopes and the SPA reached none of them, so a caseworker's list only ever grew.
+   */
+  updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string): Promise<void>;
+  /** Raise an escalation. Both the target role and the reason are required — the server refuses either blank. */
+  raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string): Promise<void>;
+  /** Acknowledge or resolve one. `Resolved` is terminal and the note is what closing it was for. */
+  updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string): Promise<void>;
+  /** Move a case through its lifecycle. The server refuses any transition its state machine does not allow. */
+  setCaseState(caseId: string, state: CaseState): Promise<void>;
   caseTasks(caseId: string): Promise<CoordinationTask[]>;
   escalations(): Promise<Escalation[]>;
 
@@ -943,7 +964,30 @@ export interface ApiClient {
   adminTenants(): Promise<TenantSummary[]>;
   sodMatrix(): Promise<SodConflict[]>;
   accessReviewCampaigns(): Promise<AccessReviewCampaign[]>;
+  /**
+   * The grants a campaign is reviewing — the reviewer's worklist.
+   *
+   * Until 33.7 there was no read behind `recertify`/`revoke` on any service, so the two decisions were keyed
+   * by an `itemId` nothing produced: the campaign's counts could say "412 pending" with no way to reach one
+   * of the 412.
+   */
+  accessReviewItems(campaignId: string): Promise<AccessReviewItem[]>;
+  /** Confirm continued need-to-know for one grant. Audited and linked to the binding. */
+  recertifyAccessItem(itemId: string, note?: string): Promise<void>;
+  /** Withdraw one grant. This REVOKES the underlying role binding, not just the review row. */
+  revokeAccessItem(itemId: string, note?: string): Promise<void>;
+  /**
+   * Auto-expire every item still pending past the deadline — which revokes each of their bindings — and
+   * close the campaign. Returns how many were expired, so the effect is visible without a re-read.
+   */
+  sweepAccessCampaign(campaignId: string): Promise<{ autoExpired: number }>;
   breakGlassGrants(): Promise<BreakGlassGrant[]>;
+  /** Approve an emergency grant. Dual control: the server refuses a self-approval with 409. */
+  approveBreakGlass(grantId: string): Promise<void>;
+  /** Refuse an emergency grant. The reason is required and is audited. */
+  rejectBreakGlass(grantId: string, reason: string): Promise<void>;
+  /** SoD conflicts users ACTUALLY hold right now — not the rules, the breaches (see `sodMatrix` for rules). */
+  sodViolations(): Promise<SodViolation[]>;
   /** The tenant's auto-decision kill switch (ADR-0035 §5.3). Never touched reads `enabled: false`. */
   autoDecisionSwitch(): Promise<AutoDecisionSwitch>;
   /** Turn auto-decision on or off. A reason is required in both directions, and it is audited. */
@@ -1032,6 +1076,16 @@ export interface ApiClient {
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
   createProvider(input: CreateProviderInput, idempotencyKey?: string): Promise<ProviderSummary>;
+  /**
+   * The network roll-up, from the service that owns it.
+   *
+   * The Performance screen used to derive these four numbers by counting `status.label.en === "Active"` over
+   * the directory — a tally of a display string, computed past the 403 provider-service gives a
+   * provider-scoped caller. See `zNetworkMetrics`.
+   */
+  networkMetrics(): Promise<NetworkMetrics>;
+  /** One provider's counters: contracts in effect, services offered, and the state of its credentials. */
+  providerMetrics(providerId: string): Promise<ProviderMetrics>;
 
   // Practitioners (Phase 14.5, design 37 §4) — the clinical profile behind a user, with the specialty and
   // the clinics that the booking screen filters on.

@@ -28,6 +28,28 @@ export interface Session {
    */
   roles: readonly Role[];
   /**
+   * The ISSUER's own role names, unmapped — 33.7.
+   *
+   * `ROLE_MAP` is many-to-one on purpose: `lab_tech` and `imaging_tech` are portals, `radiology_tech` is an
+   * alias, and a portal is the right unit for deciding which rail to draw. It is the wrong unit for
+   * deciding an AUTHORITY, and one row makes that unavoidable:
+   *
+   *     ["provider_admin", "provider_admin"],
+   *     ["network_team",   "provider_admin"],
+   *
+   * `network_team` is Mersal's Network Team — tenant-wide, T2, it administers the whole provider directory.
+   * `provider_admin` is one provider's own administrator — T4, bounded to that provider by ABAC and RLS.
+   * Opposite scope, same portal name, and every server rule about them is keyed on the ISSUER name. So
+   * `mayAdministerTiers(session.role)` compared a portal name against a rule naming
+   * `network_team | org_admin | super_admin` and answered yes for both — offering a provider's own
+   * administrator the Create-tier and Revoke-assignment controls, each of which the server refuses with
+   * `urn:hbmp:network-tier-access-denied`.
+   *
+   * This grants nothing. It is the same claim the token already carries, kept rather than discarded, so a
+   * client-side mirror of a server rule can be written against the same names the rule uses.
+   */
+  issuerRoles: readonly string[];
+  /**
    * Union across {@link roles}, NOT the primary's set alone.
    *
    * Narrowing to the active portal was the rejected alternative: each portal's nav and routes are already

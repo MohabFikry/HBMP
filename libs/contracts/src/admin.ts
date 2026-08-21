@@ -38,26 +38,112 @@ export const zSodConflict = z.object({
 });
 export type SodConflict = z.infer<typeof zSodConflict>;
 
-/** An access-review campaign — a recertification sweep of high-sensitivity grants. */
+/**
+ * An access-review campaign — a recertification sweep of high-sensitivity grants.
+ *
+ * ## The four counts
+ *
+ * admin-service has always returned them, and this schema dropped all four. Its own server-side doc comment
+ * says why they are broken out rather than summarised: *"`pending` is work outstanding, `revoked` is access
+ * actually removed, and `autoExpired` is access removed BY THE DEADLINE PASSING rather than by anyone
+ * deciding. A single 'closed' figure would fold the last two together, and only one of them means somebody
+ * reviewed anything."*
+ *
+ * A campaign row without them says "Open, due Friday" and nothing else, so the screen could not distinguish a
+ * campaign nobody has started from one that is finished — which is the only question a reviewer opens the
+ * page to answer.
+ */
 export const zAccessReviewCampaign = z.object({
   id: zId,
   name: z.string(),
   status: zStatus,
   minTier: z.string().optional(),
   dueAt: zInstant.optional(),
+  total: z.number().int(),
+  pending: z.number().int(),
+  recertified: z.number().int(),
+  revoked: z.number().int(),
+  /** Removed by the deadline passing, not by a decision. Counted apart from `revoked` on purpose. */
+  autoExpired: z.number().int(),
 });
 export type AccessReviewCampaign = z.infer<typeof zAccessReviewCampaign>;
 
-/** A break-glass grant on the governance dashboard — an emergency, time-boxed, dual-controlled access. */
+/** The decision recorded against one grant under review. `pending` is the only state that can be decided. */
+export const zReviewDecision = z.enum(["pending", "recertified", "revoked", "autoExpired"]);
+export type ReviewDecision = z.infer<typeof zReviewDecision>;
+
+/**
+ * One grant under review — the row a reviewer recertifies or revokes.
+ *
+ * `subjectUserId` is an id and NOT a governance token, which is the opposite of `zBreakGlassGrant` and
+ * deliberate: this row asks "does this person still need this role", and nobody can answer that about
+ * `•••4f2a`. `subjectName` is resolved through identity's `/user-labels` and is null when that lookup fails —
+ * the id is still shown, because a reviewer who cannot see the name is better served by an identifier they
+ * can look up than by a blank row.
+ */
+export const zAccessReviewItem = z.object({
+  id: zId,
+  bindingId: zId,
+  subjectUserId: z.string(),
+  subjectName: z.string().nullable(),
+  role: z.string(),
+  decision: zReviewDecision,
+  decidedBy: z.string().nullable(),
+  decidedAt: zInstant.nullable(),
+  note: z.string().nullable(),
+});
+export type AccessReviewItem = z.infer<typeof zAccessReviewItem>;
+
+/**
+ * A break-glass grant on the governance dashboard — an emergency, time-boxed, dual-controlled access.
+ *
+ * ## What this used to leave out
+ *
+ * admin-service computes `accessCount` and `outOfScopeCount` by joining every recorded access under the
+ * grant, and this schema kept neither. `outOfScopeCount` is the alarming one: it counts the times the grant
+ * was used to reach something it was not granted for. A governance dashboard that renders "Active · expires
+ * 14:20" and silently discards "and four of its eleven uses were out of scope" is not reporting the thing it
+ * exists to report.
+ *
+ * `postReviewDone` is the other half of the same question — an expired grant nobody reviewed afterwards is
+ * an open item, and it looked identical to a closed one.
+ *
+ * `requesterToken` and `approverToken` are tokens produced by the SERVER (see `GovernanceToken`). The
+ * truncation used to happen in `HttpApiClient`, so the whole user id crossed the wire and the minimisation
+ * held only for whoever was looking at the table.
+ */
 export const zBreakGlassGrant = z.object({
   id: zId,
   requesterToken: z.string(),
+  /** Null while a grant is unapproved — distinct from a token, which would read as somebody having approved it. */
+  approverToken: z.string().nullable(),
   reasonCode: z.string(),
   status: zStatus,
   requestedAt: zInstant,
   expiresAt: zInstant.optional(),
+  accessCount: z.number().int(),
+  /** Uses of this grant that fell outside what it was granted for. The number the register is FOR. */
+  outOfScopeCount: z.number().int(),
+  postReviewDone: z.boolean(),
 });
 export type BreakGlassGrant = z.infer<typeof zBreakGlassGrant>;
+
+/**
+ * A Segregation-of-Duties conflict a user ACTUALLY holds right now.
+ *
+ * Distinct from {@link zSodConflict}, which is a RULE: "these two roles must not be held together". The
+ * catalogue rendered the rules and nothing rendered the violations, so an administrator could read the whole
+ * SoD policy and never learn that three people in the tenant were currently in breach of it. admin-service
+ * has computed these since phase 8b as defence-in-depth against a grant path that missed a check.
+ */
+export const zSodViolation = z.object({
+  subjectUserId: z.string(),
+  subjectName: z.string().nullable(),
+  heldRole: z.string(),
+  conflictingRole: z.string(),
+  reason: z.string(),
+});
+export type SodViolation = z.infer<typeof zSodViolation>;
 
 /** A master-data version currently in force (effective-dated governance read, FR-MDM-007). */
 export const zMasterDataVersion = z.object({

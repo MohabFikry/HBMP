@@ -18,6 +18,10 @@ export const zCasePriority = z.enum(["low", "normal", "high", "urgent"]);
 export type CasePriority = z.infer<typeof zCasePriority>;
 
 /** A row on the My-Cases worklist — no clinical content. */
+/** The case lifecycle, as the caseworker moves a file through it. */
+export const zCaseState = z.enum(["open", "active", "on_hold", "resolved", "closed"]);
+export type CaseState = z.infer<typeof zCaseState>;
+
 export const zCaseListItem = z.object({
   id: zId,
   caseNo: z.string(),
@@ -25,6 +29,8 @@ export const zCaseListItem = z.object({
   category: zCaseCategory,
   priority: zCasePriority,
   status: zStatus,
+  /** The domain value behind `status`. See `zEscalationState` for why both travel. */
+  state: zCaseState,
   openedAt: zInstant,
   summary: zLocalized.optional(),
 });
@@ -101,13 +107,30 @@ export const zCoordinationTask = z.object({
 });
 export type CoordinationTask = z.infer<typeof zCoordinationTask>;
 
+/**
+ * The escalation status vocabulary, alongside the rendered chip.
+ *
+ * `status` is a `{kind, label}` chip for display and `state` is the domain value the two transitions turn
+ * on. Both, because deciding what to offer from a translated label is the defect the network roll-up was
+ * (see `zNetworkMetrics`): "Raised" may be acknowledged, "Acknowledged" may be resolved, and "Resolved" is
+ * terminal — none of which survives a chip.
+ */
+export const zEscalationState = z.enum(["raised", "acknowledged", "resolved"]);
+export type EscalationState = z.infer<typeof zEscalationState>;
+
 export const zEscalation = z.object({
   id: zId,
   caseId: zId,
   caseNo: z.string(),
   raisedToRole: zLocalized,
   reason: z.string(),
+  state: zEscalationState,
   status: zStatus,
   raisedAt: zInstant,
+  /** Set when the escalation was closed; the note is what closing it was FOR. */
+  resolvedAt: zInstant.nullable(),
+  resolutionNote: z.string().nullable(),
 });
 export type Escalation = z.infer<typeof zEscalation>;
+
+

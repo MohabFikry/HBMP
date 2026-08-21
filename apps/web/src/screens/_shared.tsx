@@ -13,6 +13,23 @@ import type { AsyncState } from "../api/useAsync";
 import { ApiError } from "../api/http";
 
 /** Returns a picker that resolves a bilingual `{en, ar}` value to the active language. */
+/**
+ * Substitute `{0}`, `{1}`, … into BOTH halves of a bilingual string.
+ *
+ * <p>Written out longhand in four screens before 33.7 — `{ en: S.x.en.replace("{0}", v), ar: S.x.ar.replace(...) }`
+ * — which is the shape a typo hides in: replacing the placeholder in `en` and forgetting `ar` leaves a
+ * literal "{0}" in front of an Arabic reader and passes every check, because a `Localized` with both keys
+ * present is what the type system is looking for.</p>
+ *
+ * <p>Needed because the components that take a `Localized` (ConfirmAction, InlineAlert via `t`) take it
+ * UNRESOLVED — the alternative convention, `t(S.x).replace(...)`, only works where the string is rendered on
+ * the spot.</p>
+ */
+export function fillLocalized(l: Localized, ...args: readonly string[]): Localized {
+  const sub = (text: string) => args.reduce((acc, a, i) => acc.split(`{${i}}`).join(a), text);
+  return { en: sub(l.en), ar: sub(l.ar) };
+}
+
 export function useLoc(): (l: Localized) => string {
   const { lang } = useTheme();
   return (l: Localized) => l[lang];

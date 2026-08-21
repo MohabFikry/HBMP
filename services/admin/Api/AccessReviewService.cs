@@ -62,10 +62,57 @@ public sealed class AccessReviewService(AdminDbContext db, IAuditClient audit, T
     public async Task<bool> ReviewRevokeAsync(ActorContext actor, string tenant, Guid itemId, string? note, CancellationToken ct = default)
         => await DecideAsync(actor, tenant, itemId, ReviewDecision.Revoked, note, revokeBinding: true, ct);
 
+    /// <summary>
+    /// The items a campaign is reviewing, oldest decision last — the reviewer's actual worklist.
+    /// </summary>
+    /// <remarks>
+    /// Scoped through the CAMPAIGN, which is the only thing here that carries a tenant. See
+    /// <see cref="DecideAsync"/> for why that matters: <c>access_review_item</c> is deliberately not
+    /// tenant-isolated, on the stated ground that its rows are "reached only through their campaign", and a
+    /// query that does not join the campaign quietly makes that untrue.
+    /// </remarks>
+    public async Task<IReadOnlyList<AccessReviewItemView>> ItemsAsync(
+        string tenant, Guid campaignId, CancellationToken ct = default)
+    {
+        var rows = await db.ReviewItems.AsNoTracking()
+            .Where(i => i.CampaignId == campaignId
+                        && db.Campaigns.Any(c => c.CampaignId == i.CampaignId && c.TenantId == tenant))
+            // Pending first — this list is opened to do the outstanding work, not to browse decisions already
+            // taken. Within each band, stable by role then subject so a reviewer working down it twice sees
+            // the same order.
+            .OrderBy(i => i.Decision == ReviewDecision.Pending ? 0 : 1)
+            .ThenBy(i => i.Role).ThenBy(i => i.SubjectUserId)
+            .ToListAsync(ct);
+
+        return [.. rows.Select(i => new AccessReviewItemView(
+            i.ItemId, i.BindingId, i.SubjectUserId, i.Role, i.Decision.ToString(),
+            i.DecidedBy, i.DecidedAt, i.Note))];
+    }
+
     private async Task<bool> DecideAsync(ActorContext actor, string tenant, Guid itemId, ReviewDecision decision,
         string? note, bool revokeBinding, CancellationToken ct)
     {
-        var item = await db.ReviewItems.FirstOrDefaultAsync(i => i.ItemId == itemId, ct);
+        /*
+         * SCOPED THROUGH THE CAMPAIGN — 33.7.
+         *
+         * This read used to be `FirstOrDefaultAsync(i => i.ItemId == itemId)`, with `tenant` used only to
+         * stamp the audit event. `admin.access_review_item` carries no `tenant_id` and has no RLS policy;
+         * migration 0005 lists it under "deliberately NOT tenant-isolated" with the reason "child rows
+         * reached only through their campaign, which IS isolated". This query did not reach it through the
+         * campaign, so that reason did not hold here.
+         *
+         * The underlying binding was safe either way — `role_binding` IS isolated, so RevokeUnderlyingAsync
+         * would find nothing and return. The REVIEW RECORD was not: another tenant's administrator, holding
+         * an item id, could mark that item Recertified. Recertifying is precisely what stops SweepExpiredAsync
+         * from revoking a grant at the deadline, so the reachable act was not "read something they shouldn't"
+         * but "silently defeat another tenant's access review of its own T4 grants".
+         *
+         * The `db.Campaigns` subquery passes through the campaign's own RLS policy as well as this explicit
+         * predicate, so the two controls have to fail together.
+         */
+        var item = await db.ReviewItems.FirstOrDefaultAsync(
+            i => i.ItemId == itemId
+                 && db.Campaigns.Any(c => c.CampaignId == i.CampaignId && c.TenantId == tenant), ct);
         if (item is null || item.Decision != ReviewDecision.Pending) return false;
 
         item.Decision = decision;

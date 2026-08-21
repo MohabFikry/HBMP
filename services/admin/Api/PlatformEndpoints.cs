@@ -175,6 +175,10 @@ public static class PlatformEndpoints
             if (!scope.IsAllowed) return scope.ToProblem();
             var t = scope.Tenant!;
             return Results.Ok(await svc.SodViolationsAsync(AdminContracts.Actor(gate.Principal!), t, ct));
-        });
+        })
+        // 33.7 — the last dashboard read on this service with no describable response. The shape was never in
+        // doubt; without `.Produces` the spec could not carry it, so the one consumer had nothing to validate
+        // against and `response-schema-floors.json` counted admin one endpoint short of its own surface.
+        .Produces<IEnumerable<SodViolationRow>>();
     }
 }

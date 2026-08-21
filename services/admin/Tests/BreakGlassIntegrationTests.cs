@@ -90,7 +90,13 @@ public class BreakGlassIntegrationTests
 
             var rows = await dash.BreakGlassAsync(viewer, mine);
             rows.Should().HaveCount(1);                          // only my tenant's grant
-            rows.Should().OnlyContain(r => r.Requester == "dr-mine");
+            // 33.7 — a TOKEN, not the subject id. This assertion used to read `r.Requester == "dr-mine"`,
+            // which pinned the whole identifier onto the wire: the dashboard's own on-screen note promises
+            // requesters "appear as governance tokens, not names", and the shortening that delivered it lived
+            // in the browser. Asserting the id is ABSENT is the half that makes this a rule rather than a
+            // rendering preference.
+            rows.Should().OnlyContain(r => r.RequesterToken == "•••mine");
+            rows.Should().NotContain(r => r.RequesterToken.Contains("dr-mine"));
             outbox.Events.Should().Contain(e => e.EntityType == "dashboard" && e.Action == AuditAction.Read); // read is audited
         }
         finally { await Cleanup(mine); await Cleanup(other); }

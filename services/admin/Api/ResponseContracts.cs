@@ -139,3 +139,23 @@ public sealed record AccessReviewCampaignView(
     Guid CampaignId, string Name, string Status, DateTimeOffset? DueAt,
     int Total, int Pending, int Recertified, int Revoked, int AutoExpired);
 
+/// <summary>
+/// One grant under review, as the reviewer decides on it.
+/// </summary>
+/// <remarks>
+/// <para>Until 33.7 there was no way to read these at all. <c>recertify</c> and <c>revoke</c> are keyed by
+/// <c>itemId</c>, and nothing in the platform produced one — so a campaign could be opened, counted and swept,
+/// and the one act it exists for could not be performed. The counts on
+/// <see cref="AccessReviewCampaignView"/> said "412 pending" to a reviewer with no way to reach any of the
+/// 412.</para>
+/// <para><b>The subject is a user id, not a governance token</b>, and that is deliberate — the opposite
+/// decision from <see cref="BreakGlassDashboardRow"/>. The break-glass register answers "was emergency access
+/// abused", which never needs a name; this answers "does this person still need this role", which is not a
+/// question anybody can decide about <c>•••4f2a</c>. The SPA resolves the id to a display name through
+/// identity's <c>/user-labels</c>, so the name is fetched from the service that owns names rather than
+/// duplicated into admin-service's tables.</para>
+/// </remarks>
+public sealed record AccessReviewItemView(
+    Guid ItemId, Guid BindingId, string SubjectUserId, string Role, string Decision,
+    string? DecidedBy, DateTimeOffset? DecidedAt, string? Note);
+

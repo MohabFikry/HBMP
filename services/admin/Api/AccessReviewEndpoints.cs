@@ -31,6 +31,27 @@ public static class AccessReviewEndpoints
                 new { c.CampaignId, c.Name, minTier = c.MinTier.ToString(), items = c.Items.Count, c.DueAt });
         });
 
+        /*
+         * THE WORKLIST — 33.7.
+         *
+         * `recertify` and `revoke` below are keyed by `itemId`, and until now nothing in the platform produced
+         * one: there was no items read on any service, so the only way to decide an item was to already know
+         * its uuid. A campaign could be opened, its counts rendered on the governance dashboard, and swept at
+         * the deadline — and the one act the whole surface exists for could not be performed by anybody.
+         *
+         * Grouped under `g` (admin:read) rather than `w`: reading the worklist is not a change.
+         */
+        g.MapGet("/{campaignId:guid}/items", async (Guid campaignId, string? tenant, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);
+            if (denied is not null) return denied;
+            var scope = gate.BindTenant(tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+
+            return Results.Ok(await svc.ItemsAsync(scope.Tenant!, campaignId, ct));
+        })
+        .Produces<IEnumerable<AccessReviewItemView>>();
+
         w.MapPost("/items/{itemId:guid}/recertify", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Review, ct);

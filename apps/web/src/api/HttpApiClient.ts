@@ -1,5 +1,6 @@
 import {
   zAccessReviewCampaign,
+  zAccessReviewItem,
   zAppointmentRow,
   zWaitingTicket,
   zBookableClinic,
@@ -21,6 +22,8 @@ import {
   zAutoDecisionSwitch,
   zSystemConfigEntry,
   zProviderSummary,
+  zNetworkMetrics,
+  zProviderMetrics,
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
@@ -35,6 +38,7 @@ import {
   zCheckInResult,
   zRoleBinding,
   zSodConflict,
+  zSodViolation,
   zTenantSummary,
   zConsumeResult,
   zDecisionResult,
@@ -88,6 +92,9 @@ import {
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
+  type EscalationState,
+  type CaseState,
+  type TaskState,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -318,6 +325,44 @@ const caseStatus = (s: unknown) =>
   ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[
     String(s ?? "open").toLowerCase()
   ] ?? "open";
+/** The same mapping as {@link caseStatus}, typed as the contract's enum so a write can be built from it. */
+const caseState = (s: unknown): CaseState =>
+  (({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" }) as
+    Record<string, CaseState>)[String(s ?? "open").toLowerCase()] ?? "open";
+
+/**
+ * The contract's enums → the names case-service's request bodies expect.
+ *
+ * Declared as tables rather than composed with a `replace` because these are two vocabularies that happen to
+ * look alike: the wire uses .NET enum names (`OnHold`, `InProgress`) and the contract uses snake_case, and a
+ * string transform between them is a rule that silently stops holding the first time either side adds a
+ * value the pattern does not cover.
+ */
+const CASE_STATE_TO_SERVER: Record<CaseState, string> = {
+  open: "Open", active: "Active", on_hold: "OnHold", resolved: "Resolved", closed: "Closed",
+};
+const TASK_STATE_TO_SERVER: Record<TaskState, string> = {
+  todo: "Todo", in_progress: "InProgress", done: "Done", cancelled: "Cancelled",
+};
+const ESCALATION_STATE_TO_SERVER: Record<EscalationState, string> = {
+  raised: "Raised", acknowledged: "Acknowledged", resolved: "Resolved",
+};
+
+/** A service escalation status → the contract's enum. Default-RAISED: an unreadable state must not read as
+ *  closed, because a closed one is the one nobody looks at again. */
+const escalationState = (s: unknown): EscalationState => {
+  const k = String(s ?? "").toLowerCase();
+  if (k === "resolved") return "resolved";
+  if (k === "acknowledged") return "acknowledged";
+  return "raised";
+};
+
+/** The escalation's own state → its chip. Three states, three cues — see `escalations()` for what this replaced. */
+const escalationChip = (state: EscalationState): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } =>
+  state === "resolved" ? { kind: "ok", label: { en: "Resolved", ar: "مُغلقة" } }
+    : state === "acknowledged" ? { kind: "info", label: { en: "Acknowledged", ar: "مُستلَمة" } }
+      : { kind: "warn", label: { en: "Escalated", ar: "مُصعَّدة" } };
+
 /** A masked, min-necessary display token for a case row (never a beneficiary name). */
 const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? "").slice(-4)}`;
 
@@ -669,6 +714,21 @@ const breakGlassChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "n
   if (k === "approved") return { kind: "info", label: { en: "Approved", ar: "معتمد" } };
   if (k === "rejected" || k === "revoked") return { kind: "bad", label: { en: raw, ar: "ملغى" } };
   return { kind: "neu", label: { en: raw || "Expired", ar: "منتهٍ" } };
+};
+/**
+ * A review decision string → the contract's enum.
+ *
+ * <p>Default-PENDING on anything unrecognised, and that is the safe direction here rather than the lazy one:
+ * a decision the client cannot read must not render as decided, because a decided item is one the reviewer
+ * skips and the sweep leaves alone. An unknown value showing as outstanding costs somebody a second look; the
+ * other way round costs a grant nobody reviewed.</p>
+ */
+const reviewDecision = (d: unknown): "pending" | "recertified" | "revoked" | "autoExpired" => {
+  const k = String(d ?? "").toLowerCase();
+  if (k === "recertified") return "recertified";
+  if (k === "revoked") return "revoked";
+  if (k === "autoexpired") return "autoExpired";
+  return "pending";
 };
 /**
  * A settlement's lifecycle state → its chip.
@@ -1273,20 +1333,7 @@ export class HttpApiClient implements ApiClient {
     // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
     // rebooked appointment repeats the same actor several times. A failure here degrades to the id rather than
     // failing the timeline: knowing when a no-show was marked is worth more than knowing nobody's name.
-    const ids = [...new Set(steps.map((x: any) => x.by).filter(Boolean).map(String))];
-    const names = new Map<string, string>();
-    if (ids.length > 0) {
-      try {
-        const rows = (await getAbsolute(
-          `${GATEWAY_BASE}/identity/user-labels?subjectIds=${encodeURIComponent(ids.join(","))}`,
-        )) as any[];
-        for (const row of rows ?? []) {
-          if (row?.subjectId && row?.displayName) names.set(String(row.subjectId), String(row.displayName));
-        }
-      } catch {
-        // Left unresolved on purpose — see above.
-      }
-    }
+    const names = await this.userLabels(steps.map((x: any) => x.by));
 
     return steps.map((x: any) =>
       parseOr(zTimelineStep, {
@@ -3398,6 +3445,7 @@ export class HttpApiClient implements ApiClient {
         category: String(c.category ?? "complex").toLowerCase(),
         priority: String(c.priority ?? "normal").toLowerCase(),
         status: caseStatus(c.status),
+        state: caseState(c.status),
         openedAt: c.openedAt ?? new Date().toISOString(),
         summary: c.summary ? neutral(c.summary) : undefined,
       }),
@@ -3470,19 +3518,53 @@ export class HttpApiClient implements ApiClient {
   async escalations() {
     const r = (await getRaw(`/cases/escalations`)) as any;
     const items: any[] = Array.isArray(r) ? r : (r?.items ?? []);
-    return items.map((e: any) =>
-      parseOr(zEscalation, {
+    return items.map((e: any) => {
+      const state = escalationState(e.status);
+      return parseOr(zEscalation, {
         id: e.escalationId ?? e.id,
         caseId: required(e.caseId, "caseEvent.caseId"),
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
-        // An escalation is by definition something that needed raising. `warn`, never the green chip the
-        // literal produced — and, as above, that literal threw before it could mislead anyone.
-        status: { kind: "warn" as const, label: { en: "Escalated", ar: "مُصعَّدة" } },
+        state,
+        // 33.7 — THE SERVER'S STATE, not a constant.
+        //
+        // This used to be the literal `{ kind: "warn", label: "Escalated" }` for every row, with the
+        // reasoning "an escalation is by definition something that needed raising". True of the act and not
+        // of the record: case-service tracks Raised → Acknowledged → Resolved, and rendering all three the
+        // same amber chip meant a register whose whole purpose is showing what is still outstanding showed
+        // everything as outstanding forever. A caseworker could not tell a resolved escalation from a new
+        // one, and nothing in the platform could resolve one anyway.
+        status: escalationChip(state),
         raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
-      }),
-    );
+        resolvedAt: e.resolvedAt ?? null,
+        resolutionNote: e.resolutionNote ?? null,
+      });
+    });
+  }
+
+  /**
+   * 33.7 — the coordination writes. `case_manager` has held `case:read`, `case:write` AND `case:manage` in
+   * the 0001 seed since it existed, and the SPA reached none of the nine endpoints behind them: a task could
+   * be listed and never completed, an escalation read and never raised or resolved, a case never closed.
+   */
+  async updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/tasks/${encodeURIComponent(taskId)}`, {
+      status: TASK_STATE_TO_SERVER[state],
+      outcomeNote: outcomeNote ?? null,
+    });
+  }
+  async raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string) {
+    await postRaw(`/cases/${encodeURIComponent(caseId)}/escalate`, { raisedToRole, reason }, idempotencyKey);
+  }
+  async updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/escalations/${encodeURIComponent(escalationId)}`, {
+      status: ESCALATION_STATE_TO_SERVER[state],
+      resolutionNote: resolutionNote ?? null,
+    });
+  }
+  async setCaseState(caseId: string, state: CaseState) {
+    await patchRaw(`/cases/${encodeURIComponent(caseId)}/status`, { status: CASE_STATE_TO_SERVER[state] });
   }
 
   // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.
@@ -4067,25 +4149,137 @@ export class HttpApiClient implements ApiClient {
           : { kind: "neu" as const, label: t("Closed", "مغلق") },
         minTier: c.minTier ?? undefined,
         dueAt: c.dueAt ?? undefined,
+        // 33.7 — admin-service has returned all five since phase 8b and this mapping dropped every one, so a
+        // campaign row read "Open, due Friday" whether nobody had started it or somebody had finished it.
+        total: Number(c.total ?? 0),
+        pending: Number(c.pending ?? 0),
+        recertified: Number(c.recertified ?? 0),
+        revoked: Number(c.revoked ?? 0),
+        autoExpired: Number(c.autoExpired ?? 0),
       }),
     );
   }
+
+  /**
+   * 33.7 — the reviewer's worklist, and the read that made `recertify`/`revoke` reachable.
+   *
+   * <p>The subject id is resolved to a display name through identity's `/user-labels`, the same helper the
+   * appointment timeline uses. A failure there degrades to the id rather than failing the list: a reviewer
+   * who cannot see a name can still look the id up, and a blank worklist teaches them the campaign is
+   * empty.</p>
+   */
+  async accessReviewItems(campaignId: string) {
+    const r = (await getRaw(`/admin/access-reviews/${encodeURIComponent(campaignId)}/items`)) as any[];
+    const rows = Array.isArray(r) ? r : [];
+    const names = await this.userLabels(rows.map((i: any) => String(i.subjectUserId ?? "")));
+    return rows.map((i: any) => {
+      const subject = String(i.subjectUserId ?? "");
+      return parseOr(zAccessReviewItem, {
+        id: i.itemId ?? i.id,
+        bindingId: i.bindingId,
+        subjectUserId: subject,
+        subjectName: names.get(subject) ?? null,
+        role: String(i.role ?? ""),
+        decision: reviewDecision(i.decision),
+        decidedBy: i.decidedBy ?? null,
+        decidedAt: i.decidedAt ?? null,
+        note: i.note ?? null,
+      });
+    });
+  }
+  async recertifyAccessItem(itemId: string, note?: string) {
+    await postRaw(`/admin/access-reviews/items/${encodeURIComponent(itemId)}/recertify`, { note: note ?? null });
+  }
+  async revokeAccessItem(itemId: string, note?: string) {
+    await postRaw(`/admin/access-reviews/items/${encodeURIComponent(itemId)}/revoke`, { note: note ?? null });
+  }
+  async sweepAccessCampaign(campaignId: string) {
+    const r = (await postRaw(`/admin/access-reviews/${encodeURIComponent(campaignId)}/sweep`, {})) as any;
+    return { autoExpired: Number(r?.autoExpired ?? 0) };
+  }
+
   async breakGlassGrants() {
     const r = (await getRaw(`/admin/dashboards/break-glass`)) as any[];
     return (Array.isArray(r) ? r : []).map((g: any) =>
       parseOr(zBreakGlassGrant, {
         id: g.grantId ?? g.id,
-        requesterToken: `•••${String(g.requester ?? g.requesterUserId ?? "").replace(/-/g, "").slice(-4)}`,
+        // The TOKEN the server produced. This used to be `•••${requesterUserId.slice(-4)}` computed here,
+        // which meant the whole subject id crossed the wire and the minimisation the screen advertises held
+        // only for whoever was looking at the table (design 18 §2 — see admin-service's `GovernanceToken`).
+        requesterToken: String(g.requesterToken ?? ""),
+        approverToken: g.approverToken ?? null,
         reasonCode: String(g.reasonCode ?? ""),
         status: breakGlassChip(g.status),
         requestedAt: g.requestedAt ?? new Date().toISOString(),
         expiresAt: g.expiresAt ?? undefined,
+        accessCount: Number(g.accessCount ?? 0),
+        outOfScopeCount: Number(g.outOfScopeCount ?? 0),
+        postReviewDone: Boolean(g.postReviewDone),
       }),
     );
   }
+  async approveBreakGlass(grantId: string) {
+    await postRaw(`/admin/break-glass/${encodeURIComponent(grantId)}/approve`, {});
+  }
+  async rejectBreakGlass(grantId: string, reason: string) {
+    await postRaw(`/admin/break-glass/${encodeURIComponent(grantId)}/reject`, { reason });
+  }
+
+  /** SoD conflicts users hold RIGHT NOW. `sodMatrix` above is the rule set; this is the breach list. */
+  async sodViolations() {
+    const r = (await getRaw(`/admin/dashboards/sod-violations`)) as any[];
+    const rows = Array.isArray(r) ? r : [];
+    const names = await this.userLabels(rows.map((v: any) => String(v.subjectUserId ?? "")));
+    return rows.map((v: any) => {
+      const subject = String(v.subjectUserId ?? "");
+      return parseOr(zSodViolation, {
+        subjectUserId: subject,
+        subjectName: names.get(subject) ?? null,
+        heldRole: String(v.heldRole ?? ""),
+        conflictingRole: String(v.conflictingRole ?? ""),
+        reason: String(v.reason ?? ""),
+      });
+    });
+  }
+  /**
+   * 33.7 — the network roll-up, ASKED of provider-service.
+   *
+   * <p>The comment that used to sit here read: "performance is derived client-side from the directory (the
+   * network roll-up /metrics is not routed at the gateway)". Both halves were true and the conclusion was
+   * the wrong one. The endpoint returns exactly these four fields; the missing gateway route was the defect,
+   * not a reason to compute them here — and the SPA's version counted a rendering label
+   * (<code>status.label.en === "Active"</code>) over the directory projection, past a 403 the service gives
+   * a provider-scoped caller.</p>
+   */
+  async networkMetrics() {
+    const r = (await getRaw(`/metrics`)) as any;
+    return parseOr(zNetworkMetrics, {
+      total: Number(r?.total ?? 0),
+      active: Number(r?.active ?? 0),
+      suspended: Number(r?.suspended ?? 0),
+      terminated: Number(r?.terminated ?? 0),
+    });
+  }
+  async providerMetrics(providerId: string) {
+    const r = (await getRaw(`/providers/${encodeURIComponent(providerId)}/metrics`)) as any;
+    return parseOr(zProviderMetrics, {
+      providerId: r?.providerId ?? providerId,
+      status: String(r?.status ?? ""),
+      activeContracts: Number(r?.activeContracts ?? 0),
+      servicesOffered: Number(r?.servicesOffered ?? 0),
+      credentials: {
+        valid: Number(r?.credentials?.valid ?? 0),
+        expiringSoon: Number(r?.credentials?.expiringSoon ?? 0),
+        expired: Number(r?.credentials?.expired ?? 0),
+      },
+      ordersFulfilled: Number(r?.ordersFulfilled ?? 0),
+      // NULL, not 0. "No orders yet" and "they all took no time" are different facts.
+      avgTurnaroundHours: r?.avgTurnaroundHours ?? null,
+    });
+  }
+
   // Provider network (Phase 2b, US-018..021) — the Network Team's tenant-scoped directory (never provider-scoped
-  // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads; performance is
-  // derived client-side from the directory (the network roll-up /metrics is not routed at the gateway).
+  // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads.
   async providerList() {
     const r = (await getRaw(`/providers`)) as any[];
     return (Array.isArray(r) ? r : []).map((p: any) =>
@@ -4134,6 +4328,34 @@ export class HttpApiClient implements ApiClient {
       status: providerStatusChip(r?.status ?? "Suspended"),
       onboardingState: String(r?.onboardingState ?? "Draft"),
     });
+  }
+
+  /**
+   * Put names to subject ids, in ONE request for the distinct ids.
+   *
+   * <p>Extracted in 33.7 from the appointment timeline, which had the only copy, because the access-review
+   * worklist and the SoD breach list need exactly the same thing and a second copy is a second place for the
+   * degrade-to-the-id rule to be got wrong.</p>
+   *
+   * <p>A failure resolves to an empty map rather than throwing. Every caller renders the id when the name is
+   * missing: knowing that `•••4f2a` holds two conflicting roles is worth more than an empty table, and an
+   * identity outage must not read as "no violations".</p>
+   */
+  private async userLabels(subjectIds: readonly unknown[]) {
+    const out = new Map<string, string>();
+    const ids = [...new Set(subjectIds.filter(Boolean).map(String))];
+    if (ids.length === 0) return out;
+    try {
+      const rows = (await getAbsolute(
+        `${GATEWAY_BASE}/identity/user-labels?subjectIds=${encodeURIComponent(ids.join(","))}`,
+      )) as any[];
+      for (const row of rows ?? []) {
+        if (row?.subjectId && row?.displayName) out.set(String(row.subjectId), String(row.displayName));
+      }
+    } catch {
+      // Deliberately swallowed — see above.
+    }
+    return out;
   }
 
   // ---- Practitioners (Phase 14.5, design 37 §4) -----------------------------------------------------------

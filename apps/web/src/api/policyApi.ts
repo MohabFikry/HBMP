@@ -732,6 +732,22 @@ export const zTierAssignmentView = z.object({
 }).passthrough();
 export type TierAssignmentView = z.infer<typeof zTierAssignmentView>;
 
+/**
+ * A provider, as the tier screen needs to name one.
+ *
+ * The minimum an operator needs to pick the right row and no more — provider-service's directory carries
+ * onboarding state, type and status, none of which decides which tier somebody belongs in. Added in 33.7
+ * because assigning a tier used to be impossible from anywhere, and the screen that revokes assignments
+ * offers a raw uuid field for its resolver: asking somebody to TYPE the id of the provider whose claims they
+ * are about to reprice is how the wrong provider gets repriced.
+ */
+export const zTierProviderOption = z.object({
+  providerId: z.string(),
+  providerCode: z.string(),
+  legalName: z.string(),
+});
+export type TierProviderOption = z.infer<typeof zTierProviderOption>;
+
 export const zTierResolutionView = z.object({
   networkTierId: z.string(),
   tierCode: z.string(),
@@ -930,6 +946,8 @@ export interface PolicyApi {
   createTier(body: unknown, idempotencyKey: string): Promise<NetworkTierView>;
   updateTier(tierId: string, body: unknown): Promise<NetworkTierView>;
   tierAssignments(tierId: string): Promise<TierAssignmentView[]>;
+  /** The providers a tier can be assigned to — the picker behind `assignTier`. */
+  tierProviders(): Promise<TierProviderOption[]>;
   assignTier(tierId: string, body: unknown, idempotencyKey: string): Promise<TierAssignmentView>;
   revokeAssignment(assignmentId: string): Promise<void>;
   resolveTier(providerId: string, serviceDate: string, locationId?: string): Promise<TierResolutionView>;
@@ -1043,6 +1061,20 @@ export function createHttpPolicyApi(): PolicyApi {
     createTier: (body, key) => parsed(zNetworkTierView, postRaw("/network-tiers", body, key)),
     updateTier: (id, body) => parsed(zNetworkTierView, putRaw(`/network-tiers/${id}`, body)),
     tierAssignments: (id) => parsed(z.array(zTierAssignmentView), getRaw(`/network-tiers/${id}/assignments`)),
+    // provider-service's own directory, behind the same gateway prefix the tier routes use.
+    tierProviders: async () => {
+      const rows = (await getRaw("/providers")) as unknown[];
+      return z.array(zTierProviderOption).parse(
+        (Array.isArray(rows) ? rows : []).map((p) => {
+          const r = p as Record<string, unknown>;
+          return {
+            providerId: String(r.providerId ?? ""),
+            providerCode: String(r.providerCode ?? ""),
+            legalName: String(r.legalName ?? ""),
+          };
+        }),
+      );
+    },
     assignTier: (id, body, key) => parsed(zTierAssignmentView, postRaw(`/network-tiers/${id}/assignments`, body, key)),
     revokeAssignment: async (assignmentId) => {
       await deleteRaw(`/network-tiers/assignments/${assignmentId}`);

@@ -127,3 +127,60 @@ export const zPractitionerCreated = z.object({
   incomplete: z.array(zPractitionerAttachFailure),
 });
 export type PractitionerCreated = z.infer<typeof zPractitionerCreated>;
+
+/**
+ * The network roll-up — how many providers the tenant has, and in what standing.
+ *
+ * ## Why this is a contract at all
+ *
+ * The Performance screen rendered these four numbers by fetching the provider DIRECTORY and counting rows
+ * whose `status.label.en` was the string "Active". Three things were wrong with that and only one of them is
+ * about tidiness:
+ *
+ * 1. It counted a **display label**. `status` is a `{kind, label}` chip assembled for rendering, so the tally
+ *    depended on a piece of English prose surviving unchanged. Any relabelling — or any server status the
+ *    chip mapper does not recognise — silently produces zero, and zero is a plausible-looking number.
+ * 2. It counted **whatever the directory returned**, which is a projection with its own filters, rather than
+ *    what the tenant has.
+ * 3. It computed, in the browser, a figure `provider-service` **refuses to a provider-scoped caller with a
+ *    403**. A provider user must not learn the shape of the network they compete in; an authorization that
+ *    the client can route around by counting rows is not one.
+ *
+ * `GET /api/v1/metrics` has returned exactly this since phase 2b. It had no Kong route until 33.7, which is
+ * why nothing called it — and the route-coverage guard that exists to catch precisely that had "metrics" in
+ * its ignore list.
+ */
+export const zNetworkMetrics = z.object({
+  total: z.number().int(),
+  active: z.number().int(),
+  suspended: z.number().int(),
+  terminated: z.number().int(),
+});
+export type NetworkMetrics = z.infer<typeof zNetworkMetrics>;
+
+/** How many of a provider's credentials are good, expiring, or already lapsed. */
+export const zCredentialCounts = z.object({
+  valid: z.number().int(),
+  expiringSoon: z.number().int(),
+  expired: z.number().int(),
+});
+export type CredentialCounts = z.infer<typeof zCredentialCounts>;
+
+/**
+ * One provider's performance counters.
+ *
+ * `ordersFulfilled` and `avgTurnaroundHours` are populated by the phase 5/6 fulfillment events;
+ * provider-service returns 0 and null today and says so in its own comment. `avgTurnaroundHours` is
+ * NULLABLE rather than 0 for the reason that distinction always matters: no orders yet and an average of
+ * zero hours are different facts, and only one of them would be alarming.
+ */
+export const zProviderMetrics = z.object({
+  providerId: zId,
+  status: z.string(),
+  activeContracts: z.number().int(),
+  servicesOffered: z.number().int(),
+  credentials: zCredentialCounts,
+  ordersFulfilled: z.number().int(),
+  avgTurnaroundHours: z.number().nullable(),
+});
+export type ProviderMetrics = z.infer<typeof zProviderMetrics>;

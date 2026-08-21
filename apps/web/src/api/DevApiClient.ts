@@ -32,13 +32,18 @@ import {
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
+  type EscalationState,
+  type CaseState,
+  type TaskState,
   zNotification,
   zMarkAllReadResult,
   zMarkReadResult,
   zRoleBinding,
   zTenantSummary,
   zSodConflict,
+  zSodViolation,
   zAccessReviewCampaign,
+  zAccessReviewItem,
   zAppointmentRow,
   zBookableClinic,
   zTimelineStep,
@@ -62,6 +67,8 @@ import {
   zAccessSession,
   zProgramEnablement,
   zProviderSummary,
+  zNetworkMetrics,
+  zProviderMetrics,
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
@@ -3484,6 +3491,7 @@ export class DevApiClient implements ApiClient {
             category: "chronic",
             priority: "high",
             status: { kind: "warn", label: loc("Active", "نشطة") },
+            state: "active",
             openedAt: "2026-07-10T09:00:00Z",
             summary: loc("Diabetes care coordination", "تنسيق رعاية السكري"),
           },
@@ -3494,6 +3502,7 @@ export class DevApiClient implements ApiClient {
             category: "vulnerable",
             priority: "urgent",
             status: { kind: "info", label: loc("Open", "مفتوحة") },
+            state: "open",
             openedAt: "2026-07-18T11:30:00Z",
             summary: loc("Post-surgery follow-up", "متابعة بعد الجراحة"),
           },
@@ -3562,12 +3571,57 @@ export class DevApiClient implements ApiClient {
             caseNo: "CASE-2026-000051",
             raisedToRole: loc("Medical Approval", "الموافقة الطبية"),
             reason: "Urgent authorization for post-surgical imaging pending > 24h.",
-            status: { kind: "warn", label: loc("Raised", "مُصعّدة") },
+            state: "raised",
+            status: { kind: "warn", label: loc("Escalated", "مُصعَّدة") },
             raisedAt: "2026-07-20T08:00:00Z",
+            resolvedAt: null,
+            resolutionNote: null,
+          },
+          {
+            id: "ESC-2",
+            caseId: "CASE-2026-000042",
+            caseNo: "CASE-2026-000042",
+            raisedToRole: loc("Medical Director", "المدير الطبي"),
+            reason: "Repeat refusal of the same imaging request — needs a policy read.",
+            state: "acknowledged",
+            status: { kind: "info", label: loc("Acknowledged", "مُستلَمة") },
+            raisedAt: "2026-07-19T13:20:00Z",
+            resolvedAt: null,
+            resolutionNote: null,
+          },
+          {
+            // Three states, three chips. Every row used to render the same amber "Escalated", so a register
+            // whose purpose is showing what is outstanding showed everything as outstanding forever.
+            id: "ESC-3",
+            caseId: "CASE-2026-000042",
+            caseNo: "CASE-2026-000042",
+            raisedToRole: loc("Medical Approval", "الموافقة الطبية"),
+            reason: "Pharmacy substitution disputed by the prescriber.",
+            state: "resolved",
+            status: { kind: "ok", label: loc("Resolved", "مُغلقة") },
+            raisedAt: "2026-07-11T10:05:00Z",
+            resolvedAt: "2026-07-12T09:40:00Z",
+            resolutionNote: "Prescriber accepted the substitution after the formulary note.",
           },
         ]),
       [],
     );
+  }
+  updateCaseTask(caseId: string, taskId: string, state: TaskState, outcomeNote?: string) {
+    void caseId; void taskId; void state; void outcomeNote;
+    return this.gate(() => undefined, undefined);
+  }
+  raiseEscalation(caseId: string, raisedToRole: string, reason: string, idempotencyKey?: string) {
+    void caseId; void raisedToRole; void reason; void idempotencyKey;
+    return this.gate(() => undefined, undefined);
+  }
+  updateEscalation(caseId: string, escalationId: string, state: EscalationState, resolutionNote?: string) {
+    void caseId; void escalationId; void state; void resolutionNote;
+    return this.gate(() => undefined, undefined);
+  }
+  setCaseState(caseId: string, state: CaseState) {
+    void caseId; void state;
+    return this.gate(() => undefined, undefined);
   }
 
   // ---- Finance (Phase 10.2) — billing codes + amounts only, no diagnosis --------------------------------
@@ -3979,14 +4033,119 @@ export class DevApiClient implements ApiClient {
   }
   accessReviewCampaigns() {
     return this.gate(
-      () => ok(z.array(zAccessReviewCampaign), [{ id: "CAMP-1", name: "Q3 2026 high-sensitivity access recertification", status: { kind: "info", label: loc("Open", "مفتوحة") }, minTier: "T3", dueAt: "2026-08-05T00:00:00Z" }]),
+      () => ok(z.array(zAccessReviewCampaign), [
+        {
+          id: "CAMP-1", name: "Q3 2026 high-sensitivity access recertification",
+          status: { kind: "info", label: loc("Open", "مفتوحة") }, minTier: "T3", dueAt: "2026-08-05T00:00:00Z",
+          // Three still pending on a campaign that is already due: the state the sweep exists for, and the
+          // one the row could not show while the counts were dropped in the mapping.
+          total: 5, pending: 3, recertified: 1, revoked: 1, autoExpired: 0,
+        },
+        {
+          id: "CAMP-2", name: "Q2 2026 high-sensitivity access recertification",
+          status: { kind: "neu", label: loc("Closed", "مغلقة") }, minTier: "T3", dueAt: "2026-05-05T00:00:00Z",
+          // Closed — and three of the four were removed by the deadline passing rather than by anybody
+          // deciding. One person's access was actually reviewed.
+          total: 4, pending: 0, recertified: 1, revoked: 0, autoExpired: 3,
+        },
+      ]),
       [],
     );
   }
+  accessReviewItems(campaignId: string) {
+    return this.gate(
+      () => ok(z.array(zAccessReviewItem), campaignId === "CAMP-1"
+        ? [
+            { id: "ITEM-1", bindingId: "RB-1", subjectUserId: "u-5", subjectName: "Sara Ibrahim", role: "doctor", decision: "pending", decidedBy: null, decidedAt: null, note: null },
+            { id: "ITEM-2", bindingId: "RB-2", subjectUserId: "u-2", subjectName: "Mona Adel", role: "medical_approval", decision: "pending", decidedBy: null, decidedAt: null, note: null },
+            // The name deliberately absent on one row: identity could not label this subject, and the
+            // worklist still has to render it rather than dropping a grant nobody would then review.
+            { id: "ITEM-3", bindingId: "RB-3", subjectUserId: "u-9", subjectName: null, role: "super_admin", decision: "pending", decidedBy: null, decidedAt: null, note: null },
+            { id: "ITEM-4", bindingId: "RB-4", subjectUserId: "u-1", subjectName: "Org Admin", role: "org_admin", decision: "recertified", decidedBy: "u-1", decidedAt: "2026-08-01T09:00:00Z", note: "Confirmed with operations." },
+            { id: "ITEM-5", bindingId: "RB-5", subjectUserId: "u-7", subjectName: "Hana Youssef", role: "finance", decision: "revoked", decidedBy: "u-1", decidedAt: "2026-08-01T09:05:00Z", note: "Left the finance team in June." },
+          ]
+        : []),
+      [],
+    );
+  }
+  recertifyAccessItem(itemId: string, note?: string) {
+    void itemId; void note;
+    return this.gate(() => undefined, undefined);
+  }
+  revokeAccessItem(itemId: string, note?: string) {
+    void itemId; void note;
+    return this.gate(() => undefined, undefined);
+  }
+  sweepAccessCampaign(campaignId: string) {
+    void campaignId;
+    return this.gate(() => ({ autoExpired: 3 }), { autoExpired: 0 });
+  }
   breakGlassGrants() {
     return this.gate(
-      () => ok(z.array(zBreakGlassGrant), [{ id: "BG-1", requesterToken: "•••8a91", reasonCode: "EmergencyCare", status: { kind: "neu", label: loc("Expired", "منتهٍ") }, requestedAt: "2026-07-20T02:00:00Z", expiresAt: "2026-07-20T03:00:00Z" }]),
+      () => ok(z.array(zBreakGlassGrant), [
+        {
+          id: "BG-1", requesterToken: "•••8a91", approverToken: "•••1111", reasonCode: "EmergencyCare",
+          status: { kind: "neu", label: loc("Expired", "منتهٍ") },
+          requestedAt: "2026-07-20T02:00:00Z", expiresAt: "2026-07-20T03:00:00Z",
+          // Eleven uses, four of them outside what the grant covered, and nobody has reviewed it since it
+          // lapsed. This is the row the dashboard exists to surface and could not previously describe.
+          accessCount: 11, outOfScopeCount: 4, postReviewDone: false,
+        },
+        {
+          id: "BG-2", requesterToken: "•••4f2a", approverToken: null, reasonCode: "UnconsciousPatient",
+          status: { kind: "info", label: loc("Requested", "مطلوب") },
+          requestedAt: "2026-08-21T06:40:00Z", expiresAt: undefined,
+          accessCount: 0, outOfScopeCount: 0, postReviewDone: false,
+        },
+      ]),
       [],
+    );
+  }
+  approveBreakGlass(grantId: string) {
+    void grantId;
+    return this.gate(() => undefined, undefined);
+  }
+  rejectBreakGlass(grantId: string, reason: string) {
+    void grantId; void reason;
+    return this.gate(() => undefined, undefined);
+  }
+  sodViolations() {
+    return this.gate(
+      () => ok(z.array(zSodViolation), [
+        {
+          subjectUserId: "u-5", subjectName: "Sara Ibrahim", heldRole: "doctor", conflictingRole: "medical_approval",
+          reason: "Self-approval of own clinical request",
+        },
+      ]),
+      [],
+    );
+  }
+  networkMetrics() {
+    return this.gate(
+      // The same three providers the directory fixture carries, counted by the SERVICE's own definition:
+      // one suspended, none terminated. Kept in step deliberately — a roll-up that disagreed with the
+      // directory beside it would be a fixture that hides exactly the drift this endpoint exists to end.
+      () => ok(zNetworkMetrics, { total: 3, active: 2, suspended: 1, terminated: 0 }),
+      { total: 0, active: 0, suspended: 0, terminated: 0 },
+    );
+  }
+  providerMetrics(providerId: string) {
+    return this.gate(
+      () => ok(zProviderMetrics, {
+        providerId,
+        status: "Active",
+        activeContracts: 2,
+        servicesOffered: 41,
+        credentials: { valid: 5, expiringSoon: 1, expired: 0 },
+        // Null, not zero — the fulfillment events that populate it land in phases 5/6.
+        ordersFulfilled: 0,
+        avgTurnaroundHours: null,
+      }),
+      {
+        providerId, status: "", activeContracts: 0, servicesOffered: 0,
+        credentials: { valid: 0, expiringSoon: 0, expired: 0 },
+        ordersFulfilled: 0, avgTurnaroundHours: null,
+      },
     );
   }
   providerList() {
