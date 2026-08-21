@@ -64,6 +64,24 @@ export type OrderRow = z.infer<typeof zOrderRow>;
  * A completed result the caller MAY read in full — Standard sensitivity, or a restricted result the caller
  * authored / holds an active grant for (14.6). `restricted:false` is the discriminant.
  */
+/**
+ * A readable result.
+ *
+ * ## What `hasReport` is, and what it is not
+ *
+ * A boolean, not a document id. The bytes come from
+ * `GET /investigation-orders/{orderId}/lines/{lineId}/result/report`, which re-applies the 14.7 sensitivity
+ * gate — so the client needs the answer to "is there a report", never the means to fetch one out from under
+ * the gate that decided it could. A document id in the browser is a capability.
+ *
+ * ## Why this schema now says what it means
+ *
+ * Every field but `orderId`/`lineId` used to arrive as a default. orders-service returned an ARRAY for a
+ * readable result and a single OBJECT for a restricted one; the client read both as an object, so
+ * `resultValue` was `undefined` and rendered as an em-dash. `category`, `code` and `status` were worse — the
+ * endpoint sent a fulfillment row, which knows nothing about the code that was ordered, so those three were
+ * "Result", "—" and "Completed" on every read against a real gateway. The whole dialog was placeholders.
+ */
 export const zResultValue = z.object({
   restricted: z.literal(false),
   orderId: zId,
@@ -72,6 +90,8 @@ export const zResultValue = z.object({
   code: z.string(),
   value: z.string(),
   status: z.string(),
+  /** A report file was uploaded alongside the summary. For radiology, this is usually the real result. */
+  hasReport: z.boolean(),
   resultedAt: zInstant.optional(),
 });
 export type ResultValue = z.infer<typeof zResultValue>;

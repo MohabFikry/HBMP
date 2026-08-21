@@ -33,7 +33,21 @@ public interface ITreatingRelationshipClient
 public interface IReportDocumentClient
 {
     Task<Guid?> StoreReportAsync(Guid beneficiaryId, string fileName, string contentType, byte[] content, string? bearerToken, CancellationToken ct = default);
+
+    /// <summary>
+    /// Read a stored report back — 33.8, the half that was missing.
+    /// </summary>
+    /// <remarks>
+    /// Returns null for every failure the caller must treat alike: the document is gone, document-service
+    /// refused this bearer, or it could not be reached. The endpoint above turns that into a 502 rather than
+    /// an empty file, because "the report is recorded and cannot be retrieved" and "there is no report" are
+    /// different sentences and only one of them is about the patient.
+    /// </remarks>
+    Task<ReportBlob?> FetchReportAsync(Guid beneficiaryId, Guid documentId, string? bearerToken, CancellationToken ct = default);
 }
+
+/// <summary>A stored report's bytes and the little that is needed to hand them on.</summary>
+public sealed record ReportBlob(Stream Content, string ContentType, string FileName);
 
 /// <summary>Issues the next monotonic Order No for a year (atomic upsert on order_seq).</summary>
 public sealed class OrderNoIssuer(OrdersDbContext db)

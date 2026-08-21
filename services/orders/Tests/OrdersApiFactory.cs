@@ -269,8 +269,22 @@ internal sealed class FakeExaminationTypes : IExaminationTypeResolver
 
 internal sealed class FakeReportDocuments : IReportDocumentClient
 {
+    /// <summary>Bytes the fake hands back on a fetch — so a test can prove the report route STREAMS what
+    /// document-service returned rather than merely answering 200.</summary>
+    public static readonly byte[] Bytes = "%PDF-1.4 fixture report"u8.ToArray();
+
+    /// <summary>Set to make document-service look unreachable or refusing, which the route must turn into a
+    /// 502 rather than an empty file: "recorded and unretrievable" is not "there is no report".</summary>
+    public bool FetchFails { get; set; }
+
     public Task<Guid?> StoreReportAsync(Guid beneficiaryId, string fileName, string contentType, byte[] content,
         string? bearerToken, CancellationToken ct = default) => Task.FromResult<Guid?>(Guid.NewGuid());
+
+    public Task<ReportBlob?> FetchReportAsync(Guid beneficiaryId, Guid documentId, string? bearerToken,
+        CancellationToken ct = default) =>
+        Task.FromResult<ReportBlob?>(FetchFails
+            ? null
+            : new ReportBlob(new MemoryStream(Bytes), "application/octet-stream", $"report-{documentId:N}"));
 }
 
 /// <summary>No permitted set — branch scoping has its own suite (BranchScope*Tests); here it must not decide

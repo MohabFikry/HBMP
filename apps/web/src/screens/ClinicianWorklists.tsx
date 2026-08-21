@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useFormat, type Formatters } from "../i18n/useFormat";
-import { Button, Card, DataTableView, Icon, Modal, StatusChip, useTableQuery } from "@mersal/design-system";
+import { Button, Card, DataTableView, Icon, InlineAlert, Modal, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { Localized, OrderRow, PatientListItem, ResultDetail, RxRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
+import { ApiError } from "../api/http";
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc, useOpenProfile, useWhenFilter } from "./_shared";
 import { RestrictedResultCard, RequestAccessDialog } from "./RestrictedResultCard";
@@ -88,6 +89,21 @@ const S = {
   submitted: { en: "Submitted", ar: "تاريخ الإرسال" },
   result: { en: "Result", ar: "النتيجة" },
   viewResult: { en: "View result", ar: "عرض النتيجة" },
+
+  // ---- 33.8 — the report file, which was stored since phase 5.3 and readable by nobody ----
+  downloadReport: { en: "Download the report", ar: "تنزيل التقرير" },
+  reportHint: {
+    en: "The signed report or study the performing centre uploaded. For imaging this is usually the finding itself, and the summary above is not a substitute for it.",
+    ar: "التقرير الموقّع أو الدراسة التي رفعها المركز المنفّذ. في الأشعة يكون هذا عادةً هو التشخيص نفسه، والملخص أعلاه ليس بديلاً عنه.",
+  },
+  reportFailed: {
+    en: "The report could not be downloaded. It is recorded against this result — try again, and report it if this persists.",
+    ar: "تعذّر تنزيل التقرير. وهو مسجّل على هذه النتيجة — أعد المحاولة، وأبلغ إن تكرر ذلك.",
+  },
+  reportDenied: {
+    en: "You may not read this report. Request time-boxed access from the result above.",
+    ar: "لا يمكنك قراءة هذا التقرير. اطلب وصولاً محدد المدة من النتيجة أعلاه.",
+  },
   resultTitle: { en: "Result", ar: "النتيجة" },
   value: { en: "Value", ar: "القيمة" },
   accessRequested: { en: "Access request submitted — pending author / medical-director grant.", ar: "تم إرسال طلب الوصول — بانتظار موافقة الطبيب المُحرّر / المدير الطبي." },
@@ -760,6 +776,9 @@ export function DoctorResults() {
             <dd>{detail.status}</dd>
           </dl>
         )}
+        {!busy && detail && !detail.restricted && detail.hasReport && (
+          <ReportDownload orderId={detail.orderId} lineId={detail.lineId} />
+        )}
       </Modal>
     </>
   );
@@ -862,5 +881,66 @@ export function DoctorPrescriptions() {
         onChanged={state.reload}
       />
     </>
+  );
+}
+
+/**
+ * 33.8 — download the report file attached to a result.
+ *
+ * <p>A radiographer has been able to upload a signed report or a DICOM study since phase 5.3. It was scanned,
+ * encrypted, checksummed and its reference pinned on the fulfillment row — and no role in the platform could
+ * read it back, because document-service serves bytes only for OPERATIONAL documents and its clinical read is
+ * metadata by design. For imaging, where the report IS the finding, the product stored the result and showed
+ * the ordering doctor a one-line summary of it.</p>
+ *
+ * <p>Goes through orders-service rather than at the document directly: that is where the 14.7 sensitivity gate
+ * lives, so the same rule that decided this clinician may read the VALUES decides whether they may read the
+ * file. A 403 here is that gate, and it says so — retrying will not help, and the route back is the
+ * time-boxed access request on the restricted card.</p>
+ *
+ * <p>A fetch through the api client, not an `&lt;a download href&gt;`: an anchor sends no Authorization
+ * header, which behind the gateway is a 401 the browser renders as a broken download with no message. Same
+ * reasoning as `BulkErrorReport`.</p>
+ */
+function ReportDownload({ orderId, lineId }: { orderId: string; lineId: string }) {
+  const api = useApi();
+  const t = useLoc();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Localized | null>(null);
+
+  async function download() {
+    setError(null);
+    setBusy(true);
+    try {
+      const blob = await api.resultReport(orderId, lineId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${orderId.slice(0, 8)}-${lineId.slice(0, 8)}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // 403 is the sensitivity gate, not an outage, and it means something different to a clinician:
+      // retrying will not help and there is a defined way to ask.
+      setError(e instanceof ApiError && e.status === 403 ? S.reportDenied : S.reportFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack" style={{ gap: "var(--sp2)", marginTop: "var(--sp3)" }}>
+      <p className="muted" style={{ margin: 0 }}>{t(S.reportHint)}</p>
+      <div>
+        <Button variant="secondary" leadingIcon={<Icon name="download" />} loading={busy} onClick={() => void download()}>
+          {t(S.downloadReport)}
+        </Button>
+      </div>
+      <div aria-live="polite">
+        {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+      </div>
+    </div>
   );
 }

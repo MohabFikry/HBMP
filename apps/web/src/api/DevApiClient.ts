@@ -1253,11 +1253,23 @@ export class DevApiClient implements ApiClient {
           restricted: true as const, orderId, lineId, category: "Radiology — Psychiatry protocol",
           status: "Completed", sensitivityLevel: "Sensitive", orderingBranch: "Maadi", date: "2026-07-21",
         });
+      // `hasReport: true` — the lab uploaded a signed PDF alongside the summary, which is the ordinary case
+      // and the one that makes the download visible in the fixture app. The shape that motivated 33.8 is the
+      // radiology one, where the report arrives with NO summary; it is not put on ln-2/ln-3 because those are
+      // the fixture's restricted and standard cases and other suites assert on them.
       return ok(zResultDetail, {
         restricted: false as const, orderId, lineId, category: "Laboratory — Chemistry panel",
-        code: "80053", value: "Within reference range", status: "Completed", resultedAt: "2026-07-20T11:00:00Z",
+        code: "80053", value: "Within reference range", status: "Completed", hasReport: true,
+        resultedAt: "2026-07-20T11:00:00Z",
       });
     });
+  }
+  resultReport(orderId: string, lineId: string) {
+    void orderId; void lineId;
+    return this.gate(
+      () => new Blob(["%PDF-1.4 fixture report"], { type: "application/pdf" }),
+      new Blob([], { type: "application/octet-stream" }),
+    );
   }
 
   /**

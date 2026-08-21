@@ -1017,6 +1017,38 @@
         }
       }
     },
+    "/api/v1/investigation-orders/{orderId}/lines/{lineId}/result/report": {
+      "get": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/report-access-requests": {
       "get": {
         "tags": [

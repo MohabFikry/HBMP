@@ -406,6 +406,13 @@ export interface ApiClient {
    * sensitivity-restricted and the caller neither authored it nor holds an active grant (14.7 server gate).
    */
   resultDetail(orderId: string, lineId: string): Promise<ResultDetail>;
+  /**
+   * 33.8 — the report file behind a result, fetched through the same 14.7 gate as its values.
+   *
+   * Keyed by order and line rather than by document id: the id is a capability the gate hands out, and the
+   * caller does not need it to ask for something the gate will decide on anyway.
+   */
+  resultReport(orderId: string, lineId: string): Promise<Blob>;
   /** Request time-boxed access to a restricted result (14.8) — purpose + justification are mandatory. */
   requestReportAccess(input: ReportAccessInput): Promise<ReportAccessRequestResult>;
   /**

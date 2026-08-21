@@ -66,6 +66,44 @@ public sealed record ReportAccessGrantView(
 /// withheld is present in the payload and hidden by the client, because a field that reaches the browser has
 /// been disclosed whatever the browser does with it.
 /// </remarks>
+/// <summary>
+/// One line's result, as the ordering clinician reads it.
+/// </summary>
+/// <remarks>
+/// <para><b>A single object, deliberately — 33.8.</b> This path used to return
+/// <c>IEnumerable&lt;ResultResponse&gt;</c> while the restricted path beside it returned a single
+/// <see cref="RestrictedResultView"/>. Two shapes on one route, discriminated by a field that only exists on
+/// one of them, is a contract a client cannot read without knowing which branch the server took — and the
+/// SPA did not: it read the array as an object, so <c>resultValue</c> came back <c>undefined</c> and the
+/// dialog rendered an em-dash for every standard result against a real gateway. Both paths are objects now
+/// and <c>Restricted</c> is a real discriminator present on both.</para>
+///
+/// <para><b>It carries the LINE's context.</b> <c>ResultResponse</c> is the fulfillment row and knows nothing
+/// about the code that was ordered, so the client filled <c>category</c>, <c>code</c> and <c>status</c> from
+/// defaults — "Result", "—", "Completed" — on every read. The endpoint has the order and the line in hand;
+/// sending what it already knows costs nothing and is the difference between a dialog and a placeholder.</para>
+///
+/// <para><b>It carries no document identifier.</b> <see cref="HasReport"/> says a report exists; the bytes come
+/// from <c>GET /investigation-orders/{orderId}/lines/{lineId}/result/report</c>, which re-applies this same
+/// gate. A document id in the browser is a capability, and the client needs the answer to "is there one",
+/// not the means to fetch it out from under the gate that decided it could.</para>
+///
+/// <para>Where a line has been fulfilled more than once, this is the MOST RECENTLY uploaded result — the one
+/// a clinician opening the record means by "the result". The earlier ones remain on the fulfillment rows and
+/// on the audit trail.</para>
+/// </remarks>
+public sealed record LineResultView(
+    bool Restricted,
+    Guid OrderId,
+    Guid LineId,
+    string Code,
+    string CodeSystem,
+    string Category,
+    string Status,
+    string? ResultValue,
+    bool HasReport,
+    DateTimeOffset? ResultUploadedAt);
+
 public sealed record RestrictedResultView(
     bool Restricted,
     Guid OrderId,

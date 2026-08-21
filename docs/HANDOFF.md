@@ -131,6 +131,14 @@ expensive way.
   `gate-freshness` cannot run locally at all), so "green locally" and "green in CI" are both partial and
   neither implies the other.
 
+- **Do not run the test suite and the Compose stack at the same time.** `libs/events`'
+  `SagaMirrorAgainstBrokerTests` publish to `orders.events` and drain it; the running services are subscribed
+  to the same broker and eat the messages first, so three tests fail with `Expected Drain(...) to be true`.
+  Nothing is wrong with the code — verified by stashing every local change and reproducing on a clean HEAD,
+  then watching all four pass the moment the application containers were stopped. `docker compose stop
+  $(docker compose ps --format '{{.Service}}' | grep -E 'service$')` before a full run, and note that
+  `rabbitmq-init` is a one-shot that `up.sh` does not re-run when the broker restarts.
+
 - ~~**`tenant_id = ''` is down to 341 rows in ONE table, and the survivor may not be debt at all.**~~
   **CLOSED 2026-08-21 — and the survivor was never debt.** The question this entry posed — *is `role_scope`
   tenant-scoped?* — had been answered before the entry was written. `tenant_id = ''` there is

@@ -167,7 +167,7 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { SubstitutionRequest, WithdrawResult } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { ApiError, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, postForFile, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getBlob, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, postForFile, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { newIdempotencyKey } from "./http";
 import type { ApprovalQueueFilter } from "./client";
 import { GATEWAY_BASE } from "../config";
@@ -1933,27 +1933,69 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
-  /** 14.6/14.7 — read one result. The orders service applies the sensitivity gate and returns either the value
-   *  or `{ restricted: true, … }` existence-only metadata; the discriminated union parses both. */
+  /**
+   * 14.6/14.7 — read one result. orders-service applies the sensitivity gate and returns either the value or
+   * existence-only metadata; the discriminated union parses both.
+   *
+   * <p>33.8 — this mapping used to invent almost all of what it returned. The readable path returned an
+   * ARRAY (`IEnumerable&lt;ResultResponse&gt;`) and the restricted path a single object, and this read both as
+   * an object: `r?.resultValue` on an array is `undefined`, so every standard result rendered as an em-dash
+   * against a real gateway. `category`, `code` and `status` were never sent at all — a fulfillment row does
+   * not know the code that was ordered — so all three fell to their defaults on every read. The whole dialog
+   * was placeholders, and no test covered it because `DevApiClient` returns the finished contract shape.</p>
+   *
+   * <p>Both paths are objects now and carry `restricted`, so this reads one field to know which it has.</p>
+   */
   async resultDetail(orderId: string, lineId: string) {
     const r = (await getRaw(`/investigation-orders/${orderId}/lines/${lineId}/result`)) as any;
+    // A SHAPE THIS CLIENT DOES NOT RECOGNISE IS A FAILURE, not a set of defaults.
+    //
+    // This is the guard the original defect needed. The readable path used to answer with an array, and the
+    // mapping below reads fields off an object — so every field fell to its `??` fallback and the dialog
+    // rendered "Result / — / — / Completed" with no error anywhere. Defaults that paper over a shape
+    // mismatch turn a contract break into a plausible-looking answer, which is the one outcome worth
+    // preventing: a doctor cannot tell a missing result from an em-dash.
+    if (Array.isArray(r) || r === null || typeof r !== "object") {
+      throw new ApiError(
+        "schema",
+        "The result endpoint returned a shape this client does not recognise. Expected one object carrying "
+          + "`restricted`; see LineResultView.",
+      );
+    }
     if (r?.restricted === true)
       return parseOr(zResultDetail, {
         restricted: true, orderId, lineId,
-        category: r.category ?? r.orderType ?? "Result",
+        category: r.category ?? "Result",
         status: r.status ?? "Completed",
         sensitivityLevel: r.sensitivityLevel ?? "Sensitive",
         orderingBranch: r.orderingBranch ?? null,
         date: r.date ?? r.resultUploadedAt ?? undefined,
       });
     return parseOr(zResultDetail, {
-      restricted: false, orderId, lineId,
-      category: r?.category ?? r?.orderType ?? "Result",
-      code: r?.code ?? "—",
-      value: r?.resultValue ?? r?.value ?? "—",
-      status: r?.status ?? "Completed",
-      resultedAt: r?.resultUploadedAt ?? r?.resultedAt ?? undefined,
+      restricted: false,
+      orderId: r?.orderId ?? orderId,
+      lineId: r?.lineId ?? lineId,
+      category: String(r?.category ?? "Result"),
+      code: String(r?.code ?? "—"),
+      // A result with a report and no summary is normal in radiology, where the report IS the finding — so
+      // an absent value is stated rather than rendered as a missing field.
+      value: String(r?.resultValue ?? "—"),
+      status: String(r?.status ?? "Completed"),
+      hasReport: Boolean(r?.hasReport),
+      resultedAt: r?.resultUploadedAt ?? undefined,
     });
+  }
+
+  /**
+   * 33.8 — the report file, fetched through the gate that decided the caller may read this result.
+   *
+   * <p>A fetch rather than an `&lt;a download&gt;`, for the reason `BulkErrorReport` gives: an anchor sends no
+   * Authorization header, and behind the gateway that is a 401 the browser renders as a broken download with
+   * no message. Keyed by order and line — the pair orders-service gates — so no document id reaches here.</p>
+   */
+  async resultReport(orderId: string, lineId: string): Promise<Blob> {
+    return await getBlob(
+      `/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result/report`);
   }
 
   /** 14.8 — request time-boxed access to a restricted result (POST /report-access-requests). */

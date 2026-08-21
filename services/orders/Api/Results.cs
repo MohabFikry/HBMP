@@ -158,7 +158,7 @@ public static class ResultEndpoints
                         EntityType = "order_fulfillment", EntityId = lineId.ToString(), Action = AuditAction.Read,
                         ActorUserId = subject, DecisionOutcome = "Allow", DecisionReasonCode = "author", FieldClasses = ["phi"],
                     }, ct);
-                return Results.Ok(sensitive.Select(ResultResponse.From));
+                return Results.Ok(LatestResult(order, line, sensitive));
             }
 
             var denied = await AuthorizeResultReadAsync(gate, engine, me, order.BeneficiaryId, orderId.ToString(),
@@ -174,13 +174,140 @@ public static class ResultEndpoints
                 EntityType = "order_fulfillment", EntityId = lineId.ToString(), Action = AuditAction.Read,
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow", FieldClasses = ["phi"],
             }, ct);
-            return Results.Ok(results.Select(ResultResponse.From));
+            return Results.Ok(LatestResult(order, line, results));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
         // TWO shapes, and both are the contract: a caller without the clinical grant gets the
-        // existence-only projection (design 37 §6), never a results array with the values removed.
-        .Produces<IEnumerable<ResultResponse>>()
+        // existence-only projection (design 37 §6), never a result with the values removed. Both are OBJECTS
+        // and both carry `restricted`, so a client reads one field to know which it has — see LineResultView.
+        .Produces<LineResultView>()
         .Produces<RestrictedResultView>();
+
+        MapReportDownload(v1);
     }
+
+    /// <summary>
+    /// The line's context plus its most recent uploaded result. Never a document id — see
+    /// <see cref="LineResultView"/>.
+    /// </summary>
+    private static LineResultView LatestResult(
+        InvestigationOrder order, OrderLine line, IReadOnlyList<OrderFulfillment> fulfillments)
+    {
+        var latest = fulfillments
+            .OrderByDescending(f => f.ResultUploadedAt ?? DateTimeOffset.MinValue)
+            .ThenByDescending(f => f.ConsumedAt)
+            .FirstOrDefault();
+
+        return new LineResultView(
+            Restricted: false,
+            order.OrderId,
+            line.OrderLineId,
+            line.Code,
+            line.CodeSystem.ToString(),
+            order.OrderType.ToString(),
+            line.Status.ToString(),
+            latest?.ResultValue,
+            HasReport: latest?.ResultDocumentId is not null,
+            latest?.ResultUploadedAt);
+    }
+
+    /// <summary>
+    /// 33.8 — the report BYTES, behind the same gate as the values.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this lives here and not in document-service.</b> A radiographer has been able to upload a
+    /// signed report or a DICOM study since phase 5.3: it is scanned, encrypted, stored, and its id pinned on
+    /// the fulfillment row. Nothing could read it back. document-service serves bytes for OPERATIONAL
+    /// documents only — a different table — and its clinical read is metadata by design
+    /// (<c>DocumentPolicies.Read</c>: "never blob bytes"). So for radiology, where the report IS the result,
+    /// the product stored the finding and showed the ordering doctor a one-line summary of it.</para>
+    ///
+    /// <para>The gate that decides who may read a result is <see cref="SensitiveResultGate"/>, and it is
+    /// here, keyed on the LINE's sensitivity and the caller's grants. Serving the blob from document-service
+    /// on its own authority would answer a question that service cannot ask: it knows a document belongs to a
+    /// beneficiary, not that the result behind it is restricted and this reader holds no grant. So the route
+    /// is keyed by <c>(orderId, lineId)</c> — the pair this service gates — and the document id is looked up
+    /// HERE rather than accepted from the caller, which is also why no document id needs to reach the
+    /// browser.</para>
+    ///
+    /// <para>The caller's own bearer is forwarded to document-service, so its role and tenant rules apply as
+    /// a second layer rather than being bypassed by a service credential.</para>
+    /// </remarks>
+    private static void MapReportDownload(RouteGroupBuilder v1)
+    {
+        v1.MapGet("/{orderId:guid}/lines/{lineId:guid}/result/report", async (
+            Guid orderId, Guid lineId, HttpRequest http, OrdersDbContext db, OrdersGate gate,
+            IReportDocumentClient docs, IAuthorizationEngine engine, IAuditClient audit,
+            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
+            var line = order?.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
+            if (order is null || line is null) return NotFound();
+
+            // The SAME 14.7 decision the values read makes. Duplicated deliberately rather than factored into
+            // a helper that takes a bool: the two endpoints must agree, and the way to keep them agreeing is
+            // for a reader of either to see the whole rule.
+            var subject = me.Principal?.Subject;
+            if (line.SensitivityLevel != SensitivityLevel.Standard)
+            {
+                var now = clock.GetUtcNow();
+                var isAuthor = order.CreatedBy == subject;
+                var activeGrant = subject is null ? null : await db.ReportAccessGrants.AsNoTracking()
+                    .Where(g => g.GranteeUserId == subject && g.OrderLineId == lineId && g.RevokedAt == null && now < g.ExpiresAt)
+                    .OrderByDescending(g => g.GrantedAt).FirstOrDefaultAsync(ct);
+
+                if (SensitiveResultGate.Decide(line.SensitivityLevel, isAuthor, activeGrant is not null) == ResultDisclosure.ExistenceOnly)
+                {
+                    await audit.EmitAsync(new AuditEventDraft
+                    {
+                        EntityType = "order_fulfillment", EntityId = lineId.ToString(), Action = AuditAction.Read,
+                        ActorUserId = subject, DecisionOutcome = "Deny", DecisionReasonCode = "sensitive-restricted",
+                        Severity = AuditSeverity.Notice,
+                    }, ct);
+                    return Results.Problem(
+                        statusCode: 403, title: "sensitive-result-restricted", type: "urn:hbmp:sensitive-result-restricted",
+                        detail: "This report is restricted. Request time-boxed access to read it.");
+                }
+            }
+            else
+            {
+                var denied = await AuthorizeResultReadAsync(gate, engine, me, order.BeneficiaryId, orderId.ToString(),
+                    http.Headers.Authorization.ToString(), ct);
+                if (denied is not null) return denied;
+            }
+
+            var fulfillment = await db.Fulfillments.AsNoTracking()
+                .Where(f => f.OrderLineId == lineId && f.ResultDocumentId != null)
+                .OrderByDescending(f => f.ResultUploadedAt).FirstOrDefaultAsync(ct);
+            if (fulfillment?.ResultDocumentId is not { } documentId)
+                return Results.Problem(
+                    statusCode: 404, title: "no-report", type: "urn:hbmp:no-report",
+                    detail: "This result has no report file. The summary is the whole of what was uploaded.");
+
+            var blob = await docs.FetchReportAsync(order.BeneficiaryId, documentId, http.Headers.Authorization.ToString(), ct);
+            if (blob is null)
+                return Results.Problem(
+                    statusCode: 502, title: "report-fetch-failed", type: "urn:hbmp:report-fetch-failed",
+                    detail: "The report is recorded but could not be retrieved from the document store.");
+
+            // An EXPORT, not a read: bytes leave the platform. Same severity the operational download uses,
+            // and for the same reason — the fourth retrieval discloses exactly as much as the first.
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "order_fulfillment", EntityId = fulfillment.FulfillmentId.ToString(),
+                Action = AuditAction.Export, ActorUserId = subject, DecisionOutcome = "ReportDownloaded",
+                DecisionReasonCode = $"order:{orderId};line:{lineId};document:{documentId}",
+                Severity = AuditSeverity.High, FieldClasses = ["phi"],
+            }, ct);
+
+            return Results.File(blob.Content, blob.ContentType, blob.FileName);
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        // The body is a file, not a described JSON shape — `Produces` with a content type rather than a type,
+        // so the spec says "bytes" instead of inventing a schema for them.
+        .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream");
+    }
+
+    private static IResult NotFound() =>
+        Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
     /// <summary>Result read is min-necessary (11-permission-matrix): the ordering doctor (treating) OR the approval
     /// team may read; anyone else is denied and audited. Doctor path reuses the treating gate; the oversight path is

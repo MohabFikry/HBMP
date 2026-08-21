@@ -32,6 +32,23 @@ public static class DocumentPolicies
     /// </remarks>
     public const string OperationalRead = "document:operational-read";
 
+    /// <summary>Download the BYTES of a beneficiary's CLINICAL document — a signed report, a study, a scan.</summary>
+    /// <remarks>
+    /// <para>Separate from <see cref="Read"/> because that action is metadata and says so: "min-necessary —
+    /// never blob bytes". Knowing a result report exists and being able to read it are different
+    /// disclosures, and the role lists differ — reception and beneficiary management legitimately see that a
+    /// beneficiary has documents on file without being people who read radiology reports.</para>
+    ///
+    /// <para><b>This is not the whole gate for a result report.</b> A report attached to an investigation
+    /// line is additionally subject to the 14.7 sensitivity gate, which lives in orders-service because it
+    /// turns on the LINE's sensitivity and the caller's time-boxed grants — facts this service does not have.
+    /// The clinician path is <c>GET /investigation-orders/{orderId}/lines/{lineId}/result/report</c>, which
+    /// applies that gate and then calls here with the caller's own bearer, so both checks run. This rule is
+    /// the second layer, not the first, and the document id needed to reach it is only ever handed out by the
+    /// first.</para>
+    /// </remarks>
+    public const string ContentRead = "document:content-read";
+
     // Roles that legitimately view a beneficiary's registration/clinical documents. super_admin is intentionally
     // absent — global PHI reach is only via break-glass (the break-glass ABAC condition elevates when active).
     private static readonly string[] Readers =
@@ -54,6 +71,17 @@ public static class DocumentPolicies
         {
             Action = OperationalRead, ResourceType = Resource,
             Scopes = Set("document:write"),
+            RequiredConditions = [AbacConditions.TenantMatch], Sensitive = true,
+        },
+        // Narrower than Read on purpose — see ContentRead. These are the roles that may read a clinical
+        // result at all (11-permission-matrix §3.2): the treating clinician and the oversight tiers. Nurses
+        // are absent because they read results through the profile projection, which is field-scoped, rather
+        // than as raw files; reception, beneficiary management and org_admin are absent because seeing that a
+        // document is on file is the whole of what their row grants.
+        new PolicyRule
+        {
+            Action = ContentRead, ResourceType = Resource,
+            Roles = Set("doctor", "medical_approval", "medical_director"),
             RequiredConditions = [AbacConditions.TenantMatch], Sensitive = true,
         },
     ];

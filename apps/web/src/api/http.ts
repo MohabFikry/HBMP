@@ -347,6 +347,41 @@ export async function getText(path: string, signal?: AbortSignal): Promise<strin
 }
 
 /**
+ * GET a BINARY body — a signed report, a study, a scan.
+ *
+ * Separate from {@link getText} for the same reason that one is separate from {@link getRaw}: a caller that
+ * wants bytes and a caller that wants a string want different failures. Errors take the same RFC-7807 path,
+ * so a refused download is as legible as a refused write — which matters most here, because the refusal a
+ * clinician meets is usually the 14.7 gate telling them to request access rather than anything broken.
+ *
+ * Returns a Blob for the caller to hand to the browser. There is no `<a download href>` anywhere near this:
+ * an anchor sends no Authorization header, so behind the gateway it is a 401 rendered as a broken download.
+ */
+export async function getBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const token = getToken();
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/octet-stream, application/pdf, image/*",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...activeBranchHeader(),
+      },
+      signal,
+    });
+  } catch (e) {
+    if (isAbort(e)) throw new ApiError("aborted", `Request to ${path} was cancelled`);
+    throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
+  }
+  if (!res.ok) {
+    const problem = await readProblem(res);
+    throw new ApiError("http", problem?.detail ?? problem?.title ?? `Request to ${path} failed`, res.status, problem);
+  }
+  return await res.blob();
+}
+
+/**
  * POST a multipart/form-data body (e.g. a lab/imaging result with an optional file). We deliberately pass no
  * `Content-Type` so the browser sets the multipart boundary itself; the JSON default is overridden to undefined.
  */

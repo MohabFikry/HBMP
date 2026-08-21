@@ -2700,3 +2700,46 @@ invariants:
       - apps/web/test/case-coordination.test.tsx::renders the three states differently instead of one amber chip for all of them
       - apps/web/test/case-coordination.test.tsx::acknowledges a raised escalation
       - apps/web/test/case-coordination.test.tsx::shows a resolved escalation's note rather than a control it cannot use
+
+  # ── 33.8 — the report that was stored and unreadable ─────────────────────────────────────────────────────
+
+  - id: INV-A-STORED-CLINICAL-FILE-CAN-BE-READ-BACK
+    statement: >-
+      A report or study uploaded against an investigation line can be retrieved by a clinician entitled to the
+      result. A write path with no read path stores a finding nobody can act on — and for imaging the report
+      IS the result, so the one-line summary beside it is not a substitute.
+    source: 10-role-matrix.md §3.8; 45-encounter-and-prescription-adjustments.md §7; doc 53 §2
+    severity: High
+    tests:
+      - Mersal.Orders.Tests.LineResultViewTests.A_result_with_a_report_and_no_summary_is_representable
+      - apps/web/test/result-detail.test.tsx::reports that a report file exists without being handed its document id
+      - apps/web/test/result-detail.test.tsx::downloads it, and says the summary is not a substitute
+      - apps/web/test/result-detail.test.tsx::offers the download only when a report exists
+
+  - id: INV-THE-REPORT-IS-GATED-BY-THE-RULE-THAT-GATES-ITS-VALUES
+    statement: >-
+      The bytes of a result report are released by the same 14.7 decision that releases its values — the
+      line's sensitivity and the caller's time-boxed grant. document-service cannot make that decision, so the
+      clinician path runs through orders-service and the document id required to reach the file is only ever
+      handed out by the gate that allowed it.
+    source: 37-branch-scoping-and-clinical-sensitivity.md §6; 18-security-model.md §2; doc 53 §3
+    severity: Critical
+    tests:
+      - Mersal.Orders.Tests.LineResultViewTests.The_readable_projection_carries_no_document_identifier
+      - Mersal.Orders.Tests.LineResultViewTests.Reading_a_clinical_documents_bytes_is_a_narrower_grant_than_listing_its_metadata
+      - Mersal.Orders.Tests.ReportAccessTests.Sensitive_results_are_full_only_for_the_author_or_a_grant_holder_else_existence_only
+      - apps/web/test/result-detail.test.tsx::asks orders-service by order and line
+      - apps/web/test/result-detail.test.tsx::tells a refusal apart from a failure, because only one of them can be retried
+
+  - id: INV-ONE-ROUTE-ANSWERS-ONE-SHAPE
+    statement: >-
+      An endpoint that can answer in more than one way discriminates them with a field present on every
+      answer, and a client that meets a shape it does not recognise fails loudly. Defaults that absorb a
+      contract break turn it into a plausible-looking result, which is the one outcome a reader cannot detect.
+    source: 17-api-specifications.md; doc 53 §1
+    severity: High
+    tests:
+      - Mersal.Orders.Tests.LineResultViewTests.Both_projections_carry_the_discriminator_so_a_client_reads_one_field_to_tell_them_apart
+      - Mersal.Orders.Tests.LineResultViewTests.The_readable_projection_carries_the_line_context_the_dialog_renders
+      - apps/web/test/result-detail.test.tsx::fails loudly if the endpoint ever answers with an array again
+      - apps/web/test/result-detail.test.tsx::takes the value, code, category and status from the response rather than from defaults
