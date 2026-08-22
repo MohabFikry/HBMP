@@ -7,6 +7,7 @@ import { DevAuthClient } from "../src/auth/devAuthClient";
 import { branchApi, rosterApi, availabilityApi } from "../src/api/branchApi";
 import { BranchRoster } from "../src/screens/BranchRoster";
 import { BranchLicenceAlerts, BranchPractitioners } from "../src/screens/BranchLicences";
+import { BranchInventory } from "../src/screens/BranchInventory";
 import { BranchesOverview } from "../src/screens/BranchesOverview";
 
 /**
@@ -322,5 +323,26 @@ describe("Branches Overview", () => {
 
     await waitFor(() => expect(screen.getByText("Maadi")).toBeInTheDocument());
     expect(screen.queryByText("b1000000")).not.toBeInTheDocument();
+  });
+});
+
+describe("Inventory", () => {
+  it("keeps the balance and the ledger together, with the write behind a button", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchInventory />);
+
+    // Recording a movement is a nine-field form and it sat permanently open BETWEEN the stock table and the
+    // ledger — so the two things this screen exists to show, a balance and the movements that produce it,
+    // were separated by the form that produces them.
+    expect(await screen.findByText("Movement ledger")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Record a movement" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Record movement" })).toBeInTheDocument();
+    // Rendered only while open: a quantity left over from a dialog closed twenty minutes ago, against stock
+    // that has moved since, is exactly the stale write an append-only ledger cannot take back.
+    expect(within(dialog).getByText(/appended to the ledger/i)).toBeInTheDocument();
   });
 });

@@ -2958,3 +2958,17 @@ invariants:
       - apps/web/test/branch-reach-controls.test.tsx::does not retry an answer that is simply empty
       - apps/web/test/branch-reach-controls.test.tsx::gives a clinics manager a clinic field
       - apps/web/test/branch-reach-controls.test.tsx::does not ask a single-clinic desk for something the server would refuse
+
+  - id: INV-A-ROUTED-SERVICE-IS-A-RUNNING-SERVICE
+    statement: >-
+      Every host the gateway forwards to is something that actually runs. `inventory-service` was routed from
+      Kong at 25.5 — schema migrated, service building, 68 tests passing — with no compose service and no
+      Dockerfile, so `/api/v1/inventory` resolved to a hostname that does not exist on the network and the
+      Inventory screen reported "the service couldn't complete this request": the wording of a transient
+      fault, for an upstream that had never been deployed. A route to nowhere is worse than a missing route,
+      because a missing one 404s at the edge and reads as "not built yet", while a route to a host nobody runs
+      looks exactly like an outage of something that exists.
+    source: 16-service-catalog.md; ADR-0036; infra/compose/config/kong.yml
+    severity: High
+    tests:
+      - Mersal.Architecture.Tests.KongUpstreamsAreDeployedTests.Every_kong_upstream_is_a_service_the_stack_actually_runs

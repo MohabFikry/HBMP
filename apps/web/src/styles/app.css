@@ -3543,9 +3543,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 /* The day stepper is one control, not three, so it stays together and never stretches. */
 .rst-scope > .rst-step { flex: 0 0 auto; }
 
-/* The view switch and the exceptions trigger on one row: the switch takes the space it needs and the button
-   sits at the far end, wrapping under it rather than shrinking when the two stop fitting. */
-.rst-toolbar {
+/* A branch screen's in-page switch and its one action on one row: the switch takes the space it needs and the
+   button sits at the far end, wrapping under it rather than shrinking when the two stop fitting. Shared by
+   the roster (view switch + Exceptions) and inventory (category switch + Record a movement). */
+.branch-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

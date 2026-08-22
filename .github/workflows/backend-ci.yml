@@ -191,6 +191,16 @@ jobs:
         continue-on-error: true
         run: python3 tools/ci/check-kong-route-coverage.py
 
+      # The other direction of the same question, and the one nothing was asking. inventory-service was routed
+      # from Kong at 25.5 with no compose service and no Dockerfile, so /api/v1/inventory resolved to a host
+      # that does not exist and the Inventory screen reported "the service couldn't complete this request" —
+      # the wording of a transient fault, for an upstream that had never been deployed.
+      - name: "gate: Kong upstreams are deployed services (no route to nowhere)"
+        id: gate_kong_upstreams
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-kong-upstreams.py
+
       # Phase 19: the SPA's scope literal is a hand-copy of IdentityContract.InteractiveScopes and had
       # drifted nineteen scopes behind it. Because the SPA asks for the union in one request, that is not
       # a degraded screen — it is a refused login (ID2051) or a token that 403s everywhere.
@@ -464,6 +474,7 @@ jobs:
             large-blobs=${{ steps.gate_large_blobs.outcome }}
             migration-compat=${{ steps.gate_migration_compat.outcome }}
             kong-route-coverage=${{ steps.gate_kong.outcome }}
+            kong-upstreams=${{ steps.gate_kong_upstreams.outcome }}
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
             login-origin=${{ steps.gate_login_origin.outcome }}
             dev-auth-flags=${{ steps.gate_dev_auth_flags.outcome }}

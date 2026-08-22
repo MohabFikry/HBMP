@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, DataTableView, InlineAlert, InputField, Pagination, SegmentedControl, ComboboxField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, InlineAlert, InputField, Modal, Pagination, SegmentedControl, ComboboxField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { inventoryApi } from "../api/branchApi";
 import type { ItemCategory, Movement, MovementKind, StockLine } from "../api/branchApi";
@@ -74,6 +74,12 @@ const S = {
   needQty: { en: "Enter a quantity greater than zero.", ar: "أدخل كمية أكبر من صفر." },
   needReason: { en: "Enter a reason for this movement.", ar: "أدخل سببًا لهذه الحركة." },
   needItem: { en: "Choose an item.", ar: "اختر صنفًا." },
+  recordDescription: {
+    en: "Receipts, issues, returns, adjustments, write-offs and stock-take variances. Every one is appended to the ledger and none is edited afterwards.",
+    ar: "الاستلام والصرف والمرتجعات والتسويات والإهلاك وفروق الجرد. تُضاف كل حركة إلى السجل ولا تُعدَّل بعد ذلك.",
+  },
+  close: { en: "Close", ar: "إغلاق" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
 } satisfies Record<string, Localized>;
 
 const WRITABLE_KINDS: Array<{ kind: MovementKind; label: Localized }> = [
@@ -103,6 +109,7 @@ export function BranchInventory() {
   const { lang } = useTheme();
   const fmt = useFormat();   // 18.D2/U7 — Cairo-pinned; never a bare toLocaleString.
   const [tab, setTab] = useState<ItemCategory>("Medical");
+  const [recording, setRecording] = useState(false);
 
   const stock = useAsync(() => inventoryApi.stock({ category: tab }), [tab]);
   /*
@@ -200,15 +207,27 @@ export function BranchInventory() {
           were looking at was to read the table. SegmentedControl is the house control for an in-screen
           switch (ApprovalsWorklist, BeneficiaryPortal use it) and carries the selected state, the roving
           focus and the 44px targets. Not `Tabs`: this filters one table rather than swapping panels. */}
-      <SegmentedControl<ItemCategory>
-        aria-label={t(S.title)}
-        segments={[
-          { value: "Medical", label: t(S.medical) },
-          { value: "NonMedical", label: t(S.nonMedical) },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
+      {/*
+        THE CATEGORY SWITCH AND THE ONE WRITE, on one row.
+
+        Recording a movement is a nine-field form and it sat permanently open BETWEEN the stock table and the
+        ledger — so the two things this screen exists to show, a balance and the movements that produce it,
+        were separated by the form that produces them. Reading the ledger meant scrolling past a form nobody
+        had asked for; and on a screen where both reads were failing, the form was the only thing on it that
+        looked healthy.
+      */}
+      <div className="branch-toolbar">
+        <SegmentedControl<ItemCategory>
+          aria-label={t(S.title)}
+          segments={[
+            { value: "Medical", label: t(S.medical) },
+            { value: "NonMedical", label: t(S.nonMedical) },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+        <Button variant="primary" onClick={() => setRecording(true)}>{t(S.record)}</Button>
+      </div>
 
       {medical && <InlineAlert tone="info">{t(S.quarantineHelp)}</InlineAlert>}
 
@@ -226,15 +245,6 @@ export function BranchInventory() {
           </Card>
         )}
       </AsyncSection>
-
-      <RecordMovement
-        lang={lang}
-        stock={stock.data?.stock ?? []}
-        onPosted={() => {
-          stock.reload();
-          movements.reload();
-        }}
-      />
 
       <h2>{t(S.ledger)}</h2>
       <AsyncSection state={movements} isEmpty={(d) => d.movements.length === 0} emptyLabel={S.noMovements}>
@@ -259,17 +269,41 @@ export function BranchInventory() {
           </Card>
         )}
       </AsyncSection>
+      {recording && (
+        <RecordMovement
+          lang={lang}
+          stock={stock.data?.stock ?? []}
+          onClose={() => setRecording(false)}
+          onPosted={() => {
+            stock.reload();
+            movements.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
 
+/**
+ * The one write on this screen, in a dialog.
+ *
+ * <p>Rendered only while open, which matters more here than it looks: the form holds a chosen item, a
+ * movement kind and a quantity, and those are a claim about a moment. A quantity left over from a dialog
+ * closed twenty minutes ago, against stock that has moved since, is exactly the kind of stale write an
+ * append-only ledger cannot take back.</p>
+ *
+ * <p>It stays a dialog rather than a route because it is short and it belongs to the table behind it: the
+ * item list it offers IS the stock on screen.</p>
+ */
 function RecordMovement({
   lang,
   stock,
+  onClose,
   onPosted,
 }: {
   lang: "en" | "ar";
   stock: StockLine[];
+  onClose: () => void;
   onPosted: () => void;
 }) {
   const t = useLoc();
@@ -313,9 +347,18 @@ function RecordMovement({
   };
 
   return (
-    <Card>
-      <h2>{t(S.record)}</h2>
-
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.record)}
+      description={t(S.recordDescription)}
+      footer={
+        <>
+          <Button onClick={submit} disabled={write.busy}>{t(S.post)}</Button>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+        </>
+      }
+    >
       <ComboboxField
         label={t(S.item)}
         // The empty option is gone: `placeholder` is how Select says "nothing chosen", and an em-dash in the
@@ -357,17 +400,14 @@ function RecordMovement({
 
       {validation && <InlineAlert tone="warn">{validation}</InlineAlert>}
       {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+      {/* The dialog stays OPEN on success. A storekeeper booking in a delivery records several lines in a
+          row, and closing after each one would make them reopen it and re-choose an item they are still
+          holding. The tables behind have already reloaded. */}
       {outcome && (
         <InlineAlert tone="ok">
           <span role="status" aria-live="polite">{outcome}</span>
         </InlineAlert>
       )}
-
-      <div className="row-actions">
-        <Button onClick={submit} disabled={write.busy}>
-          {t(S.post)}
-        </Button>
-      </div>
-    </Card>
+    </Modal>
   );
 }

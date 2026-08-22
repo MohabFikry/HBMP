@@ -659,6 +659,44 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
+  # --- inventory-service (25.5/25.6): clinic stock on an append-only movement ledger. ---
+  #
+  # IT WAS ROUTED AND NEVER DEPLOYED. Kong has forwarded /api/v1/inventory to `inventory-service:8080` since
+  # 25.5, the schema is migrated, the service builds and its 68 tests pass — and there was no container and no
+  # Dockerfile, so every request from the Inventory screen died at name resolution. The screen has never
+  # worked in a real deployment, and it said "the service couldn't complete this request", which reads as a
+  # transient fault rather than as an upstream that does not exist.
+  #
+  # The route-coverage gate did not catch it because it asks the opposite question: does every resource this
+  # platform SERVES have a Kong route. Nothing asked whether every host Kong FORWARDS TO is something that
+  # runs. `check-kong-upstreams.py` now does.
+  inventory-service:
+    build: { context: ../.., dockerfile: services/inventory/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Inventory: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
+      Auth__Authority: "http://identity-service:8080"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Auth__ProtectedScopeRequiresMfa: "false"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
+      # Branch reach comes from admin-service, and the medicines check that keeps drugs out of the consumables
+      # catalogue comes from masterdata-service. Both have in-code defaults naming these same hosts; they are
+      # written out because a silent default is not a deployment decision.
+      Admin__BaseUrl: "http://admin-service:8080"
+      MasterData__BaseUrl: "http://masterdata-service:8080"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["127.0.0.1:8109:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      identity-service: { condition: service_started }
+      admin-service: { condition: service_started }
+      masterdata-service: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
   # --- notification-service (8.1): event-driven bilingual fan-out (in-app + email live). ---
   notification-service:
     build: { context: ../.., dockerfile: services/notification/Dockerfile }

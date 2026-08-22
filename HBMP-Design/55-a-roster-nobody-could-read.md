@@ -307,6 +307,35 @@ carries a Clinic column precisely for that state. Filtering narrows it; clearing
 
 ---
 
+## 4.4 A service that was routed and never deployed
+
+The Inventory screen showed *"the service couldn't complete this request"* on both of its reads.
+
+`inventory-service` has been routed from Kong since 25.5. Its schema is migrated, the service builds, its 68
+tests pass — and there was **no compose service and no Dockerfile**. So `/api/v1/inventory` resolved to a
+hostname that does not exist on the network, every request died at name resolution, and the SPA reported the
+wording of a transient fault for an upstream that had never been deployed at all. The screen has never worked
+in a real deployment.
+
+**A route to nowhere is worse than a missing route.** A missing one 404s at the edge, which reads as "not
+built yet". A route to a host nobody runs looks exactly like an outage of something that exists, so the first
+thing anyone does is go looking for the outage.
+
+`check-kong-route-coverage.py` did not catch it because it asks the opposite direction — does every resource
+this platform *serves* have a route. Nothing asked whether every host Kong *forwards to* is deployed.
+`check-kong-upstreams.py` now does, with a C# twin (`KongUpstreamsAreDeployedTests`) so the rule is nameable
+in the registry and runs in the ordinary test suite as well as the lint lane. Verified by removing the
+service from compose and watching the gate fail.
+
+While there: **Record a movement** is now a button and a dialog. A nine-field form sat permanently open
+*between* the stock table and the ledger — so the two things the screen exists to show, a balance and the
+movements that produce it, were separated by the form that produces them. Reading the ledger meant scrolling
+past a form nobody had asked for; and on a screen where both reads were failing, the form was the only thing
+on it that looked healthy. The dialog stays open after a successful post, because a storekeeper booking in a
+delivery records several lines in a row.
+
+---
+
 ## 5. Both roles, one screen
 
 A branch coordinator and a clinics manager hold **exactly the same permission set** (design 42 §1) and differ
@@ -333,6 +362,7 @@ A control that appears because somebody has a choice to make, never because they
 | `INV-A-VALUE-THIS-SERVICE-PRINTS-IS-A-VALUE-IT-READS` | a time crosses emr's wire as `HH:mm` in both directions |
 | `INV-A-WORKING-DAY-CAN-ALWAYS-BE-ADDED-WHERE-THE-CLINIC-RUNS` | a new rule inherits the clinic's service point from any rule at that clinic |
 | `INV-A-CALLER-WHO-RUNS-SEVERAL-CLINICS-CAN-NAME-ONE` | the switcher retries a failed resolve; booking asks for the clinic when no filter is set |
+| `INV-A-ROUTED-SERVICE-IS-A-RUNNING-SERVICE` | every host the gateway forwards to is a deployed compose service |
 
 ---
 
