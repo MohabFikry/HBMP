@@ -318,6 +318,22 @@ export interface PlanWrite {
   category: string;
 }
 
+/**
+ * The result of a renewal: the successor contract, and what it could and could not carry.
+ *
+ * `unmapped` is a list of SENTENCES, not ids — the server names each member it could not place and why
+ * (ADR-0020: members map by plan LABEL, and anything unmapped is reported rather than dropped onto the
+ * default plan, because that would silently change what somebody is entitled to).
+ */
+export const zRenewalResult = z.object({
+  policyId: z.string(),
+  policyNo: z.string(),
+  previousPolicyId: z.string().nullable().optional(),
+  membersCarried: z.number(),
+  unmapped: z.array(z.string()),
+}).passthrough();
+export type RenewalResult = z.infer<typeof zRenewalResult>;
+
 /** What the contract form sends. `policyNo` is on create only. */
 export interface PolicyWrite {
   effectiveFrom: string;
@@ -1168,6 +1184,8 @@ export interface PolicyApi {
   /** Suspend / resume / expire. NOT refused for having members — the result reports how many it reached. */
   changePolicyStatus(policyId: string, move: "suspend" | "resume" | "expire", reason: string, idempotencyKey: string): Promise<PolicyStatusResult>;
   policyHistory(policyId: string): Promise<PolicyHistoryPage>;
+  /** Issue a successor contract linked to this one. The only way back from an ended policy. */
+  renewPolicy(policyId: string, body: { policyNo: string; effectiveFrom: string; effectiveTo?: string | null; carryMembersForward: boolean }, idempotencyKey: string): Promise<RenewalResult>;
   plans(): Promise<PlanView[]>;
   benefitCategories(): Promise<BenefitCategoryView[]>;
   planVersions(planId: string): Promise<PlanVersionView[]>;
@@ -1316,6 +1334,7 @@ export function createHttpPolicyApi(): PolicyApi {
     changePolicyStatus: (id, move, reason, key) =>
       parsed(zPolicyStatusResult, postRaw(`/policies/${id}/${move}`, { reason }, key)),
     policyHistory: (id) => parsed(zPolicyHistoryPage, getRaw(`/policies/${id}/history`)),
+    renewPolicy: (id, body, key) => parsed(zRenewalResult, postRaw(`/policies/${id}/renew`, body, key)),
     plans: () => parsed(z.array(zPlanView), getRaw("/plans")),
     benefitCategories: () => parsed(z.array(zBenefitCategoryView), getRaw("/benefit-categories")),
     planVersions: (planId) => parsed(z.array(zPlanVersionView), getRaw(`/plans/${planId}/versions`)),

@@ -59,7 +59,9 @@ const S = {
 } satisfies Record<string, Localized>;
 
 // 18.D2 (U7): see useFormat — Africa/Cairo + the app locale, never the browser's.
-const VALID_TYPES = ["Hospital", "Clinic", "Lab", "Pharmacy", "Imaging"] as const;
+// "Radiology" is the canonical spelling since 29.1; "Imaging" stays until the deferred contract migration
+// retires it, so a provider onboarded before the switch still matches. Order matters only for the picker.
+const VALID_TYPES = ["Hospital", "Clinic", "Lab", "Pharmacy", "Radiology", "Imaging"] as const;
 
 function directoryColumns(t: (l: Localized) => string): Column<ProviderSummary>[] {
   return [

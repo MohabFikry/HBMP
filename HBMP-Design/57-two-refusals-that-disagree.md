@@ -226,10 +226,22 @@ five-year-old policy reads as a fault unless the screen says otherwise.
 
 ## 7. Deliberately not done
 
-1. **The renewal flow has no screen.** `POST /policies/{id}/renew` has existed since 19.2, carries members
-   forward by plan label and reports what it could not map — and nothing in the portal calls it. §2.4 tells an
-   operator that renewal is the way back from an ended contract, and then leaves them to find it. This is the
-   largest gap the phase opens and the obvious next piece.
+1. ~~**The renewal flow has no screen.**~~ **Closed in the same phase.** `POST /policies/{id}/renew` now has
+   one, because §2.4 tells an operator that renewal is the way back from an ended contract and leaving them to
+   find it was not a defensible place to stop. Two details of the screen are load-bearing:
+
+   - **It is a two-stage modal.** The endpoint does two things at once — creates a policy, and optionally
+     moves people onto it — and the second half can partially fail. Members map by plan *label* (ADR-0020),
+     and anybody the new policy has no matching plan for is reported by name rather than dropped onto a
+     default, because a default would silently change what they are entitled to. A modal that closed on
+     success would show "Renewal issued" and throw that report away, so the write is stage one and the report
+     is stage two, dismissed deliberately.
+   - **Carry-forward defaults OFF.** The successor has no plans at the moment it is created — they are
+     attached afterwards — so a carry-forward on a fresh renewal maps nobody and reports everybody. Defaulting
+     it on would make the common path produce a wall of "could not be mapped" that is not a fault. Switching
+     it on says so.
+
+   Renewal is offered on **every** contract, ended ones included, and is the only action on an ended one.
 2. **Plan versions are not in the plan's history.** `plan_history` records the plan row; the version timeline
    is its own thing on the same screen. Merging them into one narrative would be better and is a projection,
    not a column.
@@ -242,3 +254,45 @@ five-year-old policy reads as a fault unless the screen says otherwise.
    history twin behind them. If a claim ever has to be judged against "the cap as it stood on the service
    date", they become versioned rows — the same shape `plan_version` already has, and for the same reason.
    Nothing adjudicates against them today.
+
+---
+
+## 8. Addendum — the migrate step that was skipped
+
+*Found while closing §7.1, in a different service, and it belongs here because it is the same class of fault
+this phase spent its whole length avoiding.*
+
+The Providers Directory answered **500 on every load**, with nothing on screen but *"The service couldn't
+complete this request."* The cause:
+
+```
+System.InvalidOperationException: Cannot convert string value 'Radiology'
+  from the database to any value in the mapped 'ProviderType' enum.
+```
+
+Design 45 §1 runs the `Imaging` → `Radiology` rename as **expand → migrate → contract**. Migration `0011`
+expanded both CHECKs to accept either spelling. `0012` backfilled every existing row to the new one. The
+deferred `0013` will narrow the CHECKs once nothing writes the old spelling. All three are written, careful,
+and heavily commented.
+
+**The migrate step is the code, and it was never done.** `ProviderType` had no `Radiology` member, so from the
+moment `0012` ran EF could not materialise a single provider row. Every read of `provider.provider` — the
+directory, contracts, locations, the routing lookups — answered 500 together. `ServiceType` had the identical
+hole and had simply not been hit yet: no contract line in the data carried the new spelling, and the first
+radiology one would have taken pricing down the same way.
+
+Three things worth keeping:
+
+1. **A backfill without its enum is a schema migration that deletes a table.** Not literally — but every read
+   fails, which is operationally the same thing, and it fails *later*, when the deploy looks green.
+2. **The read shape saved the SPA and the write shape did not.** `zProviderSummary.providerType` is
+   `z.string()`, so the browser would have rendered whatever arrived. `zCreateProviderInput.providerType` is
+   an enum, and it was narrow — so even with the server fixed, the Network Team could not *onboard* a
+   radiology centre. The one type the database had been storing since `0012` was the one type nobody could
+   pick. `zInvestigationOrderType` had been widened correctly, with the reasoning written out; the provider
+   contract beside it had not.
+3. **The guard reads the migration, not a list.** `EnumsMatchTheDatabaseTests` parses the last CHECK written
+   for each column and asserts the enum is a superset. A test that spelled the expected members out by hand
+   would be a third copy of a vocabulary whose two existing copies had just disagreed. Only the enum must be
+   the superset — a column may legitimately be narrower during the contract phase, which is exactly what
+   `0013` will make it.

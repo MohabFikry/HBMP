@@ -10,6 +10,9 @@ export const zProviderSummary = z.object({
   id: zId,
   code: z.string(),
   legalName: z.string(),
+  // A plain string, deliberately: the read side must render whatever the row holds, including a spelling
+  // added after this bundle was built. Narrowing it to an enum is how a widened database becomes a screen
+  // full of schema errors.
   providerType: z.string(),
   status: zStatus,
   onboardingState: z.string(),
@@ -39,7 +42,11 @@ export type ProviderContract = z.infer<typeof zProviderContract>;
 export const zCreateProviderInput = z.object({
   code: z.string().min(1),
   legalName: z.string().min(1),
-  providerType: z.enum(["Hospital", "Clinic", "Lab", "Pharmacy", "Imaging"]),
+  // 29.1 (design 45 §1) — "Radiology" is the canonical spelling and "Imaging" is retained for the duration
+  // of the expand/contract window, exactly as `zInvestigationOrderType` does. Without Radiology here the
+  // Network Team could not onboard a radiology centre at all: the portal's own picker is built from this
+  // list, so the type the database has been storing since migration 0012 was the one type nobody could pick.
+  providerType: z.enum(["Hospital", "Clinic", "Lab", "Pharmacy", "Radiology", "Imaging"]),
 });
 export type CreateProviderInput = z.infer<typeof zCreateProviderInput>;
 

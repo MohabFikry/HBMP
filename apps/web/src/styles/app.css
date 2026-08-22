@@ -7064,3 +7064,19 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp2);
   font-variant-numeric: tabular-nums;
 }
+
+/* The members a renewal could not place. A list, not a paragraph: each line names one person and why, and
+   somebody works down it. */
+.pol-unmapped {
+  list-style: none;
+  margin: var(--sp3) 0 0;
+  padding: var(--sp3);
+  display: grid;
+  gap: var(--sp2);
+  max-block-size: var(--scroll-picker);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  font-size: 0.9rem;
+}

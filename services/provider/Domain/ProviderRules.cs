@@ -10,7 +10,8 @@ public static class ProviderTypeLabels
         ProviderType.Clinic => "Doctor / Clinic",
         ProviderType.Lab => "Laboratory",
         ProviderType.Pharmacy => "Pharmacy",
-        ProviderType.Imaging => "Imaging Center",
+        // Both spellings label the same thing to a human; the string is the display, not the key.
+        ProviderType.Imaging or ProviderType.Radiology => "Imaging Center",
         _ => t.ToString(),
     };
 }

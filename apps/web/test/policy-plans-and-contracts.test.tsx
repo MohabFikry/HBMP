@@ -120,6 +120,7 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     updatePolicy: reject,
     changePolicyStatus: reject,
     policyHistory: () => Promise.resolve({ policyId: "pol1", entries: [] }),
+    renewPolicy: reject,
     // Selecting a policy force-mounts its tabs; the first one reads the plans under it.
     policyPlans: () => Promise.resolve([]),
     policyGroups: () => Promise.resolve([]),
@@ -147,8 +148,10 @@ const selectRow = async (label: string) => {
 };
 
 /** A modal has a Cancel in its footer AND a close control the design system labels the same way. */
-const dialogButton = async (name: string) =>
-  within(await screen.findByRole("dialog")).getAllByRole("button", { name }).at(-1)!;
+const dialogButton = async (name: string) => {
+  const found = within(await screen.findByRole("dialog")).getAllByRole("button", { name });
+  return found[found.length - 1]!;
+};
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 
@@ -337,5 +340,87 @@ describe("the contract record", () => {
     await selectRow("POL-2026-0001");
     expect(await screen.findByRole("button", { name: "Change history" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Suspend this policy" })).not.toBeInTheDocument();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+// RENEWAL — design 57 §7.1, the gap that phase deliberately left open
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("renewing a contract", () => {
+  it("is offered on an ended policy, where it is the only move left", async () => {
+    renderScreen(<PolicyList api={fakeApi({
+      policy: () => Promise.resolve(policyDetail(policyView({ status: "Expired", windowState: "Ended" }))),
+    } as Partial<PolicyApi>)} />, "beneficiary_mgmt");
+    await selectRow("POL-2026-0001");
+
+    expect(await screen.findByRole("button", { name: "Renew this policy" })).toBeInTheDocument();
+    // An ended contract cannot be suspended, resumed or edited — renewal is the way back, and the pane says so.
+    expect(screen.queryByRole("button", { name: "Suspend this policy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit this policy" })).not.toBeInTheDocument();
+    expect(screen.getByText(/issues a NEW contract linked to this one/)).toBeInTheDocument();
+  });
+
+  it("sends the new number, the window and the carry-forward choice", async () => {
+    const renewPolicy = vi.fn().mockResolvedValue({
+      policyId: "pol2", policyNo: "POL-2027-0001", previousPolicyId: "pol1",
+      membersCarried: 0, unmapped: [],
+    });
+    renderScreen(<PolicyList api={fakeApi({ renewPolicy } as Partial<PolicyApi>)} />, "beneficiary_mgmt");
+    await selectRow("POL-2026-0001");
+    await userEvent.click(await screen.findByRole("button", { name: "Renew this policy" }));
+
+    await userEvent.type(await screen.findByLabelText(/New policy number/), "POL-2027-0001");
+    await userEvent.type(screen.getByLabelText(/In force from/), "2027-01-01");
+    await userEvent.click(screen.getByRole("button", { name: /Issue the renewal/ }));
+
+    await waitFor(() => expect(renewPolicy).toHaveBeenCalledWith(
+      "pol1",
+      { policyNo: "POL-2027-0001", effectiveFrom: "2027-01-01", effectiveTo: null, carryMembersForward: false },
+      expect.any(String)));
+  });
+
+  /**
+   * The report is the reason this modal has two stages. A renewal that moved 300 of 312 people is a success
+   * with twelve follow-ups, and closing on success would throw the twelve away.
+   */
+  it("keeps the dialog open and names every member it could not carry", async () => {
+    const renewPolicy = vi.fn().mockResolvedValue({
+      policyId: "pol2", policyNo: "POL-2027-0001", previousPolicyId: "pol1",
+      membersCarried: 300,
+      unmapped: [
+        "MEM-0041 (plan 'Platinum' has no counterpart on the new policy)",
+        "MEM-0042 (plan 'Platinum' has no counterpart on the new policy)",
+      ],
+    });
+    renderScreen(<PolicyList api={fakeApi({ renewPolicy } as Partial<PolicyApi>)} />, "beneficiary_mgmt");
+    await selectRow("POL-2026-0001");
+    await userEvent.click(await screen.findByRole("button", { name: "Renew this policy" }));
+
+    await userEvent.type(await screen.findByLabelText(/New policy number/), "POL-2027-0001");
+    await userEvent.type(screen.getByLabelText(/In force from/), "2027-01-01");
+    await userEvent.click(screen.getByRole("button", { name: /Issue the renewal/ }));
+
+    // Scoped to the dialog: the screen's aria-live region announces the same sentence to a screen reader.
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(await dialog.findByText(/300 members carried forward/)).toBeInTheDocument();
+    expect(dialog.getByText(/2 members could not be mapped/)).toBeInTheDocument();
+    expect(dialog.getByText(/MEM-0041/)).toBeInTheDocument();
+    expect(dialog.getByText(/MEM-0042/)).toBeInTheDocument();
+    // Still open — the operator dismisses the report deliberately.
+    expect(dialog.getByRole("button", { name: "Open the new policy" })).toBeInTheDocument();
+  });
+
+  /** The successor has no plans at the moment it is created, so carrying forward maps nobody. Defaulting the
+   *  box ON would make the common path produce a wall of "could not be mapped" that is not a fault. */
+  it("leaves carry-forward off, and warns when it is switched on", async () => {
+    renderScreen(<PolicyList api={fakeApi()} />, "beneficiary_mgmt");
+    await selectRow("POL-2026-0001");
+    await userEvent.click(await screen.findByRole("button", { name: "Renew this policy" }));
+
+    const box = await screen.findByRole("checkbox", { name: /Carry the members forward/ });
+    expect(box).not.toBeChecked();
+    await userEvent.click(box);
+    expect(await screen.findByText(/no plans yet, so nothing can be mapped/)).toBeInTheDocument();
   });
 });

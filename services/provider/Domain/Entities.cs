@@ -7,7 +7,22 @@ namespace Mersal.Provider.Domain;
 
 /// <summary>Canonical persisted provider type (22 §5.1). Business labels (e.g. Doctor, ImagingCenter)
 /// are a presentation mapping over this enum — see <see cref="ProviderTypeLabels"/>.</summary>
-public enum ProviderType { Hospital, Clinic, Lab, Pharmacy, Imaging }
+/// <remarks>
+/// <para><b><c>Radiology</c> is the successor spelling of <c>Imaging</c>, and both are members on purpose.</b>
+/// Design 45 §1 runs this as expand → backfill → contract: migration 0011 widened the CHECK to accept both,
+/// 0012 rewrote every existing row to <c>Radiology</c>, and the deferred 0013 narrows the CHECK back down
+/// once nothing writes the old spelling.</para>
+///
+/// <para>The MIGRATE step — this enum — was skipped, and the consequence was total: the moment 0012 ran,
+/// EF could not materialise a single provider row (<c>Cannot convert string value 'Radiology' … to any value
+/// in the mapped 'ProviderType' enum</c>), so every read of <c>provider.provider</c> answered 500. The
+/// Providers Directory, contracts, locations and the routing lookups all went down together, and the only
+/// visible symptom was a generic "the service couldn't complete this request".</para>
+///
+/// <para><c>Imaging</c> STAYS until 0013 is applied. Removing it now would break the reverse direction — any
+/// row or payload still carrying the old spelling — which is the whole reason the contract step is deferred.</para>
+/// </remarks>
+public enum ProviderType { Hospital, Clinic, Lab, Pharmacy, Imaging, Radiology }
 
 /// <summary>Canonical provider lifecycle status (22 §5.1). Only <see cref="Active"/> is routable.</summary>
 public enum ProviderStatus { Active, Suspended, Terminated }
@@ -18,7 +33,13 @@ public enum OnboardingState { Draft, DocumentsCollected, Credentialed, Contracte
 
 public enum ContractStatus { Draft, Active, Expired, Terminated }
 
-public enum ServiceType { Lab, Imaging, Consult, Procedure }
+/// <summary>What a contract line is priced for. <c>Radiology</c> is the successor spelling of <c>Imaging</c>
+/// and both are members for the duration of the expand/contract window — see <see cref="ProviderType"/>.
+///
+/// <para>This one had not broken yet only because no contract line in the dev data carries the new spelling.
+/// 0012 rewrites <c>contract_service_line.service_type</c> in the same statement it rewrites the provider, so
+/// the first radiology contract line would have taken pricing down the same way.</para></summary>
+public enum ServiceType { Lab, Imaging, Consult, Procedure, Radiology }
 
 public enum CodeSystem { CPT, LOINC, LOCAL }
 

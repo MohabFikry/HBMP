@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiList, Modal,
+  Button, Card, CheckboxField, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField,
+  KpiList, Modal,
   Pagination, StatusChip, Tabs, TextareaField, useTableQuery,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -10,6 +11,7 @@ import type {
   PolicyAdminView,
   PolicyBook,
   PolicyDetail,
+  RenewalResult,
   MemberGroupView,
   PolicyApi,
   PolicyPlanView,
@@ -143,6 +145,35 @@ const S = {
   policyHistoryTitle: { en: "Change history — {0}", ar: "سجل التغييرات — {0}" },
   lastChanged: { en: "Last changed", ar: "آخر تعديل" },
   by: { en: "by {0}", ar: "بواسطة {0}" },
+  // ── renewal (design 57 §7.1) ───────────────────────────────────────────────────────────────────────────
+  renew: { en: "Renew this policy", ar: "تجديد هذه الوثيقة" },
+  renewTitle: { en: "Renew {0}", ar: "تجديد {0}" },
+  renewIntro: {
+    en: "A renewal issues a NEW contract linked to this one. This policy is not changed — it keeps its own window, its own members and its own history.",
+    ar: "التجديد يُصدر عقدًا جديدًا مرتبطًا بهذا العقد. لا تتغيّر هذه الوثيقة — فهي تحتفظ بمدتها وأعضائها وسجلها.",
+  },
+  newPolicyNo: { en: "New policy number", ar: "رقم الوثيقة الجديدة" },
+  carryForward: { en: "Carry the members forward", ar: "نقل الأعضاء إلى الوثيقة الجديدة" },
+  carryForwardHint: {
+    en: "Members map by plan label — a member on \"Standard\" lands on the new policy's \"Standard\". Anybody the new policy has no matching plan for is reported by name, never moved onto a default.",
+    ar: "يُنقل الأعضاء حسب تسمية الخطة — فمن كان على «Standard» ينتقل إلى «Standard» في الوثيقة الجديدة. ومن لا تجد له الوثيقة الجديدة خطة مطابقة يُذكر بالاسم ولا يُنقل إلى خطة افتراضية.",
+  },
+  carryForwardNeedsPlans: {
+    en: "The new policy has no plans yet, so nothing can be mapped onto it. Issue the renewal, attach its plans, then move the members.",
+    ar: "لا توجد خطط بعد في الوثيقة الجديدة، لذا لا يمكن مطابقة أحد عليها. أصدر التجديد وأضف خططه ثم انقل الأعضاء.",
+  },
+  doRenew: { en: "Issue the renewal", ar: "إصدار التجديد" },
+  renewed: { en: "Renewal issued.", ar: "تم إصدار التجديد." },
+  renewedCarried: {
+    en: "Renewal {0} issued. {1} members carried forward.",
+    ar: "تم إصدار التجديد {0}. تم نقل {1} عضوًا.",
+  },
+  renewedUnmapped: {
+    en: "{0} members could not be mapped onto the new policy and were NOT moved:",
+    ar: "{0} عضوًا تعذّرت مطابقتهم على الوثيقة الجديدة ولم يُنقلوا:",
+  },
+  openRenewal: { en: "Open the new policy", ar: "فتح الوثيقة الجديدة" },
+  done: { en: "Done", ar: "تم" },
   select: { en: "Select a policy to see its plans, groups, utilization and notes.", ar: "اختر وثيقة لعرض خططها ومجموعاتها واستخدامها وملاحظاتها." },
   tabPlans: { en: "Plans", ar: "الخطط" },
   tabGroups: { en: "Groups", ar: "المجموعات" },
@@ -243,6 +274,7 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [form, setForm] = useState<{ mode: "create" } | { mode: "edit"; policy: PolicyAdminView } | null>(null);
   const [move, setMove] = useState<"suspend" | "resume" | "expire" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [renewing, setRenewing] = useState(false);
   const [announce, setAnnounce] = useState("");
   const { session } = useAuth();
   const mayWrite = mayAdministerMembership(session?.role ?? undefined);
@@ -463,6 +495,7 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onEdit={() => detail && setForm({ mode: "edit", policy: detail.policy })}
           onMove={setMove}
           onHistory={() => setHistoryOpen(true)}
+          onRenew={() => setRenewing(true)}
         />
       )}
 
@@ -528,6 +561,21 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
         </ReasonDialog>
       )}
 
+      {selected && renewing && (
+        <RenewPolicyModal
+          api={api}
+          policyId={selected.policyId}
+          policyNo={selected.policyNo}
+          onClose={() => setRenewing(false)}
+          onOpenRenewal={async (id) => {
+            setRenewing(false);
+            await run(1, pageSize, sort, applied);
+            setDetail(await api.policy(id).catch(() => null));
+          }}
+          onAnnounce={setAnnounce}
+        />
+      )}
+
       {selected && historyOpen && (
         <HistoryModal
           title={fillLocalized(S.policyHistoryTitle, selected.policyNo)}
@@ -570,7 +618,7 @@ const WINDOW_KIND: Record<string, "ok" | "info" | "warn" | "neu"> = {
 // ── The contract's own record ───────────────────────────────────────────────────────────────────────────
 
 function PolicyDetailPane({
-  policy, book, policyNo, mayWrite, onEdit, onMove, onHistory,
+  policy, book, policyNo, mayWrite, onEdit, onMove, onHistory, onRenew,
 }: {
   policy: PolicyAdminView | null;
   book: PolicyBook | null;
@@ -579,6 +627,7 @@ function PolicyDetailPane({
   onEdit: () => void;
   onMove: (m: "suspend" | "resume" | "expire") => void;
   onHistory: () => void;
+  onRenew: () => void;
 }) {
   const t = useLoc();
   const fmt = useFormat();
@@ -621,6 +670,14 @@ function PolicyDetailPane({
         >
           {/* Ending is separated from the suspend toggle: it is the one move on this record that cannot be
               taken back, and putting it under the same control as a reversible one invites the wrong click. */}
+          {/* Renewal is offered on EVERY contract, ended ones included — an ended policy is precisely where
+              it is the only move left, and 57 §2.4 tells the operator so. It is the one action here that
+              creates a record rather than changing this one, so it leads. */}
+          {mayWrite && (
+            <Button variant="ghost" aria-label={t(S.renew)} title={t(S.renew)} onClick={onRenew}>
+              <Icon name="copy" />
+            </Button>
+          )}
           {mayWrite && policy && !ended && (
             <Button variant="ghost" aria-label={t(S.expirePolicy)} title={t(S.expirePolicy)} onClick={() => onMove("expire")}>
               <Icon name="bin" />
@@ -633,6 +690,9 @@ function PolicyDetailPane({
           agreement gets, because it is the same shape of fact. */}
       {policy && active && policy.windowState === "Ended" && (
         <InlineAlert tone="warn">{t(S.activeButEnded)}</InlineAlert>
+      )}
+      {policy && ended && (
+        <InlineAlert tone="info">{t(S.renewIntro)}</InlineAlert>
       )}
       {policy && policy.status !== "Active" && policy.statusReason && (
         <InlineAlert tone="info">
@@ -681,6 +741,129 @@ function PolicyDetailPane({
 
 function statusKind(status: string): "ok" | "warn" | "neu" {
   return status === "Active" ? "ok" : status === "Suspended" ? "warn" : "neu";
+}
+
+// ── Renewal ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Issuing a successor contract.
+ *
+ * <b>Why this is a two-stage modal.</b> `POST /policies/{id}/renew` does two things at once: it creates a
+ * policy, and it optionally moves people onto it. The second half can partially fail — members map by plan
+ * LABEL (ADR-0020), and anybody the new policy has no matching plan for is REPORTED rather than dropped onto
+ * a default, because a default would silently change what they are entitled to.
+ *
+ * A modal that closed on success would show "Renewal issued" and throw that report away. So the write is the
+ * first stage and the report is the second, and the operator dismisses it deliberately.
+ *
+ * <b>The carry-forward default is OFF.</b> The successor has no plans at the moment it is created — they are
+ * attached afterwards — so a carry-forward on a fresh renewal maps nobody and reports everybody. Defaulting it
+ * on would make the common path produce a wall of "could not be mapped" that is not a fault.
+ */
+function RenewPolicyModal({
+  api, policyId, policyNo, onClose, onOpenRenewal, onAnnounce,
+}: {
+  api: PolicyApi;
+  policyId: string;
+  policyNo: string;
+  onClose: () => void;
+  onOpenRenewal: (policyId: string) => void | Promise<void>;
+  onAnnounce: (message: string) => void;
+}) {
+  const t = useLoc();
+  const [key, rotate] = useIdempotencyKey();
+  const [no, setNo] = useState("");
+  const [from, setFrom] = useState("");
+  const [until, setUntil] = useState("");
+  const [carry, setCarry] = useState(false);
+  const [problem, setProblem] = useState<Localized | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RenewalResult | null>(null);
+
+  const submit = async () => {
+    if (!no.trim()) { setProblem(S.needPolicyNo); return; }
+    if (!from) { setProblem(S.needForwardWindow); return; }
+    if (until && until < from) { setProblem(S.needForwardWindow); return; }
+
+    setBusy(true);
+    setProblem(null);
+    try {
+      const r = await api.renewPolicy(
+        policyId,
+        { policyNo: no.trim(), effectiveFrom: from, effectiveTo: until || null, carryMembersForward: carry },
+        key,
+      );
+      setResult(r);
+      onAnnounce(t(fillLocalized(S.renewedCarried, r.policyNo, String(r.membersCarried))));
+    } catch (e) {
+      rotate();
+      setProblem(writeErrorMessage(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={t(fillLocalized(S.renewTitle, policyNo))}
+      closeLabel={t(S.cancel)}
+      wide={result !== null}
+      footer={result
+        ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>{t(S.done)}</Button>
+            <Button variant="primary" onClick={() => void onOpenRenewal(result.policyId)}>
+              {t(S.openRenewal)}
+            </Button>
+          </>
+        )
+        : (
+          <>
+            <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+            <Button variant="primary" onClick={() => void submit()} loading={busy}>{t(S.doRenew)}</Button>
+          </>
+        )}
+    >
+      {result ? (
+        <>
+          <InlineAlert tone="ok">
+            {t(fillLocalized(S.renewedCarried, result.policyNo, String(result.membersCarried)))}
+          </InlineAlert>
+          {/* The report is the point. A renewal that moved 300 of 312 people is a success with twelve
+              follow-ups, and the twelve are named so somebody can act on them. */}
+          {result.unmapped.length > 0 && (
+            <>
+              <InlineAlert tone="warn">
+                {t(fillLocalized(S.renewedUnmapped, String(result.unmapped.length)))}
+              </InlineAlert>
+              <ul className="pol-unmapped mrs-scroll">
+                {result.unmapped.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <InlineAlert tone="info">{t(S.renewIntro)}</InlineAlert>
+          {problem && <InlineAlert tone="bad">{t(problem)}</InlineAlert>}
+          <div className="pay-form-grid">
+            <InputField label={t(S.newPolicyNo)} value={no} onChange={(e) => setNo(e.currentTarget.value)} required />
+            <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} required />
+            <InputField label={t(S.until)} type="date" value={until} onChange={(e) => setUntil(e.currentTarget.value)} help={t(S.untilHint)} />
+          </div>
+          <CheckboxField
+            label={t(S.carryForward)}
+            help={t(S.carryForwardHint)}
+            checked={carry}
+            onChange={(e) => setCarry(e.currentTarget.checked)}
+          />
+          {carry && <InlineAlert tone="warn">{t(S.carryForwardNeedsPlans)}</InlineAlert>}
+        </>
+      )}
+    </Modal>
+  );
 }
 
 // ── Issue / amend ───────────────────────────────────────────────────────────────────────────────────────
