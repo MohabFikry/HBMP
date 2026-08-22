@@ -36,6 +36,14 @@ interface FieldBase {
 }
 
 export interface InputFieldProps extends FieldBase, Omit<InputHTMLAttributes<HTMLInputElement>, "className"> {}
+export interface FileFieldProps
+  extends FieldBase,
+    Omit<InputHTMLAttributes<HTMLInputElement>, "className" | "type" | "value"> {}
+/** A checkbox's label sits BESIDE the box, so it does not take `hideLabel` — a checkbox with no visible
+ *  label is a box whose meaning lives somewhere else on the screen. */
+export interface CheckboxFieldProps
+  extends Omit<FieldBase, "hideLabel">,
+    Omit<InputHTMLAttributes<HTMLInputElement>, "className" | "type"> {}
 export interface TextareaFieldProps
   extends FieldBase,
     Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className"> {}
@@ -178,6 +186,92 @@ export function ComboboxField({
         // override it with the same text, which is noise in the a11y tree rather than belt and braces.
       />
     </Labelled>
+  );
+}
+
+/**
+ * A file input, wearing the house control.
+ *
+ * <p>It existed as CSS and as nothing else: `input[type="file"].mrs-control` has been styled since the QA
+ * pass that found a grey system button with a ~28px target sitting inside an otherwise themed form — but
+ * every screen that needed one hand-built `<div className="mrs-field">` + `<label className="mrs-label">`
+ * around it. That is the right markup in the wrong place, and the next screen to need one writes it
+ * slightly differently. The native control is kept rather than replaced with a custom picker: it brings
+ * keyboard operation, the OS dialog and screen-reader support that a div-and-a-hidden-input reimplements
+ * badly.</p>
+ */
+export function FileField({ label, help, error, className, style, id, hideLabel, ...rest }: FileFieldProps) {
+  const auto = useId();
+  const base = id ?? auto;
+  return (
+    <Labelled
+      label={label} help={help} error={error} base={base} className={className} style={style}
+      requiredMark={rest.required} hideLabel={hideLabel}
+    >
+      <input
+        id={base}
+        type="file"
+        className="mrs-control"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy(base, help, error)}
+        {...rest}
+      />
+    </Labelled>
+  );
+}
+
+/**
+ * A checkbox and its label, as one control.
+ *
+ * ============================================================================================================
+ * WHY THIS EXISTS
+ * ============================================================================================================
+ * `.mrs-checkbox` — 24px box, transparent outset to a 44px target — has been in the stylesheet since the QA
+ * pass, and five of the app's twenty-three checkboxes used it. The other eighteen were bare
+ * `<input type="checkbox">` wearing one of eight ad-hoc wrapper classes or none, so they rendered at the
+ * user agent's ~13px default. That fails WCAG 2.2 AA Target Size (Minimum) at 24px and this project's own
+ * 44px bar, and it failed them most visibly on the plan-version editor, where the checkbox IS the control
+ * that decides whether a benefit is covered at all.
+ *
+ * A style rule nobody applies is not a style. Shipping the component is what makes the sized form the
+ * default rather than the thing you have to remember.
+ *
+ * ============================================================================================================
+ * THE LABEL WRAPS THE BOX
+ * ============================================================================================================
+ * `<label>` around both, rather than `htmlFor` beside it: the whole row becomes the hit target, which is the
+ * behaviour people try first and the one that makes a 44px target actually reachable on a phone. The `id`
+ * still binds so a `help` or `error` can be described.
+ */
+export function CheckboxField({
+  label, help, error, className, style, id, requiredMark, ...rest
+}: CheckboxFieldProps) {
+  const auto = useId();
+  const base = id ?? auto;
+  return (
+    <div className={cx("mrs-field", "mrs-checkfield", className)} style={style}>
+      <label className="mrs-checkrow" htmlFor={base}>
+        <input
+          id={base}
+          type="checkbox"
+          className="mrs-checkbox"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy(base, help, error)}
+          {...rest}
+        />
+        <span>
+          {label}
+          {requiredMark && <span className="mrs-req" aria-hidden="true"> *</span>}
+        </span>
+      </label>
+      {help && <div className="mrs-help" id={`${base}-help`}>{help}</div>}
+      {error && (
+        <div className="mrs-error" id={`${base}-err`} role="alert">
+          <Icon name="cross" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
   );
 }
 

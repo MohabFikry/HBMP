@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, CheckboxField, DataTable, Icon, InlineAlert, InputField, ComboboxField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   AnalyticsDelta,
@@ -415,14 +415,11 @@ function FilterBar({
       {reference.failed && <InlineAlert tone="warn">{t(S.referenceFailed)}</InlineAlert>}
       <InlineAlert tone="info">{t(S.asOfHint)}</InlineAlert>
       <div className="pol-filteractions">
-        <label className="pol-check">
-          <input
-            type="checkbox"
-            checked={filters.compare === "1"}
-            onChange={(e) => onChange("compare", e.target.checked ? "1" : "")}
-          />
-          {t(S.compare)}
-        </label>
+        <CheckboxField
+          label={t(S.compare)}
+          checked={filters.compare === "1"}
+          onChange={(e) => onChange("compare", e.currentTarget.checked ? "1" : "")}
+        />
         <Button variant="ghost" onClick={onClear}>
           {t(S.clear)}
         </Button>

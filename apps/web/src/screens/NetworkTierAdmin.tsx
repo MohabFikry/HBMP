@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
+import { Button, Card, CheckboxField, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { NetworkTierView, PolicyApi, TierAssignmentView, TierProviderOption, TierResolutionView } from "../api/policyApi";
@@ -16,6 +16,7 @@ import { PageHeader, fillLocalized, useLoc, readErrorMessage } from "./_shared";
 import { ConfirmAction } from "./ConfirmAction";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { useEnumLabel } from "../i18n/enumLabels";
 
 /**
  * Phase 19.6 (19.1b) — network tier administration.
@@ -145,6 +146,7 @@ type AssignmentScope = (typeof ASSIGNMENT_SCOPES)[number]["value"];
 
 export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const { session } = useAuth();
   const mayWrite = mayAdministerTiers(session?.issuerRoles);
@@ -198,7 +200,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
               header: t(S.window),
               cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
             },
-            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} /> },
             {
               key: "act",
               header: t(S.actions),
@@ -213,7 +215,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
                   </Button>
                 ) : null,
             },
-  ], [t, fmt, mayWrite]);
+  ], [t, fmt, mayWrite, enumLabel]);
 
   /** The row the assignment and rename panels act on — resolved once rather than looked up in three places. */
   const selectedTier = useMemo(
@@ -257,7 +259,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
               key: "oon",
               header: t(S.oon),
               cell: (r) => <StatusChip kind={r.isOutOfNetwork ? "warn" : "ok"} label={r.isOutOfNetwork ? t(S.oon) : "—"} />, sortable: true, sortValue: (r) => Number(r.isOutOfNetwork) },
-            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} /> },
           ]}
         />
       </Card>
@@ -270,10 +272,11 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           <InputField label={t(S.nameEn)} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
           <InputField label={t(S.nameAr)} value={nameAr} onChange={(e) => setNameAr(e.target.value)} />
           <InputField label={t(S.rank)} value={rank} inputMode="numeric" onChange={(e) => setRank(e.target.value)} />
-          <label className="pol-check">
-            <input type="checkbox" checked={isOon} onChange={(e) => setIsOon(e.target.checked)} />
-            {t(S.oon)}
-          </label>
+          <CheckboxField
+            label={t(S.oon)}
+            checked={isOon}
+            onChange={(e) => setIsOon(e.currentTarget.checked)}
+          />
           <Button leadingIcon={<Icon name="plus" />}
             variant="primary"
             onClick={async () => {

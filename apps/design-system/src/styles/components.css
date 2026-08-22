@@ -7,6 +7,11 @@
   border-radius: var(--r-lg);
   box-shadow: var(--elev-1);
 }
+/* `<Card padded>` — the standard inset, carried by the card instead of inferred from its ancestry. */
+.mrs-card-pad { padding: var(--sp4); }
+/* A padded card inside a padded card would inset twice; the inner surface keeps what its parent gives it.
+   A KPI tile is excluded: it is a component with its own fixed internal spacing, nested by design. */
+.mrs-card-pad .mrs-card-pad:not(.mrs-kpi) { padding: 0; }
 .mrs-glass {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
@@ -288,6 +293,29 @@ input[type="radio"] {
 }
 .mrs-checkbox:disabled::after {
   content: none;
+}
+
+/*
+ * `CheckboxField`: the box and its label as one control, and the whole row is the target.
+ *
+ * `align-items: start` rather than centre — a label that wraps to two lines should keep its box on the
+ * first, beside the text it belongs to, not float to the middle of the block.
+ */
+.mrs-checkrow {
+  display: flex;
+  align-items: start;
+  gap: var(--sp3);
+  cursor: pointer;
+  /* The 44px outset on .mrs-checkbox is a pseudo-element, so the row has to establish the stacking context
+     that keeps it from swallowing clicks on whatever sits above or below. */
+  isolation: isolate;
+}
+.mrs-checkrow > span { padding-block-start: 2px; }
+.mrs-checkfield .mrs-help,
+.mrs-checkfield .mrs-error {
+  /* Line up under the LABEL, not under the box — help text indented to the checkbox reads as a caption on
+     the box rather than on the thing it explains. 24px box + 12px gap. */
+  margin-inline-start: calc(24px + var(--sp3));
 }
 /*
  * Dark theme: `accent-color` recolours the CHECKED box, but an unchecked native checkbox keeps the UA's

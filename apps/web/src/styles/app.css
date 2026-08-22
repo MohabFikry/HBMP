@@ -1422,44 +1422,36 @@ nav.mrs-rail {
  * had nothing finite to resolve that percentage against. This gives it one.
  */
 .pol-screen > * { min-inline-size: 0; }
-/* Policy-portal cards never passed the inline padding every other portal's cards carry, so their content
-   — most visibly the member search pill — sat flush against the card border and the card itself read as
-   edgeless (QA follow-up). Direct children only; cards that set their own padding inline still win. */
 /*
-  CARDS IN THESE SCREENS HAVE PADDING.
+  CARDS IN THESE SCREENS HAVE PADDING — AND NO LONGER CARE HOW DEEPLY THEY ARE NESTED.
 
-  `.mrs-card` deliberately carries none — a card is a surface, and each screen sets its own — but that makes
-  a forgotten padding invisible in review and obvious on screen: content sits hard against the border and the
-  card reads as a rendering fault.
+  `.mrs-card` deliberately carries none: a card is a surface, and a surface that always insets its content
+  cannot hold a full-bleed table. But leaving it to each screen made a forgotten padding invisible in review
+  and obvious on screen — content hard against the border, the card reading as a rendering fault.
 
-  This rule used to be `.pol-screen > .mrs-card`, DIRECT CHILDREN ONLY, and every analytics card is inside a
-  tab panel. So the filter bar (a direct child) was padded and the six view panels below it were not — the
-  same card, the same screen, two different insets depending on whether a `Tabs` happened to sit between it
-  and `.pol-screen`. The member detail had the identical fault for the identical reason.
+  THIS RULE HAS BROKEN TWICE, BOTH TIMES FOR THE SAME REASON. It was `.pol-screen > .mrs-card`, direct
+  children only, so every analytics card — which sits inside a tab panel — went unpadded while the filter bar
+  above it did not: the same card, the same screen, two different insets depending on whether a `Tabs`
+  happened to sit between. That was patched by adding `.mrs-tabpane` selectors. Then the de-nesting rule
+  below flattened every KPI tile to zero, because a tile IS a `.mrs-card`, and the label ended up sitting on
+  the tile's top border under the accent hairline. Reported as "the padding is broken on this page", and it
+  was, three selectors away.
 
-  `> .mrs-card` under the pane as well, not a descendant selector: a card nested inside another card keeps
-  whatever its parent gives it, and a panel that sets its own inline padding still wins (inline beats this).
+  Both faults are the same fault: padding decided by ANCESTRY. So the depth is gone from the selector. Any
+  card anywhere under the page wrapper is padded; a card inside another card is not, because the inner
+  surface keeps what its parent gives it. Nesting something one level deeper can no longer change an inset.
+
+  `<Card padded>` (design system) is where new code should get this — the inset belongs to the card. This
+  blanket stays for the thirty-eight call sites that predate the prop, and shrinks as they convert.
 */
-.pol-screen > .mrs-card,
-.pol-screen .mrs-tabpane .mrs-card,
-.pol-detail > .mrs-card,
-.pol-detail .mrs-tabpane .mrs-card {
+.pol-screen .mrs-card,
+.pol-detail .mrs-card {
   padding: var(--sp4);
 }
 /*
-  A card INSIDE a card would otherwise be padded twice. The inner surface keeps whatever its parent gives it,
-  which is what the nesting was for.
-
-  `:not(.mrs-kpi)` — THE NESTING ARRIVED, AND THIS RULE FLATTENED IT. The note here used to say "there is no
-  such nesting on these screens today", and that stopped being true the moment the utilization panel started
-  rendering a `KpiList`: a KPI tile IS a `.mrs-card`, nested inside the panel card, so this selector (0,3,0)
-  beat `.mrs-kpi`'s own `padding: var(--sp5)` (0,1,0) and stripped every tile to zero. The label then sat on
-  the tile's top border under the 3px accent hairline — reading as clipped — and the 34px figure ran to the
-  bottom edge. Reported as "the padding is broken on this page", and it was, three selectors away.
-
-  A KPI tile is not the case this guard is about. That case is a panel nested in a panel, where the inner one
-  would be inset twice; a tile is a component with its own fixed internal spacing, and it is nested by
-  design. Excluding it by class keeps the guard doing its job for everything else.
+  A KPI tile is not the case the de-nesting guard is about. That case is a panel inside a panel, where the
+  inner one would be inset twice; a tile is a component with its own fixed internal spacing (`.mrs-kpi` sets
+  `--sp5`), and it is nested by design.
 */
 .pol-screen .mrs-card .mrs-card:not(.mrs-kpi),
 .pol-detail .mrs-card .mrs-card:not(.mrs-kpi) {
@@ -1470,12 +1462,40 @@ nav.mrs-rail {
 .pol-panel h3 { margin: 0; }
 .pol-muted { color: var(--text-2); }
 
-.pol-searchbar { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
+/*
+  ONE FIELD WIDTH FOR THE PORTAL.
+
+  Four screens capped a field by hand — 280, 320, 360, 480 — with no two agreeing and none of them on the
+  8-point scale. Two of them were stacked in the same card, so their right edges ended 120px apart. A width
+  chosen per call site is a width that disagrees with the next one.
+*/
+:root { --field-max: 24rem; }
+
+/* Cards whose children stack. The INSET comes from the portal rule; only the internal rhythm is local,
+   which is the division these screens kept getting wrong by writing both inline. */
+.pol-stack { display: grid; gap: var(--sp4); align-content: start; }
+/* The wider rhythm the utilization panels use — meters and KPI strips need more air than form rows. */
+.pol-stack-lg { display: grid; gap: var(--sp5); align-content: start; }
+/* A card holding one scope picker and the action beside it, aligned at the control line. */
+.pol-scopebar { display: flex; flex-wrap: wrap; gap: var(--sp4); align-items: end; }
+
+/*
+  The search row aligns at the CONTROL line, not the box: a labelled field is taller than a bare button, so
+  centring floats the button against the label instead of the input.
+
+  It used to do this with `align-items: end` plus `margin-bottom: 1px` on the button — a physical property in
+  a stylesheet that is otherwise logical throughout, nudging away a discrepancy rather than removing it. The
+  discrepancy was that the button was 40px and the control is 44px. Making them the same height aligns them
+  structurally, and takes the button to the 44px target bar on the way.
+*/
+.pol-searchbar {
+  display: flex;
+  gap: var(--sp3);
+  align-items: end;
+  flex-wrap: wrap;
+}
 .pol-searchbar > *:first-child { flex: 1 1 22rem; }
-/* The pair aligns at the control line: the labeled field is taller than the button, and centring would
-   float the button against the label instead of the input. */
-.pol-searchbar { align-items: end; }
-.pol-searchbar .mrs-btn { margin-bottom: 1px; }
+.pol-searchbar > .mrs-btn { min-block-size: 44px; }
 
 /* `.pol-facts` — a short list of label/value FACTS. Renamed from `.pol-kpis`, which is what it was called
    while four screens used it for figures; those four now render `KpiList`, which is the 0B §10b treatment
@@ -1639,8 +1659,18 @@ nav.mrs-rail {
    a primary action on a record it only withdraws. */
 .pol-note > .mrs-btn { justify-self: end; }
 .pol-note-form { display: grid; gap: var(--sp3); }
-.pol-check { display: flex; gap: var(--sp2); align-items: center; min-block-size: 44px; }
-.pol-check input { inline-size: 24px; block-size: 24px; }
+/*
+  `.pol-check` IS GONE, AND THE REASON IS WORTH KEEPING.
+
+  It was declared TWICE in this file, ~400 lines apart, with different rules. The later block won, and its
+  `.pol-check input { width: 20px }` (0,1,1) beat `.mrs-checkbox`'s own 24px (0,1,0) — so the one checkbox in
+  the portal that DID wear the house class was silently shrunk below the 24px WCAG 2.2 AA floor by a
+  duplicate definition of its own wrapper. The second block's comment even said "the checkbox itself is
+  smaller than the rule allows", describing the problem it was causing.
+
+  `CheckboxField` owns the row now: the box, the label beside it, and the 44px target, in one place that
+  cannot be redefined half a file away.
+*/
 
 /* A withheld body is a LOCKED state, never an empty one. */
 .pol-locked {
@@ -2050,14 +2080,6 @@ nav.mrs-rail {
   align-items: center;
   justify-content: space-between;
 }
-.pol-check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp2);
-  min-height: 44px;              /* ≥44px target — the checkbox itself is smaller than the rule allows */
-  color: var(--text-1);
-}
-.pol-check input { width: 20px; height: 20px; }
 
 .pol-view { display: grid; gap: var(--sp5); }
 .pol-view-actions { display: flex; justify-content: flex-end; }
@@ -3546,7 +3568,13 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 /* A branch screen's in-page switch and its one action on one row: the switch takes the space it needs and the
    button sits at the far end, wrapping under it rather than shrinking when the two stop fitting. Shared by
    the roster (view switch + Exceptions) and inventory (category switch + Record a movement). */
-.branch-toolbar {
+/*
+  The row above a screen's main table: whatever names or scopes the view on one side, the primary action on
+  the other. Named `.branch-toolbar` while only the roster and the inventory used it — then the payers screen
+  reached for it, and a class named after one portal was doing duty in another. A name that lies about where
+  it belongs is how a class gets edited for one screen and silently changes a different one.
+*/
+.screen-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

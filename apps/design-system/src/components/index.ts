@@ -4,8 +4,10 @@ export { Button } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
 export { StatusChip } from "./StatusChip";
 export type { StatusChipProps } from "./StatusChip";
-export { InputField, ComboboxField, TextareaField } from "./Field";
-export type { InputFieldProps, ComboboxFieldProps, TextareaFieldProps } from "./Field";
+export { InputField, ComboboxField, TextareaField, CheckboxField, FileField } from "./Field";
+export type {
+  InputFieldProps, ComboboxFieldProps, TextareaFieldProps, CheckboxFieldProps, FileFieldProps,
+} from "./Field";
 export { SearchField } from "./SearchField";
 export type { SearchFieldProps } from "./SearchField";
 export { Combobox } from "./Combobox";

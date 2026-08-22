@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, FileField, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -19,6 +19,7 @@ import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { useEnumLabel } from "../i18n/enumLabels";
 import { BulkTemplateActions } from "./BulkTemplateActions";
 import { BulkErrorReportButton } from "./BulkErrorReport";
 
@@ -144,6 +145,7 @@ function jobStatusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
 
 export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const { lang } = useTheme();
   const [templates, setTemplates] = useState<BulkTemplateView[]>([]);
@@ -250,13 +252,16 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
-      <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+      {/* The inset comes from the portal rule (`--sp4`), like every other card here. This one set
+          `--sp5` inline and its sibling below did not, so two stacked cards sat 4px apart along their
+          shared edge. Only the internal layout is local. */}
+      <Card className="pol-stack">
         {/* QA P1-10: this card was raw browser controls crammed into one unspaced row while every other
             screen wears the design system — the controls now use the shared field classes and breathe. */}
         <ComboboxField
           id="bulk-type"
           label={t(S.jobType)}
-          style={{ maxWidth: 360 }}
+          style={{ maxWidth: "var(--field-max)" }}
           value={jobType}
           onChange={(v) => { setJobType(v); reset(); }}
           options={JOB_TYPES.map((x) => ({
@@ -277,16 +282,16 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onOpenChange={setColumnsOpen}
         />
 
-        <div className="mrs-field" style={{ maxWidth: 480 }}>
-          <label className="mrs-label" htmlFor="bulk-file">{t(S.file)}</label>
-          <input
-            className="mrs-control"
-            id="bulk-file"
-            type="file"
-            accept=".csv,.xlsx"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </div>
+        {/* `FileField`, not a hand-built `.mrs-field` + `.mrs-label` + `.mrs-control` — the markup was
+            right and the place was wrong, and it had picked a different max-width from the combobox
+            directly above it, so the two controls ended 120px apart. */}
+        <FileField
+          id="bulk-file"
+          label={t(S.file)}
+          style={{ maxWidth: "var(--field-max)" }}
+          accept=".csv,.xlsx"
+          onChange={(e) => setFile(e.currentTarget.files?.[0] ?? null)}
+        />
         <div>
           <Button variant="primary"
               leadingIcon={<Icon name="upload" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
@@ -299,7 +304,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
         <Card data-testid="bulk-job">
           <div className="pol-editor-head">
             <h3>{job.fileName}</h3>
-            <StatusChip kind={jobStatusKind(job.status)} label={job.status} />
+            <StatusChip kind={jobStatusKind(job.status)} label={enumLabel(job.status)} />
           </div>
           {job.failureCode && (
             <InlineAlert tone="bad" data-testid="bulk-failure">

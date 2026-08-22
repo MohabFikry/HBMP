@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Button, Card, Icon, InlineAlert, Modal, ComboboxField, StatusChip, TextareaField,
+  Button, Card, CheckboxField, Icon, InlineAlert, Modal, ComboboxField, StatusChip, TextareaField,
 } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { newIdempotencyKey } from "../api/http";
@@ -364,10 +364,11 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
               options={VISIBILITIES.map((v) => ({ value: v, label: t(VISIBILITY_LABELS[v]) }))}
             />
             <TextareaField label={t(S.body)} value={body} onChange={(e) => setBody(e.target.value)} rows={5} />
-            <label className="pol-check">
-              <input type="checkbox" className="mrs-checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
-              {t(S.pin)}
-            </label>
+            <CheckboxField
+              label={t(S.pin)}
+              checked={pinned}
+              onChange={(e) => setPinned(e.currentTarget.checked)}
+            />
             {formError && <InlineAlert tone="bad">{t(formError)}</InlineAlert>}
           </div>
         </Modal>

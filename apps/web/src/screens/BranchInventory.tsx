@@ -216,7 +216,7 @@ export function BranchInventory() {
         had asked for; and on a screen where both reads were failing, the form was the only thing on it that
         looked healthy.
       */}
-      <div className="branch-toolbar">
+      <div className="screen-toolbar">
         <SegmentedControl<ItemCategory>
           aria-label={t(S.title)}
           segments={[

@@ -416,7 +416,7 @@ export function BranchRoster() {
         feature. Putting the exceptions trigger there made a whole surface disappear behind a condition that
         has nothing to do with it. Here it sits beside the control it belongs with, visible in both views.
       */}
-      <div className="branch-toolbar">
+      <div className="screen-toolbar">
         <SegmentedControl<View>
           aria-label={t(S.viewLabel)}
           segments={[

@@ -49,6 +49,9 @@ import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { ChangeTimeline, LimitMeters, NotesPanel, useIdempotencyKey } from "./PolicyPanels";
 import { BeneficiaryDocuments } from "./BeneficiaryDocuments";
 import { useFormat } from "../i18n/useFormat";
+// 33.11 — the enum table moved out of this file: six other screens in the same portal needed it and
+// could not reach it. See i18n/enumLabels.ts.
+import { useEnumLabel } from "../i18n/enumLabels";
 import { useToast } from "@mersal/design-system";
 
 /**
@@ -248,39 +251,6 @@ function statusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
   }
 }
 
-/**
- * Bilingual labels for the membership enums the server sends as bare strings.
- *
- * policy-service types `status`, `relationship` and `waitingPeriodState` as `string` (see
- * `api/policyApi.ts`), and the table rendered them straight through — so an Arabic operator read a fully
- * Arabic table whose Status column said "Active", whose Relationship column said "Principal", and whose
- * Waiting period column said "None". A locale that is right everywhere except in the columns that carry the
- * decision is not a translated screen.
- *
- * The fallback is the raw value on purpose: a value the server adds later shows up as itself rather than
- * disappearing, which is the failure mode that would actually hide a member's state.
- */
-const ENUM_LABELS: Record<string, Localized> = {
-  Active: { en: "Active", ar: "نشط" },
-  Pending: { en: "Pending", ar: "قيد الانتظار" },
-  Suspended: { en: "Suspended", ar: "موقوف" },
-  Terminated: { en: "Terminated", ar: "منتهٍ" },
-  Cancelled: { en: "Cancelled", ar: "ملغى" },
-  Principal: { en: "Principal", ar: "المشترك الرئيسي" },
-  Spouse: { en: "Spouse", ar: "الزوج/الزوجة" },
-  Child: { en: "Child", ar: "ابن/ابنة" },
-  Dependent: { en: "Dependent", ar: "معال" },
-  Serving: { en: "Serving", ar: "جارية" },
-  Served: { en: "Served", ar: "منتهية" },
-  None: { en: "None", ar: "لا يوجد" },
-};
-
-/** Resolve a server enum to the active language, falling back to the raw value. */
-function useEnumLabel(): (value: string) => string {
-  const t = useLoc();
-  return (value: string) => (ENUM_LABELS[value] ? t(ENUM_LABELS[value]) : value);
-}
-
 // ── Member query ────────────────────────────────────────────────────────────────────────────────────────
 
 export function MemberSearch({ api = httpPolicyApi }: { api?: PolicyApi }) {
@@ -410,7 +380,7 @@ export function MemberSearch({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
               <FilterSelect label={t(S.fIdType)} value={draft.identifierType}
                 onChange={(v) => setDraft({ ...draft, identifierType: v })}
-                options={[{ value: "", label: t(S.anyValue) }, ...ID_TYPES.map((v) => ({ value: v, label: v }))]} />
+                options={[{ value: "", label: t(S.anyValue) }, ...ID_TYPES.map((v) => ({ value: v, label: enumLabel(v) }))]} />
               <InputField
                 label={t(S.fIdValue)} value={draft.identifierValue} autoComplete="off"
                 // Stated at the pair, not after a fruitless search: a type with no number narrows nothing, and
@@ -1453,6 +1423,7 @@ function EditDetailsModal({
 }) {
   const api = useApi();
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const write = useWrite();
   const [form, setForm] = useState({
     givenName: person.givenName,
@@ -1530,7 +1501,7 @@ function EditDetailsModal({
         <InputField type="date" label={t(P.birthDate)} value={form.birthDate} error={dateError} max={today}
           onChange={(e) => setForm({ ...form, birthDate: e.currentTarget.value })} />
         <FilterSelect label={t(P.sex)} value={form.sex} onChange={(v) => setForm({ ...form, sex: v })}
-          options={SEXES.map((v) => ({ value: v, label: v }))} />
+          options={SEXES.map((v) => ({ value: v, label: enumLabel(v) }))} />
         <InputField label={t(P.nationality)} value={form.nationalityCode} maxLength={2} autoComplete="off"
           onChange={(e) => setForm({ ...form, nationalityCode: e.currentTarget.value })} />
         <InputField label={t(P.individualNo)} value={form.individualNo} autoComplete="off"
@@ -1705,7 +1676,7 @@ function MemberUtilizationTab({ api, beneficiaryId }: { api: PolicyApi; benefici
     // same panel, over one member instead of a cohort.
     <Card
       data-testid="member-utilization"
-      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+      className="pol-stack-lg"
     >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (

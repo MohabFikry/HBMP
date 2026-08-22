@@ -137,7 +137,7 @@ function tsxFiles(dir: string, out: string[] = []): string[] {
  */
 const BARE_TABLE_OK: Record<string, string> = {
   "screens/MemberAdmin.tsx": "server-side search, sort and paging — the book is too big for the browser",
-  "screens/PolicyBook.tsx": "server-side sort and paging on the policy list; the rest are bounded config",
+  "screens/PolicyBook.tsx": "server-side filters, sort and paging on the policy register; the plans-under-a-policy tab lists ONE policy's plans",
   "screens/BranchInventory.tsx": "the ledger is server-paged; the stock table above it IS a DataTableView",
   // 28.10 — AdminConsole.tsx is GONE from this list. Its four remaining screens all render `DataTableView`
   // now. Master data was the case that made the old entry indefensible: the server returns up to five
@@ -175,7 +175,11 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/MasterListAdmin.tsx": "an in-force code list",
   "screens/PharmacyDispense.tsx": "the result of an explicit search",
   "screens/PolicyAnalytics.tsx": "a drill-down from a chart band",
-  "screens/PolicyProductAdmin.tsx": "payers and plan versions — bounded configuration",
+  // 33.11 — PolicyProductAdmin.tsx is GONE from this list. "Bounded configuration" was true of the plan
+  // catalogue and was being used to justify a list with no search, no filters and no pager, sitting directly
+  // beneath Payers in the same nav group — which has had all four since 19.7. Two catalogue lists side by
+  // side, one searchable and one not, is the inconsistency an operator actually trips over. The plan table
+  // is a `DataTableView` now; the benefit grid it opens is `.pol-grid`, which is not a data table at all.
   "screens/ProfileSectionViews.tsx": "one patient's record, sectioned",
   "screens/ProgramAdmin.tsx": "programmes and capacity — bounded configuration",
   "screens/ReportView.tsx": "a rendered report's own tables",

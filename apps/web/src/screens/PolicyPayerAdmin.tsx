@@ -368,7 +368,7 @@ export function PolicyPayers({ api = httpPolicyApi }: { api?: PolicyApi }) {
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
       {mayWrite && (
-        <div className="branch-toolbar">
+        <div className="screen-toolbar">
           <span />
           <Button variant="primary" leadingIcon={<Icon name="plus" />} onClick={() => setForm({ mode: "create" })}>
             {t(S.newPayer)}
@@ -483,7 +483,7 @@ function PayerDetailPane({
   return (
     <div className="pol-detail">
       <Card>
-        <div className="branch-toolbar">
+        <div className="screen-toolbar">
           <div className="pay-head">
             <h3>
               <BiName en={payer.nameEn} ar={payer.nameAr} />{" "}

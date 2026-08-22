@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiList, Pagination, StatusChip, Tabs, useTableQuery } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
+  PayerView,
   MemberGroupView,
   PolicyApi,
   PolicyPlanView,
@@ -19,6 +21,7 @@ import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { ChangeTimeline, DocumentsPanel, LimitMeters, NotesPanel } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { useEnumLabel } from "../i18n/enumLabels";
 import { useTheme } from "@mersal/design-system";
 
 /**
@@ -31,6 +34,9 @@ import { useTheme } from "@mersal/design-system";
  * plans as a tab rather than a nested drill-down keeps that comparison on one screen.
  */
 
+/** The three the server accepts on `status` (PolicyStatus). */
+const POLICY_STATUSES = ["Active", "Suspended", "Expired"] as const;
+
 const S = {
   title: { en: "Policies", ar: "الوثائق" },
   groupsTitle: { en: "Groups", ar: "المجموعات" },
@@ -41,6 +47,13 @@ const S = {
   plans: { en: "Plans", ar: "الخطط" },
   used: { en: "% used", ar: "٪ مستخدم" },
   noPolicies: { en: "No policies match these filters.", ar: "لا توجد وثائق مطابقة." },
+  findPolicy: { en: "Policy number", ar: "رقم الوثيقة" },
+  findPolicyHint: { en: "Any part of it — the server matches on a fragment.", ar: "أي جزء منه — يطابق الخادم جزءًا من الرقم." },
+  anyStatus: { en: "Any status", ar: "أي حالة" },
+  anyPayer: { en: "Any payer", ar: "أي جهة ممولة" },
+  payer: { en: "Payer", ar: "الجهة الممولة" },
+  search: { en: "Search", ar: "بحث" },
+  clearFilters: { en: "Clear", ar: "مسح" },
   select: { en: "Select a policy to see its plans, groups, utilization and notes.", ar: "اختر وثيقة لعرض خططها ومجموعاتها واستخدامها وملاحظاتها." },
   tabPlans: { en: "Plans", ar: "الخطط" },
   tabGroups: { en: "Groups", ar: "المجموعات" },
@@ -53,6 +66,10 @@ const S = {
   default: { en: "Default", ar: "الافتراضية" },
   noPlansUnder: { en: "No plans attached to this policy.", ar: "لا توجد خطط مرتبطة بهذه الوثيقة." },
   noGroups: { en: "No groups defined.", ar: "لا توجد مجموعات." },
+  searchGroups: { en: "Search groups", ar: "بحث في المجموعات" },
+  searchGroupsHint: { en: "Code or name", ar: "الرمز أو الاسم" },
+  noGroupMatches: { en: "No group matches your search.", ar: "لا توجد مجموعة مطابقة لبحثك." },
+  groupTypeFilter: { en: "Type", ar: "النوع" },
   groupCode: { en: "Code", ar: "الرمز" },
   groupName: { en: "Name", ar: "الاسم" },
   groupType: { en: "Type", ar: "النوع" },
@@ -88,6 +105,7 @@ function bandKind(band: string): "ok" | "warn" | "bad" | "neu" {
 
 export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const { lang } = useTheme();
   /*
@@ -115,8 +133,40 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [sort, setSort] = useState<{ field: string; dir: "ascending" | "descending" }>(
     { field: "policyno", dir: "ascending" });
 
+  /*
+    THE REGISTER HAD NO WAY IN.
+
+    This screen sent `page`, `pageSize` and `sort` and nothing else, while `GET /policy-query` accepts eleven
+    filters — payer, plan, plan label, status, policy number, three dates, group, and two bands. So finding one
+    policy meant paging through the book. `MemberAdmin` consumes the identical envelope off the identical query
+    surface and has had a criteria bar since 19.5b; this is that wiring, not new capability.
+
+    Three of the eleven, deliberately. Policy number is what somebody has in hand; status and payer are what
+    they narrow by. The other eight are report parameters, and putting all eleven in a permanent bar is how the
+    analytics screen ended up with thirteen controls above its content.
+
+    `applied` is separate from what is typed: a filter takes effect on Search, not on every keystroke, because
+    each change is a server round trip over the whole book.
+  */
+  const [payers, setPayers] = useState<PayerView[]>([]);
+  const [draft, setDraft] = useState<{ policyNo: string; status: string; payerId: string }>(
+    { policyNo: "", status: "", payerId: "" });
+  const [applied, setApplied] = useState<{ policyNo: string; status: string; payerId: string }>(
+    { policyNo: "", status: "", payerId: "" });
+
+  // Reference data for the payer picker. A failure here leaves the picker empty rather than the screen
+  // broken: the register still lists, and it still filters by number and status.
+  useEffect(() => {
+    let live = true;
+    api.payers().then((r) => live && setPayers(r)).catch(() => undefined);
+    return () => { live = false; };
+  }, [api]);
+
   const run = useCallback(
-    async (p: number, size: number, sortBy: { field: string; dir: "ascending" | "descending" }) => {
+    async (
+      p: number, size: number, sortBy: { field: string; dir: "ascending" | "descending" },
+      f: { policyNo: string; status: string; payerId: string },
+    ) => {
       setError(null);
       try {
         setPage(await api.policyQuery({
@@ -124,6 +174,11 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
           pageSize: size,
           // The server's vocabulary: a leading "-" means descending (SortRequest.TryParse).
           sort: (sortBy.dir === "descending" ? "-" : "") + sortBy.field,
+          // `q()` drops empty values, so an unset filter is absent from the query string rather than sent
+          // as "" — which the server would read as a filter matching nothing.
+          policyNo: f.policyNo.trim() || undefined,
+          status: f.status || undefined,
+          payerId: f.payerId || undefined,
         }));
       } catch (e) {
         setError(readErrorMessage(e));
@@ -135,13 +190,59 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   // ONE effect drives every fetch, keyed on the whole query — a per-control handler that also fetched would
   // race, and the older response can land last.
   useEffect(() => {
-    void run(pageNo, pageSize, sort);
-  }, [run, pageNo, pageSize, sort]);
+    void run(pageNo, pageSize, sort, applied);
+  }, [run, pageNo, pageSize, sort, applied]);
+
+  const narrowed = Boolean(applied.policyNo || applied.status || applied.payerId);
+
+  /* Narrowing has to reset to page 1 and drop the selection: the operator is very likely no longer looking
+     at a page the selected policy is on, and leaving the detail open under a table it left is the fault the
+     sort handler below already guards against. */
+  const applyFilters = () => { setApplied(draft); setPageNo(1); setSelected(null); };
+  const clearFilters = () => {
+    const empty = { policyNo: "", status: "", payerId: "" };
+    setDraft(empty); setApplied(empty); setPageNo(1); setSelected(null);
+  };
 
   return (
     <div className="pol-screen">
       <PageHeader title={t(S.title)} />
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+
+      <Card>
+        <div className="pol-searchbar">
+          <InputField
+            label={t(S.findPolicy)}
+            help={t(S.findPolicyHint)}
+            value={draft.policyNo}
+            onChange={(e) => setDraft({ ...draft, policyNo: e.currentTarget.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") applyFilters(); }}
+          />
+          <ComboboxField
+            label={t(S.status)}
+            style={{ maxWidth: "var(--field-max)" }}
+            value={draft.status || null}
+            placeholder={t(S.anyStatus)}
+            onChange={(v) => setDraft({ ...draft, status: v ?? "" })}
+            options={POLICY_STATUSES.map((v) => ({ value: v, label: enumLabel(v) }))}
+          />
+          <ComboboxField
+            label={t(S.payer)}
+            style={{ maxWidth: "var(--field-max)" }}
+            value={draft.payerId || null}
+            placeholder={t(S.anyPayer)}
+            onChange={(v) => setDraft({ ...draft, payerId: v ?? "" })}
+            options={payers.map((p) => ({ value: p.payerId, label: lang === "ar" ? p.nameAr : p.nameEn }))}
+          />
+          <Button variant="primary" leadingIcon={<Icon name="search" />} onClick={applyFilters}>
+            {t(S.search)}
+          </Button>
+          {narrowed && (
+            <Button variant="ghost" onClick={clearFilters}>{t(S.clearFilters)}</Button>
+          )}
+        </div>
+      </Card>
+
       {/* A payer-scoped user must not read "12 policies" as "the organisation has 12 policies". */}
       {page?.payerScopeApplied && <InlineAlert tone="info">{t(S.payerScoped)}</InlineAlert>}
       {page && page.unavailable.length > 0 && (
@@ -184,7 +285,7 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
             {
               key: "status",
               header: t(S.status),
-              cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />,
+              cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} />,
               sortable: true,
             },
             {
@@ -251,6 +352,7 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
 function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const [rows, setRows] = useState<PolicyPlanView[] | null>(null);
   const [error, setError] = useState<Localized | null>(null);
@@ -283,7 +385,7 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
           },
           { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
           { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true, sortable: true, sortValue: (r) => r.memberCount },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -292,6 +394,7 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
 
 function PolicyGroupsTab({ api, policyId }: { api: PolicyApi; policyId: string }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const [rows, setRows] = useState<MemberGroupView[] | null>(null);
   const [error, setError] = useState<Localized | null>(null);
@@ -315,9 +418,9 @@ function PolicyGroupsTab({ api, policyId }: { api: PolicyApi; policyId: string }
         columns={[
           { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
           { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
-          { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
+          { key: "type", header: t(S.groupType), cell: (r) => enumLabel(r.groupType), sortable: true, sortValue: (r) => r.groupType },
           { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -373,7 +476,7 @@ export function ScopeUtilizationPanel({
     // rather than merely tight.
     <Card
       data-testid="scope-utilization"
-      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+      className="pol-stack-lg"
     >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (
@@ -498,7 +601,7 @@ export function UtilizationScreen({
       {!embedded && <PageHeader title={t(S.tabUtilization)} />}
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <Card style={{ padding: "var(--sp4)", display: "flex", gap: "var(--sp4)", alignItems: "end", flexWrap: "wrap" }}>
+      <Card className="pol-scopebar">
         {/* QA P1-11 fixed the label running into a zero-width bare select by hand-building the field markup
             around it. `ComboboxField` IS that markup, so the wrapper goes and the width stays.
             Searchable, and this is the case the audit was loudest about: the list is every policy on the
@@ -508,7 +611,7 @@ export function UtilizationScreen({
         <ComboboxField
           id="util-policy"
           label={t(S.policyNo)}
-          style={{ minWidth: 280 }}
+          style={{ minWidth: "var(--field-max)" }}
           placeholder="—"
           value={scopeId || null}
           onChange={(v) => {
@@ -537,6 +640,7 @@ const scopeMap: Record<"policies" | "groups" | "plans" | "payers", string> = {
 /** The standalone Groups section: every group across the policies the caller can see, with its utilization. */
 export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const [policies, setPolicies] = useState<PolicyQueryRow[]>([]);
   const [policyId, setPolicyId] = useState<string | null>(null);
@@ -567,6 +671,33 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
     }
   }, [api, policyId]);
 
+  const groupColumns: Column<MemberGroupView>[] = [
+    { key: "code", header: t(S.groupCode), cell: (r) => <span className="tnum">{r.groupCode}</span>, sortable: true, sortValue: (r) => r.groupCode },
+    { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+    { key: "type", header: t(S.groupType), cell: (r) => enumLabel(r.groupType), sortable: true, sortValue: (r) => r.groupType },
+    { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
+  ];
+
+  /* One policy's groups come down whole, so the search and the type chips run in the browser. The POLICY
+     picker above is a different kind of control and stays where it is: it changes what the server returns. */
+  const groupQuery = useTableQuery<MemberGroupView>({
+    rows: groups,
+    columns: groupColumns,
+    searchText: (r) => `${r.groupCode} ${r.nameEn}`,
+    searchLabel: t(S.searchGroups),
+    searchPlaceholder: t(S.searchGroupsHint),
+    filters: [
+      {
+        key: "type",
+        label: t(S.groupTypeFilter),
+        options: [...new Set(groups.map((g) => g.groupType))].sort().map((v) => ({ value: v, label: enumLabel(v) })),
+        match: (r, v) => r.groupType === v,
+      },
+    ],
+    initialSortKey: "code",
+    persistKey: "policy-groups",
+  });
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -575,11 +706,11 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
     <div className="pol-screen">
       <PageHeader title={t(S.groupsTitle)} />
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <Card style={{ padding: "var(--sp4)" }}>
+      <Card>
         <ComboboxField
           id="grp-policy"
           label={t(S.policyNo)}
-          style={{ maxWidth: 320 }}
+          style={{ maxWidth: "var(--field-max)" }}
           placeholder="—"
           value={policyId}
           onChange={setPolicyId}
@@ -587,20 +718,16 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
         />
       </Card>
       <Card>
-        <DataTable
-          caption={t(S.groupsTitle)}
-          rows={groups}
+        <DataTableView
+          query={groupQuery}
+          columns={groupColumns}
           rowKey={(r) => r.groupId}
+          caption={t(S.groupsTitle)}
           interactive
           selectedKey={selected}
           onSelect={(r) => setSelected(r.groupId)}
           emptyLabel={t(S.noGroups)}
-          columns={[
-            { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
-            { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
-            { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
-            { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
-          ]}
+          noMatchesLabel={t(S.noGroupMatches)}
         />
       </Card>
       {selected && <ScopeUtilizationPanel api={api} scope="groups" id={selected} />}

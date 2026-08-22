@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, Combobox, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
+import { Button, Card, Combobox, DataTableView, Icon, InlineAlert, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   ActivationProblem,
@@ -22,6 +23,7 @@ import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { useEnumLabel } from "../i18n/enumLabels";
 
 /**
  * Phase 19.6 — payers, plans, and THE PLAN VERSION EDITOR (design 38 §4.1 / §4.1b).
@@ -47,6 +49,11 @@ const S = {
   status: { en: "Status", ar: "الحالة" },
   category: { en: "Category", ar: "الفئة" },
   noPlans: { en: "No plans configured.", ar: "لا توجد خطط." },
+  searchPlans: { en: "Search plans", ar: "بحث في الخطط" },
+  searchPlansHint: { en: "Code, name, or category", ar: "الرمز أو الاسم أو الفئة" },
+  noPlanMatches: { en: "No plan matches your search.", ar: "لا توجد خطة مطابقة لبحثك." },
+  filterStatus: { en: "Status", ar: "الحالة" },
+  filterCategory: { en: "Category", ar: "الفئة" },
   versions: { en: "Versions", ar: "الإصدارات" },
   version: { en: "Version", ar: "الإصدار" },
   window: { en: "In force", ar: "سارٍ" },
@@ -108,6 +115,7 @@ function BiName({ en, ar }: { en: string; ar: string }) {
 
 export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const fmt = useFormat();
   const [plans, setPlans] = useState<PlanView[] | null>(null);
   const [categories, setCategories] = useState<BenefitCategoryView[]>([]);
@@ -159,28 +167,66 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
     ? versions.filter((v) => v.versionNo < version.versionNo).sort((a, b) => b.versionNo - a.versionNo)[0] ?? null
     : null;
 
+  const planColumns: Column<PlanView>[] = [
+    { key: "code", header: t(S.payerCode), cell: (r) => <span className="tnum">{r.planCode}</span>, sortable: true, sortValue: (r) => r.planCode },
+    { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
+    { key: "category", header: t(S.category), cell: (r) => r.category, sortable: true, sortValue: (r) => r.category },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={enumLabel(r.status)} />, sortable: true, sortValue: (r) => r.status },
+  ];
+
+  const planQuery = useTableQuery<PlanView>({
+    rows: plans ?? [],
+    columns: planColumns,
+    searchText: (r) => `${r.planCode} ${r.nameEn} ${r.nameAr} ${r.category}`,
+    searchLabel: t(S.searchPlans),
+    searchPlaceholder: t(S.searchPlansHint),
+    filters: [
+      {
+        key: "status",
+        label: t(S.filterStatus),
+        options: [
+          { value: "Active", label: enumLabel("Active") },
+          { value: "Inactive", label: enumLabel("Inactive") },
+        ],
+        match: (r, v) => r.status === v,
+      },
+      {
+        // The category vocabulary is whatever the catalogue holds, so the chips are derived from the rows
+        // rather than hardcoded — a category added on the server appears here without a code change.
+        key: "category",
+        label: t(S.filterCategory),
+        options: [...new Set((plans ?? []).map((p) => p.category))].sort().map((c) => ({ value: c, label: c })),
+        match: (r, v) => r.category === v,
+      },
+    ],
+    initialSortKey: "code",
+    persistKey: "policy-plans",
+  });
+
   return (
     <div className="pol-screen">
       <PageHeader title={t(S.plans)} />
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
+      {/* The house table — search, filters, sortable columns, pager — rather than the bare `DataTable` this
+          was. Payers sits directly above this in the same nav group and has had all four since 19.7; a
+          catalogue list beside another catalogue list, one searchable and one not, is the inconsistency an
+          operator actually trips over. The plan catalogue is small and comes down whole, so the client-side
+          `useTableQuery` engine is the right one here (unlike the policy and member registers, which page on
+          the server). */}
       <Card>
-        <DataTable
-          caption={t(S.plans)}
-          rows={plans ?? []}
+        <DataTableView
+          query={planQuery}
+          columns={planColumns}
           rowKey={(r) => r.planId}
+          caption={t(S.plans)}
           interactive
           selectedKey={selectedPlan}
           onSelect={(r) => setSelectedPlan(r.planId)}
           loading={plans === null && !error}
           emptyLabel={t(S.noPlans)}
-          columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.planCode, sortable: true, sortValue: (r) => r.planCode },
-            { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "category", header: t(S.category), cell: (r) => r.category, sortable: true, sortValue: (r) => r.category },
-            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
-          ]}
+          noMatchesLabel={t(S.noPlanMatches)}
         />
       </Card>
 
@@ -202,7 +248,7 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
                 </Button>
                 <StatusChip
                   kind={v.status === "Active" ? "ok" : v.status === "Draft" ? "info" : "neu"}
-                  label={v.status}
+                  label={enumLabel(v.status)}
                 />
                 <span>
                   {t(S.window)}: {fmt.date(v.effectiveFrom)} → {v.effectiveTo ? fmt.date(v.effectiveTo) : "—"}
@@ -347,6 +393,7 @@ function PlanVersionEditor({
   onAnnounce: (s: string) => void;
 }) {
   const t = useLoc();
+  const enumLabel = useEnumLabel();
   const [rules, setRules] = useState<EditableRule[]>(() => toEditable(version.rules, categories, tiers));
   const [expanded, setExpanded] = useState<string | null>(null);
   const [problems, setProblems] = useState<ActivationProblem[] | null>(null);
@@ -489,6 +536,7 @@ function PlanVersionEditor({
                 <td>
                   <input
                     type="checkbox"
+                    className="mrs-checkbox"
                     aria-label={`${t(S.covered)} — ${r.benefitCategoryCode}`}
                     checked={r.isCovered}
                     disabled={!editable}
@@ -506,11 +554,12 @@ function PlanVersionEditor({
                     disabled={!editable}
                     placeholder="—"
                     onChange={(v) => patch(r.benefitCategoryCode, { limitType: v })}
-                    options={LIMIT_TYPES.filter(Boolean).map((x) => ({ value: x, label: x }))}
+                    options={LIMIT_TYPES.filter(Boolean).map((x) => ({ value: x, label: enumLabel(x) }))}
                   />
                 </td>
                 <td>
                   <input
+                    className="mrs-control"
                     inputMode="decimal"
                     aria-label={`${t(S.limit)} — ${r.benefitCategoryCode}`}
                     value={r.limitValue}
@@ -524,11 +573,12 @@ function PlanVersionEditor({
                     value={r.resetPeriod}
                     disabled={!editable}
                     onChange={(v) => patch(r.benefitCategoryCode, { resetPeriod: v })}
-                    options={RESET_PERIODS.map((x) => ({ value: x, label: x }))}
+                    options={RESET_PERIODS.map((x) => ({ value: x, label: enumLabel(x) }))}
                   />
                 </td>
                 <td>
                   <input
+                    className="mrs-control"
                     inputMode="numeric"
                     aria-label={`${t(S.waiting)} — ${r.benefitCategoryCode}`}
                     value={r.waitingPeriodDays}
@@ -539,6 +589,7 @@ function PlanVersionEditor({
                 <td>
                   <input
                     type="checkbox"
+                    className="mrs-checkbox"
                     aria-label={`${t(S.preauth)} — ${r.benefitCategoryCode}`}
                     checked={r.requiresPreauth}
                     disabled={!editable}
@@ -547,6 +598,7 @@ function PlanVersionEditor({
                 </td>
                 <td>
                   <input
+                    className="mrs-control"
                     aria-label={`${t(S.exclusions)} — ${r.benefitCategoryCode}`}
                     value={r.exclusions}
                     disabled={!editable}
@@ -591,6 +643,7 @@ function PlanVersionEditor({
                               <td key={x.networkTierId}>
                                 <input
                                   type="checkbox"
+                                  className="mrs-checkbox"
                                   aria-label={`${t(S.covered)} — ${r.benefitCategoryCode} — ${x.tierCode}`}
                                   checked={x.isCovered}
                                   disabled={!editable}
@@ -606,6 +659,7 @@ function PlanVersionEditor({
                             {r.tiers.map((x) => (
                               <td key={x.networkTierId}>
                                 <input
+                                  className="mrs-control"
                                   inputMode="decimal"
                                   aria-label={`${t(S.copay)} — ${r.benefitCategoryCode} — ${x.tierCode}`}
                                   value={x.copayFixed ?? ""}
@@ -624,6 +678,7 @@ function PlanVersionEditor({
                             {r.tiers.map((x) => (
                               <td key={x.networkTierId}>
                                 <input
+                                  className="mrs-control"
                                   inputMode="decimal"
                                   aria-label={`${t(S.coinsurance)} — ${r.benefitCategoryCode} — ${x.tierCode}`}
                                   value={x.coinsurancePercent ?? ""}
