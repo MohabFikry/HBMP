@@ -459,3 +459,18 @@ export function mayReadTheNetworkRollup(issuerRoles: readonly string[] | null | 
 export function maySupervisePolicy(role: Role | null | undefined): boolean {
   return role === "policy_admin" || role === "org_admin" || role === "super_admin";
 }
+
+/**
+ * May this caller AUTHOR the benefit product — payers, plans, plan versions?
+ *
+ * The server calls it `policy:admin` and `PolicyPolicies.Rules()` names exactly three roles for it. Claims,
+ * finance and the network team hold `policy:read` and reach these screens legitimately — they adjudicate
+ * against the terms — so this mirror decides whether the write affordances are RENDERED at all. An operator
+ * shown four buttons that each answer 403 learns that the screen is broken; one shown none learns whose job
+ * it is.
+ *
+ * A mirror, never the enforcement: the server refuses either way.
+ */
+export function mayAdministerBenefitProduct(role: Role | null | undefined): boolean {
+  return role === "policy_admin" || role === "org_admin" || role === "super_admin";
+}

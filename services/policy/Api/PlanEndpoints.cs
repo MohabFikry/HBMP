@@ -28,7 +28,7 @@ public static class PlanEndpoints
         // browse the configuration they are adjudicated against without being able to author it.
         var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:read"));
 
-        MapPayers(v1);
+        PayerEndpoints.MapPayers(v1);   // 19.7 — the payer surface moved to its own file when it grew one
         MapPlans(v1);
         MapPlanVersions(v1);
         MapBenefitCategories(v1);
@@ -67,72 +67,6 @@ public static class PlanEndpoints
             return Results.Ok(rows.Select(c => new BenefitCategoryView(c.BenefitCategoryId, c.Code, c.Name)));
         })
         .Produces<IEnumerable<BenefitCategoryView>>();
-    }
-
-    // ---- Payers ------------------------------------------------------------------------------------------
-    private static void MapPayers(RouteGroupBuilder v1)
-    {
-        v1.MapPost("/payers", async (CreatePayer req, PolicyDbContext db, PolicyGate gate, IAuditClient audit,
-            IOutbox outbox, TimeProvider clock, CancellationToken ct) =>
-        {
-            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
-            if (denied is not null) return denied;
-            if (!Enum.TryParse<PayerType>(req.PayerType, out var type))
-                return ProblemResults.Invalid("UNKNOWN_PAYER_TYPE", $"'{req.PayerType}' is not a payer type.");
-            if (string.IsNullOrWhiteSpace(req.PayerCode))
-                return ProblemResults.Invalid("PAYER_CODE_REQUIRED", "A payer code is required.");
-
-            var now = clock.GetUtcNow();
-            var payer = new Payer
-            {
-                PayerId = Guid.NewGuid(), PayerCode = req.PayerCode.Trim(),
-                NameEn = req.NameEn, NameAr = req.NameAr, PayerType = type,
-                Contact = req.Contact ?? "{}",
-                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
-            };
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
-            db.Payers.Add(payer);
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(new AuditEventDraft
-            {
-                EntityType = "payer", EntityId = payer.PayerId.ToString(),
-                Action = AuditAction.Create, ActorUserId = gate.Subject,
-            }, ct);
-            await outbox.EnqueueAsync("PayerCreated", "policy.events",
-                new
-                {
-                    tenantId = payer.TenantId, payerId = payer.PayerId, payer.PayerCode,
-                    payerType = type.ToString(),
-                    // The NAMES, so the dashboard can label a payer instead of printing eight characters of
-                    // its uuid. reporting-service keeps a dimension-label table for exactly this and had no
-                    // feed for it; `AnalyticsQueries.Label` falls back to `id.ToString()[..8]` — deliberately,
-                    // because a truncated id sends someone looking while "Unknown payer" hides the gap.
-                    payer.NameEn, payer.NameAr,
-                }, ct);
-            await tx.CommitAsync(ct);
-            return Results.Created($"/api/v1/payers/{payer.PayerId}", PayerView.From(payer));
-        })
-        .Produces<PayerView>();
-
-        v1.MapGet("/payers", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
-        {
-            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
-            if (denied is not null) return denied;
-            var rows = await db.Payers.AsNoTracking().Where(p => !p.IsDeleted)
-                .OrderBy(p => p.PayerCode).ToListAsync(ct);
-            return Results.Ok(rows.Select(PayerView.From));
-        })
-        .Produces<IEnumerable<PayerView>>();
-
-        v1.MapGet("/payers/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
-        {
-            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
-            if (denied is not null) return denied;
-            var payer = await db.Payers.AsNoTracking().FirstOrDefaultAsync(p => p.PayerId == id && !p.IsDeleted, ct);
-            return payer is null ? NotFound() : Results.Ok(PayerView.From(payer));
-        })
-        .Produces<PayerView>();
     }
 
     // ---- Plans -------------------------------------------------------------------------------------------

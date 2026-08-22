@@ -8,7 +8,6 @@ import type {
   BenefitRuleTierInput,
   BenefitRuleView,
   NetworkTierView,
-  PayerView,
   PlanVersionView,
   PlanView,
   PolicyApi,
@@ -41,14 +40,12 @@ import { useFormat } from "../i18n/useFormat";
  */
 
 const S = {
-  payers: { en: "Payers", ar: "الجهات الممولة" },
   plans: { en: "Plans & Versions", ar: "الخطط والإصدارات" },
   payerCode: { en: "Code", ar: "الرمز" },
   name: { en: "Name", ar: "الاسم" },
   type: { en: "Type", ar: "النوع" },
   status: { en: "Status", ar: "الحالة" },
   category: { en: "Category", ar: "الفئة" },
-  noPayers: { en: "No payers configured.", ar: "لا توجد جهات ممولة." },
   noPlans: { en: "No plans configured.", ar: "لا توجد خطط." },
   versions: { en: "Versions", ar: "الإصدارات" },
   version: { en: "Version", ar: "الإصدار" },
@@ -100,41 +97,7 @@ const S = {
 const LIMIT_TYPES = ["", "Annual", "PerEncounter", "Lifetime", "Count"];
 const RESET_PERIODS = ["None", "Monthly", "Quarterly", "Yearly"];
 
-// ── Payers ──────────────────────────────────────────────────────────────────────────────────────────────
-
-export function PolicyPayers({ api = httpPolicyApi }: { api?: PolicyApi }) {
-  const t = useLoc();
-  const [rows, setRows] = useState<PayerView[] | null>(null);
-  const [error, setError] = useState<Localized | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    api.payers().then((r) => live && setRows(r)).catch((e) => live && setError(readErrorMessage(e)));
-    return () => { live = false; };
-  }, [api]);
-
-  return (
-    <div className="pol-screen">
-      <PageHeader title={t(S.payers)} />
-      {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <Card>
-        <DataTable
-          caption={t(S.payers)}
-          rows={rows ?? []}
-          rowKey={(r) => r.payerId}
-          loading={rows === null && !error}
-          emptyLabel={t(S.noPayers)}
-          columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.payerCode, sortable: true, sortValue: (r) => r.payerCode },
-            { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "type", header: t(S.type), cell: (r) => r.payerType, sortable: true, sortValue: (r) => r.payerType },
-            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
-          ]}
-        />
-      </Card>
-    </div>
-  );
-}
+// Payers moved to PolicyPayerAdmin.tsx in 19.7, when the section grew a detail pane and three writes.
 
 function BiName({ en, ar }: { en: string; ar: string }) {
   const t = useLoc();

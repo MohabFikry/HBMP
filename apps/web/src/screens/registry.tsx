@@ -101,7 +101,10 @@ const AdminConfig = lazy(() => import("./AdminConsole").then((m) => ({ default: 
 // Policy administration (Phase 19.6) — four chunks rather than one, because the portal's sections are used by
 // two different roles: a beneficiary-management officer opens Members and Bulk and never touches the plan
 // version editor, which is the heaviest screen here.
-const PolicyPayers = lazy(() => import("./PolicyProductAdmin").then((m) => ({ default: m.PolicyPayers })));
+// 19.7 — payers are their own chunk now that the section carries a detail pane, three write dialogs and a
+// history modal. Bundling it with the plan-version editor would make the heaviest screen in the portal the
+// price of opening the lightest.
+const PolicyPayers = lazy(() => import("./PolicyPayerAdmin").then((m) => ({ default: m.PolicyPayers })));
 const PolicyPlans = lazy(() => import("./PolicyProductAdmin").then((m) => ({ default: m.PolicyPlans })));
 const PolicyList = lazy(() => import("./PolicyBook").then((m) => ({ default: m.PolicyList })));
 const GroupsScreen = lazy(() => import("./PolicyBook").then((m) => ({ default: m.GroupsScreen })));

@@ -156,7 +156,155 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "$ref": "#/components/schemas/PayerDetailView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePayer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/PayerView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payers/{id}/deactivate": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePayerStatus"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayerView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payers/{id}/reactivate": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePayerStatus"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayerView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payers/{id}/history": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayerHistoryPage"
                 }
               }
             }
@@ -3676,6 +3824,16 @@
         },
         "additionalProperties": false
       },
+      "ChangePayerStatus": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ChangePlan": {
         "type": "object",
         "properties": {
@@ -3979,7 +4137,13 @@
             "type": "string",
             "nullable": true
           },
-          "contact": {
+          "contacts": {
+            "$ref": "#/components/schemas/PayerContacts"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/PayerTermsInput"
+          },
+          "notes": {
             "type": "string",
             "nullable": true
           }
@@ -4452,6 +4616,305 @@
         },
         "additionalProperties": false
       },
+      "PayerAgreementView": {
+        "type": "object",
+        "properties": {
+          "externalRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementFrom": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "agreementTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerBookView": {
+        "type": "object",
+        "properties": {
+          "policyCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "activePolicyCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "activeMemberCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "planCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "committedLimit": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "consumedValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "ceilingPercentCommitted": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerContact": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "isEmpty": {
+            "type": "boolean",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerContacts": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "$ref": "#/components/schemas/PayerContact"
+          },
+          "finance": {
+            "$ref": "#/components/schemas/PayerContact"
+          },
+          "escalation": {
+            "$ref": "#/components/schemas/PayerContact"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerDetailView": {
+        "type": "object",
+        "properties": {
+          "payer": {
+            "$ref": "#/components/schemas/PayerView"
+          },
+          "book": {
+            "$ref": "#/components/schemas/PayerBookView"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerFinancialTermsView": {
+        "type": "object",
+        "properties": {
+          "fundingCeiling": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlementTermsDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "invoicingCadence": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimSubmissionWindowDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerHistoryEntryView": {
+        "type": "object",
+        "properties": {
+          "historyId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "operation": {
+            "type": "string",
+            "nullable": true
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actorName": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "payerType": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementFrom": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "agreementTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "fundingCeiling": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlementTermsDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "invoicingCadence": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimSubmissionWindowDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerHistoryPage": {
+        "type": "object",
+        "properties": {
+          "payerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayerHistoryEntryView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayerTermsInput": {
+        "type": "object",
+        "properties": {
+          "externalRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreementFrom": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "agreementTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "fundingCeiling": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlementTermsDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "invoicingCadence": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimSubmissionWindowDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "PayerView": {
         "type": "object",
         "properties": {
@@ -4476,6 +4939,36 @@
             "nullable": true
           },
           "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusChangedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "agreement": {
+            "$ref": "#/components/schemas/PayerAgreementView"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/PayerFinancialTermsView"
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/PayerContacts"
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedByName": {
             "type": "string",
             "nullable": true
           }
@@ -4915,6 +5408,34 @@
           },
           "origin": {
             "$ref": "#/components/schemas/TimelineEntryView"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatePayer": {
+        "type": "object",
+        "properties": {
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "payerType": {
+            "type": "string",
+            "nullable": true
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/PayerContacts"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/PayerTermsInput"
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

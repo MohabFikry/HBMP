@@ -92,6 +92,13 @@ export function ConfirmAction({
       setTyped("");
       setTouched(false);
       onOpenChange(false);
+    } catch {
+      // A REJECTED confirm has not happened, so the dialog stays open — closing it would report a failure as
+      // a success, which is the same fault the `canConfirm` note above describes for an early return. The
+      // message belongs to whoever owns `onConfirm`: they hold the RFC 7807 detail ("this payer still funds 3
+      // active policies"), and this component holds nothing but a label. Swallowing here rather than letting
+      // the rejection escape `void confirm()` keeps it out of the unhandled-rejection channel, where it would
+      // be logged as a crash and shown to nobody.
     } finally {
       setBusy(false);
     }

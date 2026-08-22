@@ -53,6 +53,49 @@ export const zQueryPage = <T>(item: z.ZodType<T>) =>
   }).passthrough();
 export type QueryPage<T> = z.infer<ReturnType<typeof zQueryPage<T>>>;
 
+// ── Payers (19.7) ───────────────────────────────────────────────────────────────────────────────────────
+//
+// The wire shape is SPLIT the way the server splits it, and the split is not cosmetic. `agreement` says
+// whether this funding is still running — operational, and anyone administering the book sees it. `terms` is
+// money, and arrives as `null` in one piece for a caller who may not read contract terms. A block of nulls
+// would have rendered as "not recorded", which is a different and wrong answer about a ceiling that exists,
+// so the screen checks for the ABSENT block and says "restricted for your role" instead of drawing empty rows.
+
+export const zPayerContact = z.object({
+  name: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+}).passthrough();
+export type PayerContact = z.infer<typeof zPayerContact>;
+
+export const zPayerContacts = z.object({
+  primary: zPayerContact.nullable().optional(),
+  finance: zPayerContact.nullable().optional(),
+  escalation: zPayerContact.nullable().optional(),
+}).passthrough();
+export type PayerContacts = z.infer<typeof zPayerContacts>;
+
+export const zPayerAgreement = z.object({
+  externalRef: z.string().nullable().optional(),
+  agreementNo: z.string().nullable().optional(),
+  agreementFrom: z.string().nullable().optional(),
+  agreementTo: z.string().nullable().optional(),
+  /** `Unrecorded | NotYetStarted | InForce | Expired` — projected by the server so the screen and the
+   *  service cannot disagree about whether a grant is still running. */
+  state: z.string(),
+}).passthrough();
+export type PayerAgreement = z.infer<typeof zPayerAgreement>;
+
+export const zPayerTerms = z.object({
+  fundingCeiling: z.number().nullable().optional(),
+  currency: z.string(),
+  settlementTermsDays: z.number().nullable().optional(),
+  invoicingCadence: z.string().nullable().optional(),
+  claimSubmissionWindowDays: z.number().nullable().optional(),
+}).passthrough();
+export type PayerTerms = z.infer<typeof zPayerTerms>;
+
 export const zPayerView = z.object({
   payerId: z.string(),
   payerCode: z.string(),
@@ -60,8 +103,85 @@ export const zPayerView = z.object({
   nameAr: z.string(),
   payerType: z.string(),
   status: z.string(),
+  statusReason: z.string().nullable().optional(),
+  statusChangedAt: z.string().nullable().optional(),
+  agreement: zPayerAgreement,
+  /** Null = withheld from this role, NOT "no terms recorded". See the note above. */
+  terms: zPayerTerms.nullable().optional(),
+  contacts: zPayerContacts.nullable().optional(),
+  notes: z.string().nullable().optional(),
+  updatedAt: z.string(),
+  updatedByName: z.string().nullable().optional(),
 }).passthrough();
 export type PayerView = z.infer<typeof zPayerView>;
+
+export const zPayerBook = z.object({
+  policyCount: z.number(),
+  activePolicyCount: z.number(),
+  memberCount: z.number(),
+  activeMemberCount: z.number(),
+  planCount: z.number(),
+  /** Null = the caller may not read amounts. Zero means zero. */
+  committedLimit: z.number().nullable().optional(),
+  consumedValue: z.number().nullable().optional(),
+  /** Survives a caller who may not see the amounts: "92% committed" is operational, the pounds are not. */
+  ceilingPercentCommitted: z.number().nullable().optional(),
+}).passthrough();
+export type PayerBook = z.infer<typeof zPayerBook>;
+
+export const zPayerDetail = z.object({
+  payer: zPayerView,
+  book: zPayerBook,
+}).passthrough();
+export type PayerDetail = z.infer<typeof zPayerDetail>;
+
+export const zPayerHistoryEntry = z.object({
+  historyId: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorName: z.string().nullable().optional(),
+  actorId: z.string().nullable().optional(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  payerType: z.string(),
+  status: z.string(),
+  statusReason: z.string().nullable().optional(),
+  agreementNo: z.string().nullable().optional(),
+  agreementFrom: z.string().nullable().optional(),
+  agreementTo: z.string().nullable().optional(),
+  fundingCeiling: z.number().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  settlementTermsDays: z.number().nullable().optional(),
+  invoicingCadence: z.string().nullable().optional(),
+  claimSubmissionWindowDays: z.number().nullable().optional(),
+}).passthrough();
+export type PayerHistoryEntry = z.infer<typeof zPayerHistoryEntry>;
+
+export const zPayerHistoryPage = z.object({
+  payerId: z.string(),
+  entries: z.array(zPayerHistoryEntry),
+}).passthrough();
+export type PayerHistoryPage = z.infer<typeof zPayerHistoryPage>;
+
+/** What the create/update forms send. `payerCode` is on create only — see `UpdatePayer` on the server. */
+export interface PayerWrite {
+  nameEn: string;
+  nameAr: string;
+  payerType: string;
+  contacts?: PayerContacts | null;
+  terms?: {
+    externalRef?: string | null;
+    agreementNo?: string | null;
+    agreementFrom?: string | null;
+    agreementTo?: string | null;
+    fundingCeiling?: number | null;
+    currency?: string | null;
+    settlementTermsDays?: number | null;
+    invoicingCadence?: string | null;
+    claimSubmissionWindowDays?: number | null;
+  } | null;
+  notes?: string | null;
+}
 
 export const zPlanView = z.object({
   planId: z.string(),
@@ -879,6 +999,14 @@ export type BulkReconciliationView = z.infer<typeof zBulkReconciliationView>;
 export interface PolicyApi {
   // Product configuration (19.1 / 19.1b)
   payers(): Promise<PayerView[]>;
+  /** One payer plus its book of business. Answered together because the second is why anyone opens the first. */
+  payer(payerId: string): Promise<PayerDetail>;
+  createPayer(body: PayerWrite & { payerCode: string }, idempotencyKey: string): Promise<PayerView>;
+  updatePayer(payerId: string, body: PayerWrite): Promise<PayerView>;
+  /** Refused with 409 while the payer still funds active policies — the message carries the count. */
+  deactivatePayer(payerId: string, reason: string, idempotencyKey: string): Promise<PayerView>;
+  reactivatePayer(payerId: string, reason: string, idempotencyKey: string): Promise<PayerView>;
+  payerHistory(payerId: string): Promise<PayerHistoryPage>;
   plans(): Promise<PlanView[]>;
   benefitCategories(): Promise<BenefitCategoryView[]>;
   planVersions(planId: string): Promise<PlanVersionView[]>;
@@ -1005,6 +1133,12 @@ const q = (filters: Record<string, string | number | undefined>): string => {
 export function createHttpPolicyApi(): PolicyApi {
   return {
     payers: () => parsed(z.array(zPayerView), getRaw("/payers")),
+    payer: (id) => parsed(zPayerDetail, getRaw(`/payers/${id}`)),
+    createPayer: (body, key) => parsed(zPayerView, postRaw("/payers", body, key)),
+    updatePayer: (id, body) => parsed(zPayerView, putRaw(`/payers/${id}`, body)),
+    deactivatePayer: (id, reason, key) => parsed(zPayerView, postRaw(`/payers/${id}/deactivate`, { reason }, key)),
+    reactivatePayer: (id, reason, key) => parsed(zPayerView, postRaw(`/payers/${id}/reactivate`, { reason }, key)),
+    payerHistory: (id) => parsed(zPayerHistoryPage, getRaw(`/payers/${id}/history`)),
     plans: () => parsed(z.array(zPlanView), getRaw("/plans")),
     benefitCategories: () => parsed(z.array(zBenefitCategoryView), getRaw("/benefit-categories")),
     planVersions: (planId) => parsed(z.array(zPlanVersionView), getRaw(`/plans/${planId}/versions`)),

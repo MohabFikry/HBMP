@@ -62,7 +62,11 @@ describe("policyApi validates instead of casting", () => {
     // Forward compatibility is the other half of the rule: a server that ADDS a field must not break a
     // bundle deployed before it. `.passthrough()` is what makes drift an error in one direction only.
     respondWith([{ payerId: "p1", payerCode: "MOH", nameEn: "Ministry", nameAr: "وزارة",
-                   payerType: "Government", status: "Active", somethingNewNextQuarter: 42 }]);
+                   payerType: "Government", status: "Active",
+                   // 19.7 — the agreement block and the signature stamp are part of the contract now.
+                   agreement: { agreementFrom: null, agreementTo: null, state: "Unrecorded" },
+                   updatedAt: "2026-08-01T09:00:00Z",
+                   somethingNewNextQuarter: 42 }]);
 
     const payers = await createHttpPolicyApi().payers();
     expect(payers[0].payerCode).toBe("MOH");

@@ -6938,3 +6938,101 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   padding: 0;
   list-style: none;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════════════════
+   PAYER ADMINISTRATION (19.7, design 56)
+
+   Logical properties throughout — this screen is read in Arabic as often as in English, and a `margin-left`
+   here is a layout that mirrors everything except the one thing you wrote by hand.
+   ════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* The list's agreement column: state chip over the window, so the row scans as one fact rather than two. */
+.pay-agreement-cell { display: grid; gap: var(--sp1); justify-items: start; }
+.pay-agreement-cell > span { font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+
+.pay-head { display: grid; gap: var(--sp2); min-inline-size: 0; }
+.pay-head h3 { margin: 0; }
+.pay-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp2); }
+
+/* A definition list laid out as wrapping pairs. `.pol-identity dl` already does this for the member header;
+   this is the standalone class, because these lists are not inside a `.pol-identity`. */
+.pol-identity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp3) var(--sp5);
+  margin: 0;
+  margin-block-start: var(--sp2);
+}
+.pol-identity-list > div { display: grid; gap: 2px; min-inline-size: 8rem; }
+.pol-identity-list dt {
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pol-identity-list dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* Contacts. One row per named role, and the role label is the first thing read — the whole reason there are
+   three of them rather than a list is that the reader is looking for a PARTICULAR one. */
+.pay-contacts { list-style: none; margin: var(--sp2) 0 0; padding: 0; display: grid; gap: var(--sp2); }
+.pay-contacts > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp1) var(--sp3);
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+.pay-contact-role {
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-basis: 11rem;
+}
+.pay-contact-name { font-weight: 600; }
+.pay-contacts a { display: inline-flex; align-items: center; gap: var(--sp1); }
+.pay-contacts svg { inline-size: 14px; block-size: 14px; }
+
+/* The create/edit form. Two columns where there is room, one when there is not — a funding ceiling and a
+   currency belong side by side, and forcing them apart on a phone is worse than stacking everything. */
+.pay-form-section { display: grid; gap: var(--sp2); margin-block-start: var(--sp4); }
+.pay-form-section:first-of-type { margin-block-start: 0; }
+.pay-form-section h4 { margin: 0; font-size: 1rem; }
+.pay-form-grid {
+  display: grid;
+  gap: var(--sp3);
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+.pay-contact-fields {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--sp3);
+  margin: 0;
+}
+.pay-contact-fields legend {
+  padding-inline: var(--sp2);
+  color: var(--text-2);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* The history modal: newest first, each entry a header line plus the facts as they stood. */
+.pay-history { list-style: none; margin: var(--sp3) 0 0; padding: 0; display: grid; gap: var(--sp3); }
+.pay-history > li {
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+.pay-history-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+  font-variant-numeric: tabular-nums;
+}

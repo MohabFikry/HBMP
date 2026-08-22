@@ -17,6 +17,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     // 19.1 — the PAS product layer (design 38 §3).
     public DbSet<Payer> Payers => Set<Payer>();
+    public DbSet<PayerHistoryEntry> PayerHistory => Set<PayerHistoryEntry>();   // 19.7 (0020)
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<PlanVersion> PlanVersions => Set<PlanVersion>();
     public DbSet<BenefitRule> BenefitRules => Set<BenefitRule>();
@@ -147,6 +148,38 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.CreatedBy).HasColumnName("created_by");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            // 19.7 (0020) — the commercial facts. Nullable throughout: a payer created before this existed is
+            // still a valid payer, and a screen that demanded a funding ceiling to render one would be
+            // demanding the administrator invent a number.
+            e.Property(x => x.ExternalRef).HasColumnName("external_ref");
+            e.Property(x => x.AgreementNo).HasColumnName("agreement_no");
+            e.Property(x => x.AgreementFrom).HasColumnName("agreement_from");
+            e.Property(x => x.AgreementTo).HasColumnName("agreement_to");
+            e.Property(x => x.FundingCeiling).HasColumnName("funding_ceiling");
+            e.Property(x => x.Currency).HasColumnName("currency");
+            e.Property(x => x.SettlementTermsDays).HasColumnName("settlement_terms_days");
+            e.Property(x => x.InvoicingCadence).HasConversion<string>().HasColumnName("invoicing_cadence");
+            e.Property(x => x.ClaimSubmissionWindowDays).HasColumnName("claim_submission_window_days");
+            e.Property(x => x.Notes).HasColumnName("notes");
+            e.Property(x => x.StatusReason).HasColumnName("status_reason");
+            e.Property(x => x.StatusChangedAt).HasColumnName("status_changed_at");
+            e.Property(x => x.StatusChangedBy).HasColumnName("status_changed_by");
+            e.Property(x => x.CreatedByName).HasColumnName("created_by_name");
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");
+        });
+
+        // 19.7 (0020) — the history twin the trigger writes. Insert-only from the application's side; the
+        // trigger owns the writes, and EF only ever reads it.
+        b.Entity<PayerHistoryEntry>(e =>
+        {
+            e.ToTable("payer_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).HasColumnName("history_id").ValueGeneratedOnAdd();
+            e.Property(x => x.PayerId).HasColumnName("payer_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Operation).HasColumnName("operation");
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.RecordedAt).HasColumnName("recorded_at");
         });
 
         b.Entity<Plan>(e =>

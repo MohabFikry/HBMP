@@ -6,11 +6,25 @@ namespace Mersal.Policy.Domain;
 public enum PayerType { SelfFunded, Donor, Government, PartnerNGO, Insurer }
 public enum CatalogStatus { Active, Inactive }
 
+/// <summary>How often the payer is billed. 19.7 — a number of days answers "by when"; this answers "how
+/// often", and the two are independent (net-30 on a monthly invoice is not net-30 per claim).</summary>
+public enum PayerInvoicingCadence { OnClaim, Monthly, Quarterly, SemiAnnual, Annual }
+
 /// <summary>Lifecycle of a benefit configuration. <c>Draft</c> is freely editable; <c>Active</c> is in force and
 /// IMMUTABLE; <c>Superseded</c> was replaced by a later version but still resolves for service dates inside its
 /// own window; <c>Retired</c> was withdrawn without a successor and likewise still resolves for the past.</summary>
 public enum PlanVersionStatus { Draft, Active, Superseded, Retired }
 
+/// <summary>
+/// The counterparty a policy is funded BY — a donor grant, a government programme, a partner NGO, an insurer,
+/// or Mersal's own funds. <see cref="Policy.PayerId"/> points here, utilization rolls up to here (19.4), and a
+/// user can be RESTRICTED to one (19.5), which makes this the top of the commercial hierarchy.
+///
+/// <para>19.7 gave it the facts that decide whether it can actually pay. Before that the row could label a
+/// payer and not administer one: the agreement window, the funding ceiling, the settlement terms and the
+/// people to call all lived outside the platform, and <see cref="Contact"/> — reserved since 0005 — was
+/// <c>{}</c> on every row ever created because nothing read or wrote it.</para>
+/// </summary>
 public sealed class Payer
 {
     public Guid PayerId { get; set; }
@@ -19,15 +33,106 @@ public sealed class Payer
     public string NameEn { get; set; } = default!;
     public string NameAr { get; set; } = default!;
     public PayerType PayerType { get; set; }
-    /// <summary>Free-form contact block (jsonb). Operational contact detail, not beneficiary PII.</summary>
+
+    /// <summary>The reference the PAYER knows this agreement by — a donor's grant number, an insurer's
+    /// licence. Reconciliation happens against their reference, not ours.</summary>
+    public string? ExternalRef { get; set; }
+    public string? AgreementNo { get; set; }
+
+    /// <summary>The funding window, half-open like every other window in this schema: <c>[from, to)</c>.
+    /// Deliberately NOT the same thing as <see cref="Status"/> — see <see cref="AgreementState"/>.</summary>
+    public DateOnly? AgreementFrom { get; set; }
+    public DateOnly? AgreementTo { get; set; }
+
+    /// <summary>What the payer has committed, in <see cref="Currency"/>. Null = uncapped (Mersal's own funds
+    /// usually are). Zero is refused at the database: a ceiling of nothing is not "uncapped", it is a payer
+    /// that would refuse every claim for a reason no screen explains.</summary>
+    public decimal? FundingCeiling { get; set; }
+    public string Currency { get; set; } = "EGP";
+
+    /// <summary>Days from invoice to payment — "net 30" as the number every signed contract states it as.</summary>
+    public int? SettlementTermsDays { get; set; }
+    public PayerInvoicingCadence? InvoicingCadence { get; set; }
+    /// <summary>Days after the service date within which a claim must reach this payer. Past it the money is
+    /// gone regardless of whether the care was covered, which is why it belongs on the payer and not in a
+    /// finance spreadsheet.</summary>
+    public int? ClaimSubmissionWindowDays { get; set; }
+
+    public string? Notes { get; set; }
+
+    /// <summary>Operational contact detail (jsonb), shaped by <see cref="PayerContacts"/>. Never beneficiary
+    /// PII — these are the payer's own staff.</summary>
     public string Contact { get; set; } = "{}";
+
     public CatalogStatus Status { get; set; } = CatalogStatus.Active;
+    /// <summary>Why the status is what it is. A deactivation recorded without one is a record of the fact and
+    /// none of the decision, and the reason is the half somebody needs six months later.</summary>
+    public string? StatusReason { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public Guid? StatusChangedBy { get; set; }
+
     public bool IsDeleted { get; set; }
     public int RowVersion { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+
+    /// <summary>
+    /// Where the AGREEMENT stands on a date, which is not where the RECORD stands.
+    ///
+    /// <para>Collapsing the two would lose the difference between "the grant ran its course" and "we stopped
+    /// working with them". An Active payer whose window has closed is a real and actionable combination —
+    /// somebody has to renew it or stop enrolling against it — so it is surfaced rather than hidden.</para>
+    /// </summary>
+    public PayerAgreementState AgreementState(DateOnly on)
+    {
+        if (AgreementFrom is null && AgreementTo is null) return PayerAgreementState.Unrecorded;
+        if (AgreementFrom is { } from && on < from) return PayerAgreementState.NotYetStarted;
+        if (AgreementTo is { } to && on >= to) return PayerAgreementState.Expired;
+        return PayerAgreementState.InForce;
+    }
+}
+
+/// <summary>Where a payer's funding agreement stands on a date. <c>Unrecorded</c> is its own answer and not a
+/// synonym for in-force: "we never wrote the window down" and "the window is open" are different problems.</summary>
+public enum PayerAgreementState { Unrecorded, NotYetStarted, InForce, Expired }
+
+/// <summary>
+/// The typed shape of <see cref="Payer.Contact"/>.
+///
+/// <para>Three NAMED roles rather than a list, because the three questions asked of a payer are different
+/// questions asked of different people: the day-to-day counterpart, the one who settles invoices, and the one
+/// you escalate a stalled claim to. A flat list of contacts makes an operator guess which is which, and the
+/// guess is made at the moment they most need to be right.</para>
+/// </summary>
+public sealed record PayerContacts(
+    PayerContact? Primary = null,
+    PayerContact? Finance = null,
+    PayerContact? Escalation = null);
+
+public sealed record PayerContact(string? Name, string? Title, string? Email, string? Phone)
+{
+    /// <summary>An entry with nothing in it is not a contact. Stored as null rather than as four empty
+    /// strings, so "no finance contact" reads as absent instead of as present-and-blank.</summary>
+    public bool IsEmpty =>
+        string.IsNullOrWhiteSpace(Name) && string.IsNullOrWhiteSpace(Title)
+        && string.IsNullOrWhiteSpace(Email) && string.IsNullOrWhiteSpace(Phone);
+}
+
+/// <summary>One row of <c>policy.payer_history</c> — the snapshot the 0020 trigger writes on every insert and
+/// update. Read at the same authority that maintains the payer; the hash-chained audit trail answers the
+/// compliance question separately (see 0020's header).</summary>
+public sealed class PayerHistoryEntry
+{
+    public long HistoryId { get; set; }
+    public Guid PayerId { get; set; }
+    public string TenantId { get; set; } = "";
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = "{}";
+    public DateTimeOffset RecordedAt { get; set; }
 }
 
 public sealed class Plan

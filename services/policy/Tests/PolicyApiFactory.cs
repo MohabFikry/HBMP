@@ -44,6 +44,10 @@ public sealed class PolicyApiFactory : WebApplicationFactory<Program>
 
     public InMemoryOutbox Outbox { get; private set; } = default!;
 
+    /// <summary>The caller's payer restriction, as admin-service would report it. Unrestricted by default —
+    /// the common case — and settable so the payer-scope suite can narrow it without a second factory.</summary>
+    public PermittedPayers Payers { get; set; } = PermittedPayers.Unrestricted;
+
     /// <summary>A fresh tenant per factory. policy's tables are tenant-scoped, so this is also the cleanup key.</summary>
     public string Tenant { get; } = "t-api-" + Guid.NewGuid().ToString("N")[..10];
 
@@ -67,7 +71,7 @@ public sealed class PolicyApiFactory : WebApplicationFactory<Program>
             s.RemoveAll<INetworkTierCatalog>();
             s.AddSingleton<INetworkTierCatalog>(new FakeTierCatalog());
             s.RemoveAll<IPayerDirectory>();
-            s.AddSingleton<IPayerDirectory>(new AllPayers());
+            s.AddSingleton<IPayerDirectory>(new FactoryPayers(this));
             s.RemoveAll<IBranchDirectory>();
             s.AddSingleton<IBranchDirectory>(new AllBranches());
 
@@ -122,6 +126,10 @@ public sealed class PolicyApiFactory : WebApplicationFactory<Program>
             "DELETE FROM policy.member_group WHERE tenant_id = {0}; " +
             "DELETE FROM policy.policy_plan WHERE tenant_id = {0}; " +
             "DELETE FROM policy.policy WHERE tenant_id = {0}; " +
+            // 19.7 — payers, and the history twin the 0020 trigger fills on every write. Left behind, they
+            // accumulate a row per create and per edit across every run of the suite.
+            "DELETE FROM policy.payer_history WHERE tenant_id = {0}; " +
+            "DELETE FROM policy.payer WHERE tenant_id = {0}; " +
             "SET session_replication_role = origin;", Tenant);
     }
 
@@ -145,11 +153,11 @@ internal sealed class FakeTierCatalog : INetworkTierCatalog
         => Task.FromResult<IReadOnlyList<NetworkTierRef>>([new NetworkTierRef(TierId, "TIER-A")]);
 }
 
-/// <summary>Not payer-restricted — the common case. Payer scoping has its own suite.</summary>
-internal sealed class AllPayers : IPayerDirectory
+/// <summary>Reports whatever the factory was told to report. Unrestricted unless a test narrows it.</summary>
+internal sealed class FactoryPayers(PolicyApiFactory f) : IPayerDirectory
 {
     public Task<PermittedPayers> GetAsync(HbmpPrincipal principal, CancellationToken ct = default)
-        => Task.FromResult(PermittedPayers.Unrestricted);
+        => Task.FromResult(f.Payers);
 }
 
 internal sealed class AllBranches : IBranchDirectory

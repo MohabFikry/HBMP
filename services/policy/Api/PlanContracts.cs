@@ -4,7 +4,7 @@ namespace Mersal.Policy.Api;
 
 // Phase 19.1 request/response contracts for the PAS product layer (design 38 §3, §4.1).
 
-public sealed record CreatePayer(string PayerCode, string NameEn, string NameAr, string PayerType, string? Contact);
+// CreatePayer / PayerView and the rest of the payer surface live in PayerContracts.cs (19.7).
 
 public sealed record CreatePlan(string PlanCode, string NameEn, string NameAr, string? Description, string Category);
 
@@ -46,12 +46,6 @@ public sealed record BenefitRuleTierInput(
 
 /// <summary>19.6 — reference data for the plan-version editor's row set. Codes and names only.</summary>
 public sealed record BenefitCategoryView(Guid BenefitCategoryId, string Code, string Name);
-
-public sealed record PayerView(Guid PayerId, string PayerCode, string NameEn, string NameAr, string PayerType, string Status)
-{
-    public static PayerView From(Payer p) =>
-        new(p.PayerId, p.PayerCode, p.NameEn, p.NameAr, p.PayerType.ToString(), p.Status.ToString());
-}
 
 public sealed record PlanView(Guid PlanId, string PlanCode, string NameEn, string NameAr, string? Description, string Category, string Status)
 {
