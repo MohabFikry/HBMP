@@ -272,6 +272,41 @@ Registered as `INV-THE-RESOLVED-BRANCH-REACH-REACHES-THE-GUARD`, severity Critic
 
 ---
 
+## 4.3 The other half: a supervisor with no way to say which clinic
+
+Two symptoms, reported separately, that are one problem seen from two places.
+
+**"The branch selector is flaky — sometimes it shows, sometimes it doesn't."** `useBranchContext` resolved
+`/me/branches` once and gave up on any failure, silently. One 401 while the token was still being exchanged,
+one gateway timeout, or identity-service answering a moment late left the caller with **no switcher for the
+rest of the session** — and nothing on screen admitting it. It now retries four times with backoff, and
+distinguishes a request that FAILED from an answer that was EMPTY: a 200 listing no branches is a real answer
+(the fixture harness, a caller with no assignment) and is not retried.
+
+Fail-soft was right for the case it was written for. Fail-soft with **one attempt and no signal** was not.
+
+**"Book Appointment doesn't show a branch selector."** It never did, deliberately — reception books into its
+own clinic and the server refuses a request naming another, so a picker could only offer a choice that 403s.
+That reasoning holds for a coordinator and breaks for a clinics manager, who has **no active branch until
+they filter**: `BranchWriteScope.ResolveTarget` refuses the booking with `branch-target-required`, and the
+note on the screen told them to *"switch branches in the header"* — a control that filters rather than
+switches, starts cleared, and (per the first symptom) might not be there at all. Booking was unreachable and
+the screen's own advice led nowhere.
+
+So the mode now follows the caller's reach, subscribed to the same active-branch store `useAsync` watches:
+
+| caller | mode | note |
+|---|---|---|
+| reception / coordinator | `fixed` | "booked in your active branch" |
+| clinics manager, unfiltered | `choose` | "you run several clinics, so this booking has to name the one it is for" |
+| clinics manager, filtered | `fixed` | "booking into the clinic you have filtered to" |
+
+**And the answer to "does this view show only one branch?"** — no. A set-scoped caller with no filter is
+served every clinic in reach: `BranchQueryScope` returns the whole permitted set, and the roster's day view
+carries a Clinic column precisely for that state. Filtering narrows it; clearing the filter restores all six.
+
+---
+
 ## 5. Both roles, one screen
 
 A branch coordinator and a clinics manager hold **exactly the same permission set** (design 42 §1) and differ
@@ -297,6 +332,7 @@ A control that appears because somebody has a choice to make, never because they
 | `INV-A-ROSTER-NAMES-EACH-CLINICIAN-ONCE` | one row per clinician, clinics named where ambiguous, free days visible |
 | `INV-A-VALUE-THIS-SERVICE-PRINTS-IS-A-VALUE-IT-READS` | a time crosses emr's wire as `HH:mm` in both directions |
 | `INV-A-WORKING-DAY-CAN-ALWAYS-BE-ADDED-WHERE-THE-CLINIC-RUNS` | a new rule inherits the clinic's service point from any rule at that clinic |
+| `INV-A-CALLER-WHO-RUNS-SEVERAL-CLINICS-CAN-NAME-ONE` | the switcher retries a failed resolve; booking asks for the clinic when no filter is set |
 
 ---
 

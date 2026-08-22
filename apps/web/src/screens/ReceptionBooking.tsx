@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button, Card, Icon, InlineAlert, InputField, Modal, StatusChip } from "@mersal/design-system";
 import type { EligibilityHit, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
+import { getActiveBranch, subscribeActiveBranch } from "../api/activeBranch";
+import { useAuth } from "../auth/AuthProvider";
+import { isSetScopedRole } from "../shell/useBranchContext";
+import type { BranchSummary } from "@mersal/contracts";
 import { useWrite } from "../api/useWrite";
 import { useFormat } from "../i18n/useFormat";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
@@ -10,10 +14,23 @@ import { BookingForm, NOTE_MAX, type BookingSelection } from "./booking/BookingF
 
 const S = {
   title: { en: "Book an Appointment", ar: "حجز موعد" },
-  // The branch is NOT a field: it is whatever the app bar says, and the server refuses anything else.
+  // For a caller with ONE clinic the branch is not a field: it is whatever the app bar says, and the server
+  // refuses anything else.
   branchNote: {
     en: "The appointment is booked in your active branch — switch branches in the header to book elsewhere.",
     ar: "يُحجز الموعد في فرعك النشط — بدّل الفرع من الأعلى للحجز في مكان آخر.",
+  },
+  /* A clinics manager supervises several clinics and has NO active branch until they filter, so there is no
+     "your branch" for the server to resolve — it refuses the booking with branch-target-required. The clinic
+     is a field for them, and the note says which state they are in rather than pointing at a header control
+     that filters rather than switches. */
+  branchNoteSupervisor: {
+    en: "You run several clinics, so this booking has to name the one it is for.",
+    ar: "أنت تدير عدة عيادات، لذا يجب أن يحدد هذا الحجز العيادة المقصودة.",
+  },
+  branchNoteFiltered: {
+    en: "Booking into the clinic you have filtered to. Clear the filter in the header to book elsewhere.",
+    ar: "الحجز في العيادة التي حددتها بالتصفية. امسح التصفية من الأعلى للحجز في مكان آخر.",
   },
   step1: { en: "1. Patient", ar: "١. المريض" },
   step2: { en: "2. Appointment", ar: "٢. الموعد" },
@@ -125,6 +142,35 @@ export function ReceptionBooking() {
   const t = useLoc();
   const fmt = useFormat();
   const write = useWrite();
+  const { session } = useAuth();
+
+  /*
+    WHERE THE BRANCH COMES FROM, for a caller who runs more than one clinic.
+
+    Reception has one clinic and the server resolves it — that is the `fixed` mode this screen was written
+    for, and it is still right for them. A clinics manager reaches six and starts with NO filter, so there is
+    nothing for the server to resolve: `BranchWriteScope` refuses the booking with `branch-target-required`,
+    and the note on this screen told them to "switch branches in the header" — a control that FILTERS for
+    them and starts cleared. Booking was unreachable, and the screen's own advice did not lead anywhere.
+
+    So: unfiltered supervisor ⇒ the clinic is a field. Filtered ⇒ `fixed` again, because the server accepts
+    only the clinic they have filtered to and a picker offering others could only produce a 403.
+  */
+  const setScoped = isSetScopedRole(session?.role ?? undefined);
+  // Subscribed, not read once: the header filter can change while this screen is open, and the mode has to
+  // follow it — the same store `useAsync` watches so every other screen re-reads on a switch.
+  const activeBranch = useSyncExternalStore(subscribeActiveBranch, getActiveBranch, getActiveBranch);
+  const mustNameClinic = setScoped && !activeBranch;
+
+  const [branches, setBranches] = useState<BranchSummary[]>([]);
+  useEffect(() => {
+    if (!mustNameClinic) return;
+    let live = true;
+    void api.branches()
+      .then((b) => { if (live) setBranches(b); })
+      .catch(() => { if (live) setBranches([]); });
+    return () => { live = false; };
+  }, [api, mustNameClinic]);
 
   // `?q=` — the patient the caller arrived WITH. The profile's "Book appointment" sends the member number,
   // because otherwise that action lands on an empty form and asks the operator to look up the person whose
@@ -281,7 +327,9 @@ export function ReceptionBooking() {
     <>
       <PageHeader title={t(S.title)} />
       <Card as="section" className="book-card" style={{ padding: "var(--sp5)" }}>
-        <p className="muted">{t(S.branchNote)}</p>
+        <p className="muted">
+          {mustNameClinic ? t(S.branchNoteSupervisor) : setScoped ? t(S.branchNoteFiltered) : t(S.branchNote)}
+        </p>
 
         {/* ── 1. Patient ─────────────────────────────────────────────── */}
         <h2 className="section-h">{t(S.step1)}</h2>
@@ -353,7 +401,13 @@ export function ReceptionBooking() {
 
         {/* ── 2. Appointment ─────────────────────────────────────────── */}
         <h2 className="section-h">{t(S.step2)}</h2>
-        <BookingForm key={formKey} branchMode="fixed" onChange={setSel} reloadToken={reloadToken} />
+        <BookingForm
+          key={formKey}
+          branchMode={mustNameClinic ? "choose" : "fixed"}
+          branches={branches}
+          onChange={setSel}
+          reloadToken={reloadToken}
+        />
 
         {/* Only after a submit attempt: telling the desk what is missing before they have tried is noise. */}
         {attempted && missing && <InlineAlert tone="warn">{t(missing)}</InlineAlert>}

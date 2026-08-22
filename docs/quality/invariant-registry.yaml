@@ -2942,3 +2942,19 @@ invariants:
       - apps/web/test/branch-roster.test.tsx::offers a working day to a clinician who has no pattern at all
       - apps/web/test/branch-roster.test.tsx::narrows to one clinic when its chip is pressed
       - apps/web/test/branch-roster.test.tsx::gives every row action a name, because they are icons
+
+  - id: INV-A-CALLER-WHO-RUNS-SEVERAL-CLINICS-CAN-NAME-ONE
+    statement: >-
+      A caller whose reach spans several clinics is always given a way to say which one they mean. The
+      app-bar switcher retries a failed resolve rather than giving up on the first 401 or timeout — for a
+      set-scoped caller that control IS their filter, so losing it silently loses every narrowing they have —
+      and a booking screen asks for the clinic when no filter is set, because `BranchWriteScope` refuses a
+      write that names none and the header control filters rather than switches.
+    source: design 37 §3/§7; design 42 §1; ADR-0029
+    severity: High
+    tests:
+      - apps/web/test/branch-reach-controls.test.tsx::retries, rather than leaving the caller with no filter for the session
+      - apps/web/test/branch-reach-controls.test.tsx::stops after a bounded number of attempts rather than hammering a service that is down
+      - apps/web/test/branch-reach-controls.test.tsx::does not retry an answer that is simply empty
+      - apps/web/test/branch-reach-controls.test.tsx::gives a clinics manager a clinic field
+      - apps/web/test/branch-reach-controls.test.tsx::does not ask a single-clinic desk for something the server would refuse
