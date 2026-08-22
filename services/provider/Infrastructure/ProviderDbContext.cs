@@ -26,6 +26,10 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<NetworkTier> NetworkTiers => Set<NetworkTier>();                                   // 19.1b
     public DbSet<ProviderNetworkAssignment> NetworkAssignments => Set<ProviderNetworkAssignment>(); // 19.1b
     public DbSet<ProviderTerminationRequest> TerminationRequests => Set<ProviderTerminationRequest>();  // 2026-08-09 audit
+    /// <summary>0015 — the three append-only twins, written by triggers and never by this application.</summary>
+    public DbSet<ProviderHistoryRow> ProviderHistory => Set<ProviderHistoryRow>();
+    public DbSet<ProviderLocationHistoryRow> LocationHistory => Set<ProviderLocationHistoryRow>();
+    public DbSet<ProviderContractHistoryRow> ContractHistory => Set<ProviderContractHistoryRow>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -43,6 +47,29 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.ApprovedBy).HasColumnName("approved_by");
             e.Property(x => x.ApprovedAt).HasColumnName("approved_at");
             e.Property(x => x.WithdrawnAt).HasColumnName("withdrawn_at");
+        });
+
+        // 0015 — the history twins. Read-only to the application: the trigger is the writer.
+        b.Entity<ProviderHistoryRow>(e =>
+        {
+            e.ToTable("provider_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+        });
+        b.Entity<ProviderLocationHistoryRow>(e =>
+        {
+            e.ToTable("provider_location_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+        });
+        b.Entity<ProviderContractHistoryRow>(e =>
+        {
+            e.ToTable("provider_contract_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
         });
 
         b.AddOutbox("provider");

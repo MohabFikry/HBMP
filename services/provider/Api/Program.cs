@@ -236,6 +236,10 @@ write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAu
         ProviderId = Guid.NewGuid(), TenantId = tenant, ProviderCode = req.ProviderCode, LegalName = req.LegalName,
         ProviderType = type, Status = ProviderStatus.Suspended, OnboardingState = OnboardingState.Draft,
         CreatedAt = now, UpdatedAt = now,
+        // 19.9 — snapshotted at write time, never joined at read time: the point of recording who did this
+        // is that the answer survives them being renamed or de-provisioned.
+        CreatedBy = me.Principal?.Subject, CreatedByName = me.Principal?.DisplayName,
+        UpdatedBy = me.Principal?.Subject, UpdatedByName = me.Principal?.DisplayName,
     };
     // 24.3 — the provider row and ProviderCreated commit together.
     await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -286,6 +290,8 @@ write.MapPost("/providers/{id:guid}/locations", async (Guid id, CreateLocation r
         LocationId = Guid.NewGuid(), ProviderId = id, TenantId = tenant!, Name = req.Name,
         Governorate = req.Governorate, Address = req.Address, GeoLat = req.GeoLat, GeoLng = req.GeoLng,
         IsPrimary = req.IsPrimary,
+        CreatedBy = me.Principal?.Subject, UpdatedBy = me.Principal?.Subject,
+        UpdatedByName = me.Principal?.DisplayName,
     };
     db.Locations.Add(loc);
     try { await db.SaveChangesAsync(ct); }
@@ -307,6 +313,8 @@ write.MapPost("/providers/{id:guid}/contracts", async (Guid id, CreateContract r
     {
         ContractId = Guid.NewGuid(), ProviderId = id, TenantId = tenant!, ContractNo = req.ContractNo,
         EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo, Status = ContractStatus.Draft,
+        CreatedBy = me.Principal?.Subject, CreatedByName = me.Principal?.DisplayName,
+        UpdatedBy = me.Principal?.Subject, UpdatedByName = me.Principal?.DisplayName,
     };
     db.Contracts.Add(c);
     try { await db.SaveChangesAsync(ct); }
@@ -321,6 +329,12 @@ write.MapPost("/contracts/{contractId:guid}/service-lines", async (Guid contract
     var tenant = me.Principal?.TenantId;
     var c = await db.Contracts.FirstOrDefaultAsync(x => x.ContractId == contractId && x.TenantId == tenant && !x.IsDeleted, ct);
     if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+    // 19.9 — a closed contract does not grow. Adding a code to a LIVE contract stays allowed on purpose: a
+    // service that was not on the list cannot have been priced under it, so nothing already adjudicated can
+    // change. Repricing and removal are Draft-only, and refuse with the reason (ProviderAdminEndpoints).
+    if (c.Status is ContractStatus.Expired or ContractStatus.Terminated)
+        return Mersal.Authz.ProblemResults.Conflict("CONTRACT_CLOSED",
+            $"Contract {c.ContractNo} is {c.Status}. Add the code to the contract that is in force, or raise a new one.");
     if (!Enum.TryParse<ServiceType>(req.ServiceType, out var st)) return Results.Problem(statusCode: 400, title: $"unknown service_type '{req.ServiceType}'");
     if (!Enum.TryParse<CodeSystem>(req.CodeSystem, out var cs)) return Results.Problem(statusCode: 400, title: $"unknown code_system '{req.CodeSystem}'");
     if (req.AgreedPrice < 0) return Results.Problem(statusCode: 400, title: "agreed_price must be >= 0");
@@ -431,6 +445,9 @@ app.MapBranches();
 app.MapPractitioners();
 // 19.1b — network tiers + effective-dated provider tier assignment + the service-date resolver.
 app.MapNetworkTiers();
+// 19.9 — administering what 2b could only create: edit, reprice, deactivate, revoke, withdraw, and the
+// readiness checklist that says what is stopping a provider going live before anybody presses activate.
+app.MapProviderAdmin();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

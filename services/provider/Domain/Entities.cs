@@ -59,6 +59,27 @@ public sealed class Provider
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    // --- 19.9 (0015) administrative identity ------------------------------------------------------
+    /// <summary>The name on the building, when it differs from the name on the contract.</summary>
+    public string? CommercialName { get; set; }
+    public string? TaxId { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>Why the provider is in its CURRENT standing, and who put it there. The audit chain records
+    /// that the change happened and is read by Compliance; this is the operational record, read by the team
+    /// that has to decide next month whether to switch them back on.</summary>
+    public string? StatusReason { get; set; }
+    public string? StatusActor { get; set; }
+    public string? StatusActorName { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+
+    public string? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
+    public string? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+
     public List<ProviderLocation> Locations { get; set; } = [];
     public List<ProviderContract> Contracts { get; set; } = [];
     public List<ProviderCredential> Credentials { get; set; } = [];
@@ -78,6 +99,18 @@ public sealed class ProviderLocation
     public decimal? GeoLng { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsDeleted { get; set; }
+
+    // --- 19.9 (0015) ------------------------------------------------------------------------------
+    /// <summary>A deactivated location is soft-deleted WITH its reason. Routing already sent patients to
+    /// this address; "it is gone" and "it is gone because the lease ended in March" are different answers
+    /// to the person holding an appointment card for it.</summary>
+    public DateTimeOffset? DeactivatedAt { get; set; }
+    public string? DeactivatedBy { get; set; }
+    public string? DeactivationReason { get; set; }
+    public string? CreatedBy { get; set; }
+    public string? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public sealed class ProviderContract
@@ -90,6 +123,18 @@ public sealed class ProviderContract
     public DateOnly? EffectiveTo { get; set; }
     public ContractStatus Status { get; set; } = ContractStatus.Draft;
     public bool IsDeleted { get; set; }
+
+    // --- 19.9 (0015) ------------------------------------------------------------------------------
+    public string? StatusReason { get; set; }
+    public string? StatusActor { get; set; }
+    public string? StatusActorName { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public string? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
+    public string? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
+
     public List<ContractServiceLine> ServiceLines { get; set; } = [];
 }
 
@@ -150,4 +195,51 @@ public sealed class ProviderTerminationRequest
     public string? ApprovedBy { get; set; }
     public DateTimeOffset? ApprovedAt { get; set; }
     public DateTimeOffset? WithdrawnAt { get; set; }
+}
+
+
+// --- 19.9 (0015) history twins -------------------------------------------------------------------
+//
+// One append-only snapshot row per administered table. The application NEVER inserts into these; the
+// trigger does, which is what makes them a record of what happened rather than of what somebody
+// remembered to log.
+//
+// They are three separate classes rather than one base with three subclasses because EF maps an
+// inheritance hierarchy as one table by default, and three tables sharing a C# base is exactly the shape
+// that turns into a silent TPH mapping nobody asked for.
+
+/// <summary>Snapshots of <c>provider.provider</c>. The table has existed since 0001; 0015 gave it the
+/// tenant column and the row-level security it needed before anything was allowed to read it.</summary>
+public sealed class ProviderHistoryRow
+{
+    public long HistoryId { get; set; }
+    public Guid ProviderId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = default!;
+    /// <summary>0001 named this column <c>changed_at</c>; the later twins use <c>recorded_at</c>. The
+    /// column name is not worth a rename migration on a table this size — the projection normalises it.</summary>
+    public DateTimeOffset ChangedAt { get; set; }
+}
+
+public sealed class ProviderLocationHistoryRow
+{
+    public long HistoryId { get; set; }
+    public Guid LocationId { get; set; }
+    public Guid ProviderId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = default!;
+    public DateTimeOffset RecordedAt { get; set; }
+}
+
+public sealed class ProviderContractHistoryRow
+{
+    public long HistoryId { get; set; }
+    public Guid ContractId { get; set; }
+    public Guid ProviderId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = default!;
+    public DateTimeOffset RecordedAt { get; set; }
 }

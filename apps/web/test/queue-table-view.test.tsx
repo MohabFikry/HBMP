@@ -45,7 +45,10 @@ function withProviders(rows: ProviderSummary[]) {
   return new Api();
 }
 
-const table = () => within(screen.getByRole("table"));
+// 19.9 — `role="grid"`, not `table`: the directory became selectable (choosing a row opens the provider's
+// record beside it), and `DataTableView` promotes an interactive table to a grid with roving tabindex. The
+// assertions below are unchanged; only the handle to the table is.
+const table = () => within(screen.getByRole("grid"));
 
 describe("the provider directory can be searched, filtered and paged", () => {
   it("searches on the provider CODE, not only the name", async () => {
@@ -156,7 +159,12 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/BranchLicences.tsx": "the roster migrated; the alert and reassignment lists are derived summaries",
   "screens/ProcedureCentre.tsx": "the queue migrated; the counter table lists ONE verified order",
   "screens/NetworkTierAdmin.tsx": "assignments migrated; the tier list is bounded configuration",
-  "screens/NetworkPortal.tsx": "the directory IS a DataTableView; contracts and locations are per-provider",
+  "screens/NetworkPortal.tsx": "the directory IS a DataTableView; the onboarding worklist and one provider's documents are bounded",
+  // 19.9 — both are per-PROVIDER lists: a handful of contracts, a handful of sites, a handful of staff
+  // accounts. The one list on these screens that is not bounded is a contract's priced services — a hospital
+  // tariff runs to hundreds of codes — and that one IS a `DataTableView`.
+  "screens/NetworkContractsSection.tsx": "one provider's contracts; the priced-services table beside it IS a DataTableView",
+  "screens/NetworkLocationsSection.tsx": "one provider's sites and one provider's staff accounts",
   "screens/ApprovalEngineAdmin.tsx": "a rule set, bounded by design",
   "screens/ApprovalsExtra.tsx": "an SLA board (one row per status) and an override register",
   "screens/BatchIntake.tsx": "server-capped error and preview lists — a pager is the wrong control",

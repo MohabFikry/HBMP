@@ -451,6 +451,30 @@ export function mayReadTheNetworkRollup(issuerRoles: readonly string[] | null | 
 }
 
 /**
+ * May this caller perform the COMMERCIAL half of network administration?
+ *
+ * `provider-service` splits its writes across two scopes and 19.9 extended the split to the administration
+ * endpoints (identity migration 0007 is where the line was drawn):
+ *
+ *   `provider:write`  — ordinary provider metadata: an address, a phone number, a staff account. Held by the
+ *                       Network Team AND by `provider_admin`, a contracted hospital's own administrator, who
+ *                       is confined by ABAC and RLS to their own row. Correcting their own address is their
+ *                       job, so this is right.
+ *   `provider:admin`  — the commercial acts: a contract's dates, terminating one, repricing a tariff line,
+ *                       deciding that a licence is Valid. NOT held by `provider_admin`.
+ *
+ * Without that split every one of those would have been open to the provider on the other side of the
+ * contract, and RLS would have allowed it: the rows are theirs. This mirror decides which CONTROLS render, so
+ * a provider's own administrator is shown the record and not four buttons that answer 403.
+ *
+ * Same issuer-role list as {@link mayAdministerTiers}, and for the same reason: all three questions are
+ * "is this Mersal's Network Team, or somebody who happens to land in their portal".
+ */
+export function mayAdministerTheNetwork(issuerRoles: readonly string[] | null | undefined): boolean {
+  return mayAdministerTiers(issuerRoles);
+}
+
+/**
  * May this role cancel somebody else's note, or make a back-dated membership change?
  *
  * The server calls it `policy:supervise` and enforces it; this mirror only decides whether the affordance is

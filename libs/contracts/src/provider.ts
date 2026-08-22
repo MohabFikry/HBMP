@@ -191,3 +191,252 @@ export const zProviderMetrics = z.object({
   avgTurnaroundHours: z.number().nullable(),
 });
 export type ProviderMetrics = z.infer<typeof zProviderMetrics>;
+
+/* ── Phase 19.9 — administering the network (design 58) ────────────────────────────────────────────────────
+   Phase 2b built the provider domain as a creation pipeline and gave it no second verb: a legal name could
+   not be corrected, a primary location could not be moved, a contract's dates could not be fixed, a priced
+   line could not be repriced or removed, and one provider user could not be revoked without suspending the
+   whole provider. These are the shapes the administrative half speaks in. */
+
+/**
+ * What is stopping this provider going live, as four facts rather than one refusal string.
+ *
+ * The activation endpoint has always answered a blocked attempt with 422 and the FIRST condition that
+ * failed, as a sentence, after the operator pressed the button. That is a guessing game with four rounds.
+ * All four conditions come back here so the screen can show the checklist BEFORE anything is attempted —
+ * and `blockingReason` is still the server's own wording, never re-derived in the browser.
+ */
+export const zProviderReadiness = z.object({
+  hasPrimaryLocation: z.boolean(),
+  hasMandatoryCredentials: z.boolean(),
+  mandatoryCredentialsValid: z.boolean(),
+  hasActiveContract: z.boolean(),
+  canActivate: z.boolean(),
+  blockingReason: z.string().nullish(),
+});
+export type ProviderReadiness = z.infer<typeof zProviderReadiness>;
+
+/** An open, not-yet-approved termination. Terminating is dual-controlled: the approver acts under their own
+ *  token on a second call, so this is what the second person is shown before they agree to it. */
+export const zPendingTermination = z.object({
+  requestId: zId,
+  reason: z.string(),
+  requestedBy: z.string(),
+  requestedAt: z.string(),
+});
+export type PendingTermination = z.infer<typeof zPendingTermination>;
+
+/** How much hangs off this provider. Counts only — each section is its own read. */
+export const zProviderBook = z.object({
+  locations: z.number().int(),
+  contracts: z.number().int(),
+  activeContracts: z.number().int(),
+  credentials: z.number().int(),
+  activeUsers: z.number().int(),
+});
+export type ProviderBook = z.infer<typeof zProviderBook>;
+
+export const zProviderDetail = z.object({
+  providerId: zId,
+  providerCode: z.string(),
+  legalName: z.string(),
+  providerType: z.string(),
+  providerTypeLabel: z.string(),
+  status: z.string(),
+  onboardingState: z.string(),
+  /** The name on the building, when it differs from the name on the contract. */
+  commercialName: z.string().nullish(),
+  taxId: z.string().nullish(),
+  phone: z.string().nullish(),
+  email: z.string().nullish(),
+  notes: z.string().nullish(),
+  /** Why the provider is in its CURRENT standing, and who put it there. Distinct from the audit chain,
+   *  which is hash-chained evidence behind `audit:read` and not readable by the team that administers it. */
+  statusReason: z.string().nullish(),
+  statusActorName: z.string().nullish(),
+  statusChangedAt: z.string().nullish(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  createdByName: z.string().nullish(),
+  updatedByName: z.string().nullish(),
+  readiness: zProviderReadiness,
+  pendingTermination: zPendingTermination.nullish(),
+  book: zProviderBook,
+  /** The provider-scoped roles THIS caller may grant, computed by the server from its own separation-of-duties
+   *  rule. Sent rather than hardcoded: the list is caller-dependent (a Provider Admin may grant the tech roles
+   *  and not their own), so a static picker would offer an option that exists only to be refused. */
+  provisionableRoles: z.array(z.string()),
+});
+export type ProviderDetail = z.infer<typeof zProviderDetail>;
+
+/** Editing a provider. `providerCode` is sent and CHECKED rather than omitted: the server refuses a change
+ *  loudly, because a form that silently discards a corrected code leaves the operator believing it took. */
+export const zProviderWrite = z.object({
+  providerCode: z.string().min(1),
+  legalName: z.string().min(1),
+  providerType: z.string().min(1),
+  commercialName: z.string().nullish(),
+  taxId: z.string().nullish(),
+  phone: z.string().nullish(),
+  email: z.string().nullish(),
+  notes: z.string().nullish(),
+});
+export type ProviderWrite = z.infer<typeof zProviderWrite>;
+
+/**
+ * A location as the ADMIN screen sees it — including the closed ones.
+ *
+ * Distinct from {@link zProviderLocation}, which is the picker projection and returns live rows only. "We
+ * used to be in Alexandria and closed it in March" is the answer to half the questions asked of this screen,
+ * and a list that silently omits it answers them wrong.
+ */
+export const zProviderLocationAdmin = z.object({
+  locationId: zId,
+  name: z.string(),
+  governorate: z.string().nullish(),
+  address: z.string().nullish(),
+  geoLat: z.number().nullish(),
+  geoLng: z.number().nullish(),
+  isPrimary: z.boolean(),
+  isDeleted: z.boolean(),
+  deactivationReason: z.string().nullish(),
+  deactivatedAt: z.string().nullish(),
+});
+export type ProviderLocationAdmin = z.infer<typeof zProviderLocationAdmin>;
+
+export const zLocationWrite = z.object({
+  name: z.string().min(1),
+  governorate: z.string().nullish(),
+  address: z.string().nullish(),
+  geoLat: z.number().nullish(),
+  geoLng: z.number().nullish(),
+});
+export type LocationWrite = z.infer<typeof zLocationWrite>;
+
+/** A contract as the admin screen sees it. `inEffect` is the server's own answer, not a date comparison the
+ *  browser repeats: Active-and-within-its-window is what routing means by in effect, and two implementations
+ *  of that is one too many. */
+export const zContractAdmin = z.object({
+  contractId: zId,
+  contractNo: z.string(),
+  status: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullish(),
+  serviceLines: z.number().int(),
+  inEffect: z.boolean(),
+  statusReason: z.string().nullish(),
+  statusActorName: z.string().nullish(),
+  statusChangedAt: z.string().nullish(),
+});
+export type ContractAdmin = z.infer<typeof zContractAdmin>;
+
+export const zContractWrite = z.object({
+  contractNo: z.string().min(1),
+  effectiveFrom: z.string().min(1),
+  effectiveTo: z.string().nullish(),
+});
+export type ContractWrite = z.infer<typeof zContractWrite>;
+
+/**
+ * One priced line.
+ *
+ * `agreedPrice` is **nullable** because the server withholds the whole field from a caller without
+ * `provider:finance` — it is absent, not zero. A zero would read as "free", which is a different and much
+ * worse claim than "you are not being shown this", so the screen must render the absence as itself.
+ */
+export const zServiceLine = z.object({
+  serviceLineId: zId,
+  serviceType: z.string(),
+  codeSystem: z.string(),
+  code: z.string(),
+  agreedPrice: z.number().nullish(),
+  currencyCode: z.string().nullish(),
+});
+export type ServiceLine = z.infer<typeof zServiceLine>;
+
+export const zServiceLineWrite = z.object({
+  serviceType: z.string().min(1),
+  codeSystem: z.string().min(1),
+  code: z.string().min(1),
+  agreedPrice: z.number().min(0),
+  currencyCode: z.string().nullish(),
+});
+export type ServiceLineWrite = z.infer<typeof zServiceLineWrite>;
+
+/** A credential and its standing. `validToday` and `daysUntilExpiry` are the server's, computed against the
+ *  business calendar — the same date the activation gate uses, rather than the browser's idea of today. */
+export const zProviderCredential = z.object({
+  credentialId: zId,
+  credentialType: z.string(),
+  status: z.string(),
+  validFrom: z.string().nullish(),
+  validTo: z.string().nullish(),
+  documentId: z.string().nullish(),
+  isMandatory: z.boolean(),
+  isDeleted: z.boolean(),
+  validToday: z.boolean(),
+  daysUntilExpiry: z.number().int().nullish(),
+});
+export type ProviderCredentialView = z.infer<typeof zProviderCredential>;
+
+export const zCredentialWrite = z.object({
+  credentialType: z.string().min(1),
+  status: z.string().min(1),
+  validFrom: z.string().nullish(),
+  validTo: z.string().nullish(),
+  documentId: z.string().nullish(),
+  isMandatory: z.boolean(),
+});
+export type CredentialWrite = z.infer<typeof zCredentialWrite>;
+
+export const zProviderUser = z.object({
+  userId: zId,
+  subjectRef: z.string(),
+  role: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  revokedAt: z.string().nullish(),
+});
+export type ProviderUserView = z.infer<typeof zProviderUser>;
+
+/**
+ * One entry of a change timeline, projected from a database trigger's snapshot.
+ *
+ * `fields` is an open map on purpose: the three twins (provider, location, contract) carry different
+ * columns, and the renderer compares an entry with the one before it to show "before → after". Typing one
+ * shape per twin would be three near-identical schemas and three near-identical renderers.
+ */
+export const zAdminHistoryEntry = z.object({
+  historyId: z.number().int(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorSubject: z.string().nullish(),
+  actorName: z.string().nullish(),
+  statusReason: z.string().nullish(),
+  fields: z.record(z.string(), z.string().nullable()),
+});
+export type AdminHistoryEntryView = z.infer<typeof zAdminHistoryEntry>;
+
+export const zAdminHistoryPage = z.object({ entries: z.array(zAdminHistoryEntry) });
+export type AdminHistoryPage = z.infer<typeof zAdminHistoryPage>;
+
+/** What terminating a contract did — and whether it left the provider Active in the directory and routable
+ *  for nothing, which is the pair of truths this platform keeps letting disagree in silence. */
+export const zContractTerminationResult = z.object({
+  contractId: zId,
+  status: z.string(),
+  providerBecomesUnroutable: z.boolean(),
+  providerStatus: z.string().nullish(),
+});
+export type ContractTerminationResult = z.infer<typeof zContractTerminationResult>;
+
+/** What withdrawing a credential did. The provider's status is NOT changed by it — that decision has its own
+ *  dual control and its own reason — but a mandatory credential going away can take a live provider below
+ *  its own activation bar, and the alternative to saying so is nobody noticing for six months. */
+export const zCredentialWithdrawResult = z.object({
+  credentialId: zId,
+  withdrawn: z.boolean(),
+  providerNoLongerMeetsActivationBar: z.boolean(),
+  readiness: zProviderReadiness.nullish(),
+});
+export type CredentialWithdrawResult = z.infer<typeof zCredentialWithdrawResult>;

@@ -60,8 +60,8 @@ const ClaimsCost = lazy(() => import("./director/ClaimsCost").then((m) => ({ def
 // Provider network portal (Phase 2b) — directory / performance / contracts / locations / onboarding share one chunk.
 const NetworkDirectory = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkDirectory })));
 const NetworkPerformance = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkPerformance })));
-const NetworkContracts = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkContracts })));
-const NetworkLocations = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkLocations })));
+const NetworkContracts = lazy(() => import("./NetworkContractsSection").then((m) => ({ default: m.NetworkContracts })));
+const NetworkLocations = lazy(() => import("./NetworkLocationsSection").then((m) => ({ default: m.NetworkLocations })));
 const NetworkOnboarding = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkOnboarding })));
 // 14.5 — practitioners. Its own chunk rather than folding into NetworkPortal: it pulls the identity account
 // list and the specialty/branch reference data, none of which the other five network screens need.

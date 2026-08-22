@@ -7080,3 +7080,40 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   background: var(--surface-1);
   font-size: 0.9rem;
 }
+
+/* ── Phase 19.9 — network administration (design 58) ───────────────────────────────────────────────────
+   Two lists the network portal needs and the portal classes above do not cover. Everything else on these
+   screens is the shared administrative layout (`.pol-screen`, `.pol-detail`, `.pol-stack`, `.rst-actions`,
+   `.pay-head`, `.pay-chips`) — the `pol-` prefix is historical, not a scope: `NetworkTierAdmin` has used
+   `.pol-screen` since 19.6 and `AdminRecordControls` uses `.rst-actions`. Inventing a parallel `net-` set
+   for the same rules is exactly the drift the UI audit counted. */
+
+/* The provider picker: one row per provider, above a search that narrows it. */
+.net-picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+  /* Bounded so the picker cannot push the page: a network of two hundred is the case this screen is for.
+     `.mrs-scroll` carries the house scrollbar; the height is a token, not a hand-picked figure. */
+  max-block-size: var(--scroll-picker);
+  overflow-y: auto;
+}
+
+/* The activation checklist. Each row is a chip plus a sentence, so "outstanding" is carried by shape and
+   text as well as hue and survives greyscale (0B four-cue rule). */
+.net-check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+}
+.net-check > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp3);
+  min-block-size: 32px;
+}
