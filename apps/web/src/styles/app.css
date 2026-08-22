@@ -3640,7 +3640,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 .rst-step-btn + .rst-step-btn { border-inline-start: 1px solid var(--border); }
 .rst-step-btn:hover { background: var(--surface-2); color: var(--text-1); }
-.rst-step-now[aria-pressed="true"] { color: var(--accent); }
+/* On today, the word "Today" is the state — and it is coloured so the group reads as "you are here" at a
+   glance. On any other date the cell names the weekday in the ordinary control colour. */
+.rst-step-now[data-now] { color: var(--accent); }
+.rst-step-now { min-inline-size: 96px; }
 /* The chevron is drawn pointing DOWN and rotated off the DOCUMENT direction — the same rule as
    `.pagehead-back` and `.mrs-pager-step`, and the reason is the same: a hard-coded left arrow points
    forwards in Arabic. */

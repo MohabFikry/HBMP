@@ -283,4 +283,32 @@ describe("today's roster", () => {
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Today" })).toBeInTheDocument();
   });
+
+  it("names the day on screen once you step off today", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    await user.click(await screen.findByRole("radio", { name: "Today's roster" }));
+
+    // It said "Today" whatever date was showing, so stepping forward changed the table and changed nothing on
+    // the control that had just been pressed. The weekday is also the fact the date field cannot give.
+    await user.click(screen.getByRole("button", { name: "Next day" }));
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const weekday = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][tomorrow.getDay()];
+
+    // The visible text is the PREFIX of the accessible name (WCAG 2.5.3), so speech control still reaches it.
+    expect(await screen.findByRole("button", { name: `${weekday} — back to today` })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+  });
+
+  it("gives the day's table a search and a pager", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    await user.click(await screen.findByRole("radio", { name: "Today's roster" }));
+
+    // A supervisor with six clinics and no filter gets every session in the group on one date. "Is Hana in
+    // today" should not mean scrolling thirty rows.
+    expect(await screen.findByLabelText("Search")).toBeInTheDocument();
+  });
 });

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, KpiCard, Modal, SegmentedControl,
-  StatusChip, useTheme,
+  Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, ComboboxField, KpiCard, Modal,
+  SegmentedControl, StatusChip, useTableQuery, useTheme,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { availabilityApi, branchApi, rosterApi } from "../api/branchApi";
@@ -126,6 +126,10 @@ const S = {
   // ── the day view ──────────────────────────────────────────────────────────────────────────────────────
   dateLabel: { en: "Date", ar: "التاريخ" },
   today: { en: "Today", ar: "اليوم" },
+  /* The middle cell's action, for a screen reader, when the visible word is a weekday rather than "Today".
+     The visible text is kept as the PREFIX of the accessible name (WCAG 2.5.3, label in name) so speech
+     control still reaches it by what is written on it. */
+  backToToday: { en: "{day} — back to today", ar: "{day} — العودة إلى اليوم" },
   /* The stepper's own name. NOT "Date" — that belongs to the field beside it, and two controls answering to
      one name leaves a screen-reader user unable to say which they are on. */
   stepDay: { en: "Change the date", ar: "تغيير التاريخ" },
@@ -148,6 +152,12 @@ const S = {
   statusExtra: { en: "Extra clinic", ar: "عيادة إضافية" },
   reducedBy: { en: "Shortened — {reason}", ar: "مختصر — {reason}" },
   noticesHeading: { en: "In force on this date", ar: "ساري في هذا التاريخ" },
+  daySearch: { en: "Search", ar: "بحث" },
+  daySearchHint: {
+    en: "Clinician, clinic, hours or reason",
+    ar: "الإكلينيكي أو العيادة أو الساعات أو السبب",
+  },
+  dayNoMatches: { en: "No line on this day matches that search.", ar: "لا يوجد سطر في هذا اليوم مطابق للبحث." },
 
   // ── exceptions, behind a button ───────────────────────────────────────────────────────────────────────
   exceptionsAction: { en: "Exceptions", ar: "الاستثناءات" },
@@ -1228,6 +1238,15 @@ function DayView({
     () => rosterApi.day({ branchId: branchId || undefined, date }),
     [branchId, date]);
 
+  const isToday = date === todayIso();
+  // Parsed as a LOCAL date, not `new Date(iso)` — that reads a bare yyyy-mm-dd as UTC midnight, which is the
+  // previous day in every timezone west of Greenwich and would name the wrong weekday for half the world.
+  const dayName = (() => {
+    const [y, m, d] = date.split("-").map(Number);
+    if (!y || !m || !d) return t(S.today);
+    return t(DAY_LABEL[new Date(y, m - 1, d).getDay()] ?? DAY_LABEL[0]);
+  })();
+
   const columns: Column<DayRosterLine>[] = useMemo(
     () => [
       {
@@ -1320,14 +1339,22 @@ function DayView({
           >
             <Icon name="chevron" />
           </button>
+          {/*
+            THE MIDDLE CELL NAMES THE DAY ON SCREEN, and jumps back to today.
+
+            It read "Today" whatever date was showing, which made the whole group look inert: stepping forward
+            changed the table and changed nothing on the control that had just been pressed. The weekday is
+            also the fact a roster reader wants and the date field beside it cannot give — `2026-08-25` does
+            not say Tuesday, and "who is in on Tuesday" is the question being asked.
+          */}
           <button
             type="button" className="rst-step-btn rst-step-now"
             onClick={() => onDate(todayIso())}
-            // Pressed when the date already IS today, so the control says where you are as well as where it
-            // would take you — otherwise the only way to know is to read the date field and do the sum.
-            aria-pressed={date === todayIso()}
+            title={t(S.today)}
+            aria-label={isToday ? undefined : t(S.backToToday).replace("{day}", dayName)}
+            data-now={isToday || undefined}
           >
-            {t(S.today)}
+            {isToday ? t(S.today) : dayName}
           </button>
           <button
             type="button" className="rst-step-btn rst-next"
@@ -1371,18 +1398,73 @@ function DayView({
 
             <Card>
               <h2 className="section-h">{t(S.dayHeading)} · {fmt.date(`${d.date}T00:00:00`)}</h2>
-              <DataTable
-                caption={t(S.dayHeading)}
-                columns={columns}
-                rows={d.lines}
-                rowKey={(l) => `${l.availabilityId ?? "extra"}-${l.practitionerId ?? "none"}-${l.startTime}`}
-                emptyLabel={t(S.dayEmpty)}
-              />
+              <DayTable lines={d.lines} columns={columns} nameOf={nameOf} branchName={branchName} />
             </Card>
           </>
         )}
       </AsyncSection>
     </>
+  );
+}
+
+/**
+ * The day's lines, searchable and paged.
+ *
+ * <p>A supervisor with six clinics and no filter gets every session in the group on one date — comfortably
+ * past thirty rows — and the questions asked of it are narrow ones: "is Hana in today", "what is happening at
+ * Nasr City", "who is off and why". Scrolling a thirty-row table to answer them is the interaction the
+ * toolbar exists to replace.</p>
+ *
+ * <p>A separate component because `useTableQuery` is a hook and the lines arrive inside `AsyncSection`'s
+ * render prop, where hooks cannot be called. Splitting it is what keeps the paging state alive across a
+ * reload of the day rather than resetting on every date change — which is also why the persist key is the
+ * table's, not the date's: an operator stepping through a week keeps their search.</p>
+ */
+function DayTable({
+  lines,
+  columns,
+  nameOf,
+  branchName,
+}: {
+  lines: DayRosterLine[];
+  columns: Column<DayRosterLine>[];
+  nameOf: (id: string | null) => string | null;
+  branchName: (id: string | null) => string | null;
+}) {
+  const t = useLoc();
+
+  const query = useTableQuery<DayRosterLine>({
+    rows: lines,
+    columns,
+    /*
+      EVERY field somebody would plausibly type, not just the name. The reason is in here because "who is off
+      for the training day" is a real question and the reason is the only place that word appears; the hours
+      are in here because "the 14:00 clinic" is how an afternoon session gets referred to.
+    */
+    searchText: (l) => [
+      nameOf(l.practitionerId) ?? t(S.wholeClinic),
+      branchName(l.branchId) ?? "",
+      `${l.startTime}–${l.endTime}`,
+      l.status,
+      l.exceptionKind ?? "",
+      l.exceptionReason ?? "",
+    ].join(" "),
+    searchLabel: t(S.daySearch),
+    searchPlaceholder: t(S.daySearchHint),
+    pageSize: 25,
+    initialSortKey: "hours",
+    persistKey: "roster-day",
+  });
+
+  return (
+    <DataTableView
+      query={query}
+      columns={columns}
+      rowKey={(l) => `${l.availabilityId ?? "extra"}-${l.practitionerId ?? "none"}-${l.startTime}`}
+      caption={t(S.dayHeading)}
+      emptyLabel={t(S.dayEmpty)}
+      noMatchesLabel={t(S.dayNoMatches)}
+    />
   );
 }
 
