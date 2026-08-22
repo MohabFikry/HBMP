@@ -18,7 +18,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Accept enum NAMES in request bodies (e.g. vitalType "HR") as well as numbers — the portals send readable
 // enum strings. Backward compatible: numeric enum values still deserialize.
-builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    // HH:mm both ways. The read endpoints have always PRINTED times in that shape and the built-in converter
+    // refuses to read it back, so editing a weekly pattern or recording a part-day absence 500'd on the value
+    // this service had just handed the client. See HourMinuteTimeOnlyConverter.
+    o.SerializerOptions.Converters.Add(new HourMinuteTimeOnlyConverter());
+    o.SerializerOptions.Converters.Add(new NullableHourMinuteTimeOnlyConverter());
+});
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("emr-service");

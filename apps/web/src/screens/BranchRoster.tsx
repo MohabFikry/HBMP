@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, InlineAlert, InputField, ComboboxField, KpiCard, Modal, SegmentedControl,
+  Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, KpiCard, Modal, SegmentedControl,
   StatusChip, useTheme,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -61,17 +61,27 @@ const S = {
   patternHeading: { en: "Weekly pattern", ar: "النمط الأسبوعي" },
   assignedClinics: { en: "Assigned clinics", ar: "العيادات المعينة" },
   noClinics: { en: "None recorded", ar: "لا يوجد" },
-  manageClinics: { en: "Assign a clinic", ar: "تعيين عيادة" },
+  /* "Add", not "Assign", and the key says so too — the house guard on `plus` reads the SOURCE, because a
+     glyph meaning add-a-thing beside a verb that is not one is how an icon comes to mean nothing. It also
+     reads better under the chips it adds to. */
+  addClinic: { en: "Add a clinic", ar: "إضافة عيادة" },
+  filterToClinic: { en: "Show only {clinic}", ar: "عرض {clinic} فقط" },
+  showingAllClinics: { en: "Showing every clinic", ar: "عرض كل العيادات" },
   notWorking: { en: "Not working", ar: "لا يعمل" },
   addDay: { en: "Add", ar: "إضافة" },
   cannotAddYet: {
-    en: "A first pattern at a clinic is created when its calendar is generated — after that, days can be added here.",
-    ar: "يُنشأ أول نمط في العيادة عند توليد تقويمها — وبعد ذلك يمكن إضافة الأيام من هنا.",
+    en: "No clinic this clinician is assigned to has a weekly pattern yet. The first one at a clinic is created when its calendar is generated; after that, days can be added here.",
+    ar: "لا توجد عيادة معينة لهذا الإكلينيكي لديها نمط أسبوعي بعد. يُنشأ أول نمط في العيادة عند توليد تقويمها، وبعد ذلك يمكن إضافة الأيام من هنا.",
   },
   hoursCol: { en: "Hours", ar: "الساعات" },
   slotLength: { en: "Slot length", ar: "مدة الموعد" },
   cap: { en: "Daily limit", ar: "الحد اليومي" },
-  offered: { en: "Slots offered", ar: "المواعيد المتاحة" },
+  /* CAPACITY, per day — what the hours and the cap between them yield. Deliberately not "slots offered",
+     which reads as "slots you can still book" and is a different number: the booking calendar shows what is
+     LEFT after what is already taken, so a 18-slot Monday with two bookings shows 16 there and 18 here. */
+  offered: { en: "Slots a day", ar: "المواعيد في اليوم" },
+  /* The day view's own column keeps "offered", where Booked and Open sit beside it and settle the question. */
+  offeredOnTheDay: { en: "Slots offered", ar: "المواعيد المتاحة" },
   noCap: { en: "No limit", ar: "بلا حد" },
   minutes: { en: "min", ar: "دقيقة" },
   capExplains: { en: "of {window} the hours allow", ar: "من {window} تسمح بها الساعات" },
@@ -104,7 +114,7 @@ const S = {
   },
   retired: { en: "Working day removed.", ar: "تمت إزالة يوم العمل." },
 
-  assignHeading: { en: "Assign a clinic", ar: "تعيين عيادة" },
+  assignHeading: { en: "Add a clinic", ar: "إضافة عيادة" },
   assignHelp: {
     en: "Adding a clinic lets this clinician be rostered and booked there from the date you choose. It does not move anything already booked elsewhere.",
     ar: "إضافة عيادة تتيح إدراج هذا الإكلينيكي في جدولها وحجز مواعيده فيها اعتبارًا من التاريخ الذي تختاره. ولا ينقل ذلك أي حجز قائم في مكان آخر.",
@@ -116,6 +126,9 @@ const S = {
   // ── the day view ──────────────────────────────────────────────────────────────────────────────────────
   dateLabel: { en: "Date", ar: "التاريخ" },
   today: { en: "Today", ar: "اليوم" },
+  /* The stepper's own name. NOT "Date" — that belongs to the field beside it, and two controls answering to
+     one name leaves a screen-reader user unable to say which they are on. */
+  stepDay: { en: "Change the date", ar: "تغيير التاريخ" },
   prevDay: { en: "Previous day", ar: "اليوم السابق" },
   nextDay: { en: "Next day", ar: "اليوم التالي" },
   dayHeading: { en: "On duty", ar: "في الخدمة" },
@@ -403,9 +416,14 @@ export function BranchRoster() {
           value={view}
           onChange={setView}
         />
-        <Button variant="ghost" onClick={() => setExceptionsOpen(true)}>
+        {/*
+          A FILLED button, not a ghost one. Ghost styling says "secondary to what is beside it", and what is
+          beside it is a view switch — so the only route to leave, holidays and closures read as a caption on
+          the control next to it and was missed. It is the screen's one action; it looks like one.
+        */}
+        <Button variant="primary" leadingIcon={<Icon name="calendar-off" />} onClick={() => setExceptionsOpen(true)}>
           {t(S.exceptionsAction)}
-          {exceptionCount > 0 && <span className="rst-count tnum"> {exceptionCount}</span>}
+          {exceptionCount > 0 && <span className="rst-count tnum">{exceptionCount}</span>}
         </Button>
       </div>
 
@@ -462,6 +480,11 @@ export function BranchRoster() {
                   key={selected.person.practitionerId}
                   person={selected.person}
                   rules={selected.rules}
+                  /* Every rule in reach, not only this clinician's. A NEW working day needs the clinic's
+                     provider and location, which this screen cannot ask for and which any rule at that
+                     clinic already carries — so a clinician with no pattern of their own can still be given
+                     one wherever a colleague has one. */
+                  allRules={ruleList}
                   branches={branchList}
                   branchName={branchName}
                   onChanged={() => {
@@ -604,27 +627,60 @@ interface DayRow {
 function PatternPane({
   person,
   rules,
+  allRules,
   branches,
   branchName,
   onChanged,
 }: {
   person: BranchPractitioner;
   rules: AvailabilityRule[];
+  allRules: AvailabilityRule[];
   branches: BranchRef[];
   branchName: (id: string | null) => string | null;
   onChanged: () => void;
 }) {
   const t = useLoc();
   const { lang } = useTheme();
-  const [editing, setEditing] = useState<{ day: number; rule: AvailabilityRule | null } | null>(null);
+  const [editing, setEditing] = useState<{ day: number; rule: AvailabilityRule | null; branchId: string } | null>(null);
   const [viewingHistory, setViewingHistory] = useState<AvailabilityRule | null>(null);
   const [retiring, setRetiring] = useState<AvailabilityRule | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
+  /*
+    THE CLINIC CHIPS FILTER.
+
+    They started as labels — the fact that Dr Karim works Maadi and Dokki — and a label is where a reader's
+    hand goes anyway when the seven-day table beside it is showing both. Six rows across two buildings is the
+    case the Clinic column was added for, and narrowing to one is what somebody arranging Wednesday at Dokki
+    actually wants. Null is "every clinic", which is the state the pane opens in.
+  */
+  const [clinicFilter, setClinicFilter] = useState<string | null>(null);
+
+  const visible = clinicFilter ? rules.filter((r) => r.branchId === clinicFilter) : rules;
 
   // A clinician at two clinics needs the clinic named on every pattern row; one at a single clinic does not,
-  // and a column repeating the same word seven times is noise on the narrower half of a split layout.
-  const showClinic = new Set(rules.map((r) => r.branchId)).size > 1 || person.branches.length > 1;
+  // and a column repeating the same word seven times is noise on the narrower half of a split layout. Once
+  // the chips have narrowed to one clinic the column says the same word again, so it goes.
+  const showClinic = !clinicFilter
+    && (new Set(rules.map((r) => r.branchId)).size > 1 || person.branches.length > 1);
+
+  /*
+    WHERE A NEW WORKING DAY CAN BE ADDED.
+
+    A rule carries a provider and a location — the clinic's service point — and this screen has no way to ask
+    for them, so a new day inherits them. It used to inherit from THIS CLINICIAN's other rules, which meant a
+    clinician with no pattern at all could never be given one, and removing somebody's last day at a clinic
+    took the Add button with it. Any rule at the same clinic carries the same service point, so the source is
+    every rule in reach.
+  */
+  const addableAt = (branch: string | null): boolean =>
+    !!branch && allRules.some((r) => r.branchId === branch);
+
+  const addableClinics = person.branches.filter(addableAt);
+  const canAdd = clinicFilter ? addableAt(clinicFilter) : addableClinics.length > 0;
+  // The clinic a new day lands at, when there is no choice to make: the filter if one is set, else their only
+  // addable clinic. Empty string means "the form has to ask".
+  const defaultAddBranch = clinicFilter ?? (addableClinics.length === 1 ? addableClinics[0] : "");
 
   /*
     SEVEN DAYS, ALWAYS — including the ones with nothing in them.
@@ -636,18 +692,13 @@ function PatternPane({
   const rows: DayRow[] = useMemo(() => {
     const out: DayRow[] = [];
     for (const d of DAYS) {
-      const onDay = rules.filter((r) => r.dayOfWeek === d)
+      const onDay = visible.filter((r) => r.dayOfWeek === d)
         .sort((a, b) => a.startTime.localeCompare(b.startTime));
       if (onDay.length === 0) out.push({ dayOfWeek: d, rule: null });
       else for (const r of onDay) out.push({ dayOfWeek: d, rule: r });
     }
     return out;
-  }, [rules]);
-
-  // A new day copies the provider and location off an existing rule, because those name the CLINIC's service
-  // point and this screen has no way to ask for them. Nobody with no rule anywhere can be given one here —
-  // said plainly below rather than offering a button that 400s.
-  const canAdd = rules.length > 0;
+  }, [visible]);
 
   const columns: Column<DayRow>[] = useMemo(
     () => [
@@ -706,27 +757,52 @@ function PatternPane({
       {
         key: "actions",
         header: "",
+        /*
+          ICONS, not three words per row.
+
+          Seven rows × "Edit History Remove" is twenty-one links, and on a pane that already carries a
+          clinic, hours, a slot length, a cap and a slot count they were the widest thing in the table —
+          reading as body text rather than as controls, and pushing the numbers people come here for off the
+          edge. Each carries `aria-label` and `title`, so the name is still there for a screen reader and for
+          a hover, which is what 0B §6 requires of an icon-only control.
+        */
         cell: (r) =>
           r.rule ? (
-            <span className="row-actions">
-              <Button size="sm" variant="ghost" onClick={() => setEditing({ day: r.dayOfWeek, rule: r.rule })}>
-                {t(S.editPattern)}
+            <span className="row-actions rst-actions">
+              <Button
+                size="sm" variant="ghost"
+                aria-label={t(S.editPattern)} title={t(S.editPattern)}
+                onClick={() => setEditing({ day: r.dayOfWeek, rule: r.rule, branchId: r.rule?.branchId ?? "" })}
+              >
+                <Icon name="pen" />
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setViewingHistory(r.rule)}>
-                {t(S.historyAction)}
+              <Button
+                size="sm" variant="ghost"
+                aria-label={t(S.historyAction)} title={t(S.historyAction)}
+                onClick={() => setViewingHistory(r.rule)}
+              >
+                <Icon name="history" />
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setRetiring(r.rule)}>
-                {t(S.retireAction)}
+              <Button
+                size="sm" variant="ghost"
+                aria-label={t(S.retireAction)} title={t(S.retireAction)}
+                onClick={() => setRetiring(r.rule)}
+              >
+                <Icon name="bin" />
               </Button>
             </span>
           ) : canAdd ? (
-            <Button size="sm" variant="ghost" onClick={() => setEditing({ day: r.dayOfWeek, rule: null })}>
-              {t(S.addDay)}
+            <Button
+              size="sm" variant="ghost"
+              aria-label={t(S.addDay)} title={t(S.addDay)}
+              onClick={() => setEditing({ day: r.dayOfWeek, rule: null, branchId: defaultAddBranch })}
+            >
+              <Icon name="plus" />
             </Button>
           ) : null,
       },
     ],
-    [t, showClinic, branchName, canAdd],
+    [t, showClinic, branchName, canAdd, defaultAddBranch],
   );
 
   return (
@@ -749,14 +825,35 @@ function PatternPane({
         is the thing a clinics manager comes here to change.
       */}
       <div className="rst-assign">
-        <span className="mrs-label">{t(S.assignedClinics)}</span>
-        <div className="rst-chips">
+        <span className="mrs-label" id={`clinics-${person.practitionerId}`}>{t(S.assignedClinics)}</span>
+        <div className="rst-chips" role="group" aria-labelledby={`clinics-${person.practitionerId}`}>
           {person.branches.length === 0 ? (
             <span className="muted">{t(S.noClinics)}</span>
           ) : (
-            person.branches.map((b) => <StatusChip key={b} kind="neu" label={branchName(b) ?? b.slice(0, 8)} />)
+            person.branches.map((b) => {
+              const name = branchName(b) ?? b.slice(0, 8);
+              const on = clinicFilter === b;
+              return (
+                <button
+                  key={b}
+                  type="button"
+                  className="rst-chip"
+                  // `aria-pressed`, not a checkbox: this is a toggle on the view, and the pressed state is
+                  // what a screen reader needs to say. Colour alone would leave it unannounced and, for a
+                  // colour-blind reader, unseen.
+                  aria-pressed={on}
+                  title={on ? t(S.showingAllClinics) : t(S.filterToClinic).replace("{clinic}", name)}
+                  onClick={() => setClinicFilter(on ? null : b)}
+                >
+                  <Icon name="branch" />
+                  <span>{name}</span>
+                </button>
+              );
+            })
           )}
-          <Button size="sm" variant="ghost" onClick={() => setAssigning(true)}>{t(S.manageClinics)}</Button>
+          <Button size="sm" variant="ghost" leadingIcon={<Icon name="plus" />} onClick={() => setAssigning(true)}>
+            {t(S.addClinic)}
+          </Button>
         </div>
       </div>
 
@@ -781,7 +878,9 @@ function PatternPane({
           person={person}
           dayOfWeek={editing.day}
           rule={editing.rule}
-          templates={rules}
+          presetBranch={editing.branchId}
+          templates={allRules}
+          addableClinics={addableClinics}
           branchName={branchName}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -835,7 +934,9 @@ function PatternForm({
   person,
   dayOfWeek,
   rule,
+  presetBranch,
   templates,
+  addableClinics,
   branchName,
   onClose,
   onSaved,
@@ -843,17 +944,21 @@ function PatternForm({
   person: BranchPractitioner;
   dayOfWeek: number;
   rule: AvailabilityRule | null;
+  /** The clinic the caller was already looking at — the chip filter, or their only one. "" ⇒ ask. */
+  presetBranch: string;
+  /** EVERY rule in reach, not this clinician's. See `addableAt` on the pane. */
   templates: AvailabilityRule[];
+  /** The clinician's assigned clinics that have a pattern to inherit a service point from. */
+  addableClinics: string[];
   branchName: (id: string | null) => string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const t = useLoc();
   const { lang } = useTheme();
-  const existing = templates.filter((r) => r.branchId !== null);
-  const branchChoices = [...new Set(existing.map((r) => r.branchId as string))];
+  const branchChoices = addableClinics;
 
-  const [branchId, setBranchId] = useState(rule?.branchId ?? branchChoices[0] ?? "");
+  const [branchId, setBranchId] = useState(rule?.branchId ?? presetBranch ?? branchChoices[0] ?? "");
   const [startTime, setStartTime] = useState(rule?.startTime ?? "09:00");
   const [endTime, setEndTime] = useState(rule?.endTime ?? "13:00");
   const [slotMinutes, setSlotMinutes] = useState(String(rule?.slotMinutes ?? 15));
@@ -863,9 +968,18 @@ function PatternForm({
   const [validation, setValidation] = useState<string | null>(null);
   const write = useWrite();
 
-  // Provider and location name the clinic's service point. They are not editable here and not askable here;
-  // a new day inherits them from a rule this clinician already has at the same clinic.
-  const template = templates.find((r) => r.branchId === branchId) ?? templates[0] ?? null;
+  /*
+    Provider and location name the CLINIC's service point — not the clinician's. They are neither editable
+    here nor askable here, so a new day inherits them from a rule at the same clinic.
+
+    This clinician's own rule there first, when they have one, and any colleague's otherwise. Preferring
+    their own is not about correctness — every rule at a clinic carries that clinic's service point — but
+    about the ordinary case staying the obvious one when somebody reads the request later.
+  */
+  const template =
+    templates.find((r) => r.branchId === branchId && r.doctorId === person.practitionerId)
+    ?? templates.find((r) => r.branchId === branchId)
+    ?? null;
 
   const submit = async () => {
     const capValue = cap.trim() === "" ? null : Number(cap);
@@ -1058,7 +1172,7 @@ function AssignClinic({
               if (ok) onSaved();
             }}
           >
-            {t(S.manageClinics)}
+            {t(S.addClinic)}
           </Button>
           <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
         </>
@@ -1141,7 +1255,7 @@ function DayView({
       },
       {
         key: "offered",
-        header: t(S.offered),
+        header: t(S.offeredOnTheDay),
         numeric: true,
         /*
           The day's number and the week's, together, whenever they disagree. "8" on its own looks like the
@@ -1189,11 +1303,39 @@ function DayView({
           />
         )}
         <InputField label={t(S.dateLabel)} type="date" value={date} onChange={(e) => onDate(e.target.value)} />
-        {/* Stepping a day at a time is how a roster is actually read — nobody types a date to see tomorrow. */}
-        <div className="rst-daynav">
-          <Button size="sm" variant="ghost" onClick={() => onDate(shiftIso(date, -1))}>{t(S.prevDay)}</Button>
-          <Button size="sm" variant="ghost" onClick={() => onDate(todayIso())}>{t(S.today)}</Button>
-          <Button size="sm" variant="ghost" onClick={() => onDate(shiftIso(date, 1))}>{t(S.nextDay)}</Button>
+        {/*
+          STEPPING A DAY AT A TIME is how a roster is read — nobody types a date to see tomorrow.
+
+          One bordered group rather than three ghost links floating beside the date field: the three were
+          indistinguishable from the body copy around them, and "Previous day / Today / Next day" spelled out
+          took more width than the field they belong to. Arrows for the steps, a word for the one that is not
+          a step, and the arrows are rotated off the DOCUMENT direction so Arabic does not end up with
+          "previous" pointing forwards.
+        */}
+        <div className="rst-step" role="group" aria-label={t(S.stepDay)}>
+          <button
+            type="button" className="rst-step-btn rst-prev"
+            aria-label={t(S.prevDay)} title={t(S.prevDay)}
+            onClick={() => onDate(shiftIso(date, -1))}
+          >
+            <Icon name="chevron" />
+          </button>
+          <button
+            type="button" className="rst-step-btn rst-step-now"
+            onClick={() => onDate(todayIso())}
+            // Pressed when the date already IS today, so the control says where you are as well as where it
+            // would take you — otherwise the only way to know is to read the date field and do the sum.
+            aria-pressed={date === todayIso()}
+          >
+            {t(S.today)}
+          </button>
+          <button
+            type="button" className="rst-step-btn rst-next"
+            aria-label={t(S.nextDay)} title={t(S.nextDay)}
+            onClick={() => onDate(shiftIso(date, 1))}
+          >
+            <Icon name="chevron" />
+          </button>
         </div>
       </Card>
 

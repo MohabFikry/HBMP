@@ -2910,3 +2910,35 @@ invariants:
       - apps/web/test/branch-roster.test.tsx::keeps a clinician who has no pattern at all
       - apps/web/test/branch-roster.test.tsx::shows the whole week, including the days the clinician does not work
       - apps/web/test/branch-roster.test.tsx::names the clinic on every row of somebody who works two
+
+  - id: INV-A-VALUE-THIS-SERVICE-PRINTS-IS-A-VALUE-IT-READS
+    statement: >-
+      A time of day crosses emr's wire as `HH:mm` in BOTH directions. Every read endpoint formats
+      `TimeOnly` that way — opening hours are stated in minutes — while .NET's built-in converter requires
+      seconds and throws on `"09:00"`. So an edit form that loaded a weekly pattern and posted it back was
+      refused by the service that had just handed it those strings, and the JsonException surfaced as an
+      unhandled 500 rather than a 400 naming the field. The same two lines cover the roster exception, whose
+      part-day times are the same type. A service that prints a value in one format and refuses to read it
+      back in that format has a bug in its contract, not in its callers.
+    source: 17-api-specifications.md; design 42 §4
+    severity: High
+    tests:
+      - Mersal.Emr.Tests.TimeOnlyWireFormatTests.A_time_of_day_is_read_with_or_without_seconds
+      - Mersal.Emr.Tests.TimeOnlyWireFormatTests.It_is_written_back_in_the_shape_the_read_endpoints_print
+      - Mersal.Emr.Tests.TimeOnlyWireFormatTests.An_absent_time_does_not_become_midnight
+      - Mersal.Emr.Tests.TimeOnlyWireFormatTests.A_weekly_pattern_is_saved_with_the_times_its_own_read_returned
+      - Mersal.Emr.Tests.TimeOnlyWireFormatTests.A_part_day_absence_is_recorded_from_the_times_a_clinic_states
+
+  - id: INV-A-WORKING-DAY-CAN-ALWAYS-BE-ADDED-WHERE-THE-CLINIC-RUNS
+    statement: >-
+      A clinician assigned to a clinic that has a weekly pattern can be given a working day there, whether or
+      not they already have one. A new rule inherits the clinic's provider and location — its service point,
+      which the roster screen cannot ask for — and every rule at that clinic carries the same pair. Sourcing
+      them from the clinician's OWN rules instead means somebody with no pattern can never be given a first
+      one, and removing a clinician's last day at a clinic removes the way to add another.
+    source: design 42 §4/§6
+    severity: High
+    tests:
+      - apps/web/test/branch-roster.test.tsx::offers a working day to a clinician who has no pattern at all
+      - apps/web/test/branch-roster.test.tsx::narrows to one clinic when its chip is pressed
+      - apps/web/test/branch-roster.test.tsx::gives every row action a name, because they are icons

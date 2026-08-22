@@ -118,13 +118,67 @@ describe("the weekly pattern pane", () => {
     expect(header.map((h) => h.textContent)).toContain("Clinic");
   });
 
+  it("offers a working day to a clinician who has no pattern at all", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    const pane = await open(user, "Mona Saleh");
+
+    // Add used to inherit the clinic's provider and location from THIS clinician's other rules, so somebody
+    // with none could never be given a first one — and removing a clinician's last day at a clinic took the
+    // Add button away with it. Any rule at the same clinic carries the same service point.
+    expect(pane.getAllByRole("button", { name: "Add" }).length).toBe(7);
+  });
+
+  it("narrows to one clinic when its chip is pressed", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    const pane = await open(user, "Karim Adel");
+
+    // Two clinics, so every working day is on screen and the Clinic column tells them apart.
+    expect(pane.getAllByText("Not working")).toHaveLength(4);
+
+    await user.click(pane.getByRole("button", { name: /Dokki/ }));
+
+    // Dokki is one session a week, so six of the seven days are now free — and the Clinic column goes, having
+    // become a word repeated seven times.
+    expect(pane.getAllByText("Not working")).toHaveLength(6);
+    expect(within(pane.getByRole("table")).getAllByRole("columnheader").map((h) => h.textContent))
+      .not.toContain("Clinic");
+  });
+
+  it("presses the chip back to show every clinic again", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    const pane = await open(user, "Karim Adel");
+
+    const dokki = pane.getByRole("button", { name: /Dokki/ });
+    await user.click(dokki);
+    expect(dokki).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(dokki);
+    expect(dokki).toHaveAttribute("aria-pressed", "false");
+    expect(pane.getAllByText("Not working")).toHaveLength(4);
+  });
+
+  it("gives every row action a name, because they are icons", async () => {
+    const user = userEvent.setup();
+    wrap(<BranchRoster />);
+    const pane = await open(user, "Hala Fouad");
+
+    // 0B §6: an icon-only control carries its name. Without this the pane is three unlabelled glyphs per row
+    // to a screen reader, on the only controls that change a clinic's hours.
+    expect(pane.getAllByRole("button", { name: "Edit" }).length).toBeGreaterThan(0);
+    expect(pane.getAllByRole("button", { name: "History" }).length).toBeGreaterThan(0);
+    expect(pane.getAllByRole("button", { name: "Remove" }).length).toBeGreaterThan(0);
+  });
+
   it("offers the clinics a clinician is assigned to, and a way to add one", async () => {
     const user = userEvent.setup();
     wrap(<BranchRoster />);
     const pane = await open(user, "Karim Adel");
 
     expect(pane.getByText("Assigned clinics")).toBeInTheDocument();
-    await user.click(pane.getByRole("button", { name: "Assign a clinic" }));
+    await user.click(pane.getByRole("button", { name: "Add a clinic" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });

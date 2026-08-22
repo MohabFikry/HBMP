@@ -183,6 +183,46 @@ availability rule the window is generated against. So an extra clinic for somebo
 clinic generates nothing, and the endpoint reports the line with zero slots rather than inventing a slot
 length. That is the true answer: the calendar will be empty, and the roster says so where somebody can see it.
 
+### 3.3 Capacity is not availability, and the two numbers differ on purpose
+
+The booking calendar shows **16** on a Monday the roster calls **18**. Both are right, and they answer
+different questions:
+
+| | number | means |
+|---|---|---|
+| Roster, weekly pattern | **Slots a day** — 18 | what 09:00–15:00 at twenty minutes YIELDS, cap included |
+| Roster, today's roster | Offered 18 · Booked 2 · Open 16 | the same capacity, and what is left of it |
+| Booking calendar badge | **16** | slots still bookable: materialised, in the future, not held or booked |
+
+Verified against the live data: doctor `129d2a05…` on 24 August has 18 materialised slots and 2 taken, and
+on the 25th has 18 and 3 — the calendar showed 16 and 15. Today's badge is smaller again because a slot that
+has already passed is not bookable.
+
+The weekly-pattern column is therefore named **Slots a day** rather than "Slots offered": *offered* reads as
+"slots you can still book", which is the calendar's number and not this one. The day view keeps "Slots
+offered" because Booked and Open sit beside it and settle the question there.
+
+---
+
+## 3.4 A value this service prints is a value it reads
+
+Saving an edited pattern returned **500**, and the body it refused was the one the service had just given
+the client.
+
+Every read endpoint in emr formats a `TimeOnly` as `HH:mm` — opening hours are stated in minutes, and a
+coordinator's screen shows `09:00–13:00`. .NET's built-in JSON converter requires seconds: it accepts
+`"09:00:00"` and throws on `"09:00"`. So the edit form loaded `09:00`, posted `09:00`, and was told the JSON
+could not be converted — surfacing as an unhandled 500 rather than a 400 naming the field.
+
+`CreateRosterException.StartTime` and `EndTime` are the same type, so recording a **part-day** absence
+("away 11:00 to 13:00") failed identically. That stayed hidden because a whole-day exception sends nulls and
+whole-day is the default.
+
+`HourMinuteTimeOnlyConverter` reads `HH:mm` and `HH:mm[:ss[.fffffff]]`, and writes `HH:mm`. Seconds still
+work, so nothing that worked stops. Fixing it in the browser — padding `:00` at the one call site that broke
+— would have left the asymmetry for the next caller: a service that prints a value in one format and refuses
+to read it back in that format has a bug in its contract, not in its callers.
+
 ---
 
 ## 4. A branch guard that was never armed
@@ -255,6 +295,8 @@ A control that appears because somebody has a choice to make, never because they
 | `INV-THE-RESOLVED-BRANCH-REACH-REACHES-THE-GUARD` | a service that resolves a branch scope carries both halves of it — dropping the mode tells every guard the caller is unrestricted |
 | `INV-A-DAYS-ROSTER-IS-COMPUTED-WHERE-AVAILABILITY-IS` | the day roster comes out of `SlotGeneration`, never a second derivation |
 | `INV-A-ROSTER-NAMES-EACH-CLINICIAN-ONCE` | one row per clinician, clinics named where ambiguous, free days visible |
+| `INV-A-VALUE-THIS-SERVICE-PRINTS-IS-A-VALUE-IT-READS` | a time crosses emr's wire as `HH:mm` in both directions |
+| `INV-A-WORKING-DAY-CAN-ALWAYS-BE-ADDED-WHERE-THE-CLINIC-RUNS` | a new rule inherits the clinic's service point from any rule at that clinic |
 
 ---
 
@@ -263,10 +305,14 @@ A control that appears because somebody has a choice to make, never because they
 * **No calendar grid.** A week-by-hour grid looks like the answer and is not: it needs a decision about what a
   cap looks like when it is smaller than the window, and about how two clinics on one day are drawn. The table
   says both in words.
-* **Adding a clinician's FIRST pattern at a clinic.** A new working day copies the provider and location off
-  an existing rule, because those name the clinic's service point and this screen has no way to ask for them.
-  A clinician with no rule at that clinic gets a sentence saying the first pattern is created when the
-  calendar is generated, rather than a button that 400s.
+* **Adding a working day at a clinic that has no pattern at all.** A new rule inherits the clinic's provider
+  and location — its service point, which this screen cannot ask for — from any rule at that clinic. Where a
+  clinic has none, there is nothing to inherit and the pane says so.
+
+  This was narrower and wrong at first: the source was the CLINICIAN's own rules, so Dr Omar Adel — assigned
+  to Maadi, with no pattern — could never be given one, even though four colleagues have Maadi patterns
+  carrying the same service point. Removing somebody's last day at a clinic took the Add button with it, for
+  the same reason. Widening the source to every rule in reach fixes both.
 * **Retiring a rule still does not retract the slots it generated.** That is the server's behaviour and the
   right one — the appointments booked into them are real — and the confirmation says so rather than hiding it.
 * **No capacity forecast.** "Will next week be short?" is a genuinely different question, and answering it

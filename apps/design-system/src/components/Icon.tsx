@@ -46,6 +46,23 @@ export const iconPaths = {
   /** Edit — a pen over its underline. `doc` was standing in for this and reads as "open a document", which is
    *  what the note affordance beside it actually does; two different actions must not share a glyph. */
   pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  /**
+   * Remove a record — a bin with its lid and handle.
+   *
+   * `cross` was the only thing available and it is the wrong word: a cross means DISMISS (close this dialog,
+   * clear this field) everywhere else in the product, and reusing it for a delete would teach an operator
+   * that the glyph carries nothing. A bin says the row goes away, which is the one thing a remove control
+   * must not leave ambiguous.
+   */
+  bin: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/>'
+    + '<path d="M10 11v6M14 11v6"/>',
+  /**
+   * The record's own past — a clock with an arrow running back around it.
+   *
+   * Distinct from `clock`, which on this platform means A TIME (a slot, a due date, an opening hour). "When
+   * is this?" and "what did this used to say?" are different questions, and the arrow is what separates them.
+   */
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 7v5l3 2"/>',
 
   // ---- The member card (19.6d) -------------------------------------------------------------------------
   // Each of these labels ONE thing and is never reused for a second meaning on the same surface. A glyph that

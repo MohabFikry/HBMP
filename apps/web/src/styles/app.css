@@ -3540,13 +3540,8 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp3);
 }
 .rst-scope > * { flex: 1 1 220px; min-inline-size: 0; }
-/* The day steppers are a group, not three independent controls, so they stay together and never stretch. */
-.rst-scope > .rst-daynav { flex: 0 0 auto; }
-.rst-daynav {
-  display: flex;
-  gap: var(--sp1);
-  align-items: center;
-}
+/* The day stepper is one control, not three, so it stays together and never stretches. */
+.rst-scope > .rst-step { flex: 0 0 auto; }
 
 /* The view switch and the exceptions trigger on one row: the switch takes the space it needs and the button
    sits at the far end, wrapping under it rather than shrinking when the two stop fitting. */
@@ -3558,11 +3553,101 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp3);
 }
 
-/* The count beside "Exceptions". Tabular so the button does not resize between 9 and 10. */
+/* The count inside the Exceptions button. A pill on the fill rather than loose text: on a solid teal button
+   a dimmed number would either vanish into the fill or fight the label. Tabular so the button does not
+   resize between 9 and 10. */
 .rst-count {
   font-variant-numeric: tabular-nums;
-  color: var(--text-3);
+  margin-inline-start: var(--sp2);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.22);
+  font-size: var(--fs-caption, 13px);
+  font-weight: 600;
 }
+/* Dark theme's primary button is light teal with deep-ink text (0B §10b), so the pill has to darken instead
+   of lighten or it disappears. */
+:root[data-theme="dark"] .rst-count { background: rgb(4 40 42 / 0.18); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .rst-count { background: rgb(4 40 42 / 0.18); }
+}
+
+/* ── The clinic chips, which FILTER ──────────────────────────────────────────────────────────────────────
+   They read as labels and behave as toggles, so they have to look pressable: a real border, a hover, a focus
+   ring, and a filled state that survives grayscale by changing weight and border as well as hue. */
+.rst-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 32px;
+  padding-inline: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-caption, 13px);
+  cursor: pointer;
+}
+.rst-chip svg { inline-size: 14px; block-size: 14px; }
+.rst-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+/* The pressed tint is the house one — `color-mix` off `--brand`, exactly as the selected worklist row does
+   it — so a filtered chip and a selected row read as the same kind of state in both themes. */
+.rst-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Row actions as icons. Tight together — they are one group acting on one row — and pulled to the trailing
+   edge so the numbers they follow stay the thing the eye scans down. */
+.rst-actions {
+  display: inline-flex;
+  gap: 2px;
+  justify-content: end;
+}
+.rst-actions .mrs-btn { padding-inline: var(--sp2); }
+.rst-actions svg { inline-size: 16px; block-size: 16px; }
+
+/* ── The day stepper ─────────────────────────────────────────────────────────────────────────────────────
+   One bordered group, hairlines between the three, so it reads as a single control rather than as three
+   links that happen to be adjacent. */
+.rst-step {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.rst-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 40px;
+  min-inline-size: 44px;
+  padding-inline: var(--sp3);
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rst-step-btn + .rst-step-btn { border-inline-start: 1px solid var(--border); }
+.rst-step-btn:hover { background: var(--surface-2); color: var(--text-1); }
+.rst-step-now[aria-pressed="true"] { color: var(--accent); }
+/* The chevron is drawn pointing DOWN and rotated off the DOCUMENT direction — the same rule as
+   `.pagehead-back` and `.mrs-pager-step`, and the reason is the same: a hard-coded left arrow points
+   forwards in Arabic. */
+.rst-prev svg { transform: rotate(90deg); }
+.rst-next svg { transform: rotate(-90deg); }
+[dir="rtl"] .rst-prev svg { transform: rotate(-90deg); }
+[dir="rtl"] .rst-next svg { transform: rotate(90deg); }
 
 .rst-split { margin-block-start: var(--sp1); }
 
