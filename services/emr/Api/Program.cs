@@ -142,7 +142,21 @@ app.Use(async (ctx, next) =>
             await ctx.Response.WriteAsJsonAsync(new { title = "branch-not-permitted", detail = "the requested active branch is not in your permitted set" });
             return;
         }
-        ctx.RequestServices.GetRequiredService<BranchScopeState>().Context = state.Context;
+        // BOTH halves of the resolved state. `Mode` was computed and dropped, and it is not decoration:
+        // `BranchWriteScope` and `BranchQueryScope` take it as their first argument, and its default —
+        // `MemberScoped`, to match `BranchContext.Unrestricted` — is the ONE value that means "the branch
+        // dimension does not restrict this caller". So every call site reading `branch.Mode` was told the
+        // caller was unrestricted no matter who they were: `ResolveTarget` returned the branch off the
+        // request body untested, and `RefuseUnlessWritable` returned null for every row. That is precisely
+        // the hole BranchWriteScope was written to close, reopened one layer up, and it is invisible in the
+        // way that matters — nothing errors, every screen works, and the caller sees and does more.
+        //
+        // The endpoints that re-derive the mode from the principal through their own private `BranchModeOf`
+        // helper were unaffected, which is why the gap survived: the copies were right and the shared field
+        // they were meant to replace was empty.
+        var scope = ctx.RequestServices.GetRequiredService<BranchScopeState>();
+        scope.Context = state.Context;
+        scope.Mode = state.Mode;
         if (state.Context.ActiveBranchId is { } a) ctx.Response.Headers["X-Active-Branch"] = a.ToString();
     }
     await next();
@@ -341,6 +355,7 @@ app.MapAppointments();
 app.MapQueue();
 app.MapProviderAvailability();   // 0025 — the weekly pattern and its daily cap, as an administered record
 app.MapRosterExceptions();   // 25.4 — leave/holiday/closure/ad-hoc + the impact preview
+app.MapDayRoster();   // 33.10 — one clinic, one day: who is working, and how full they are
 app.MapClinical();
 app.MapProfileContext();   // 20.2 — the seam the patient profile's PMH + encounters sections read
 app.MapUtilizationFacts();   // 19.4 — encounter COUNTS for utilization; no clinical payload crosses the wire

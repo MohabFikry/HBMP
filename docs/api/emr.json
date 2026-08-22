@@ -1237,6 +1237,43 @@
         }
       }
     },
+    "/api/v1/roster/day": {
+      "get": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "branchId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DayRosterResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/encounters/mine": {
       "get": {
         "tags": [
@@ -2470,6 +2507,164 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "DayRosterLine": {
+        "type": "object",
+        "properties": {
+          "availabilityId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "practitionerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "startTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "slotMinutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "slotsFromPattern": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "slotsOffered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "booked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "exceptionKind": {
+            "type": "string",
+            "nullable": true
+          },
+          "exceptionReason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DayRosterNotice": {
+        "type": "object",
+        "properties": {
+          "exceptionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "practitionerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "wholeDay": {
+            "type": "boolean"
+          },
+          "startTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "endTime": {
+            "type": "string",
+            "nullable": true
+          },
+          "subtractive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DayRosterResponse": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayRosterLine"
+            },
+            "nullable": true
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayRosterNotice"
+            },
+            "nullable": true
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DayRosterSummary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DayRosterSummary": {
+        "type": "object",
+        "properties": {
+          "clinicians": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "slotsOffered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "booked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
       },
       "DiagnosisRank": {
         "enum": [

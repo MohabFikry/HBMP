@@ -2860,3 +2860,53 @@ invariants:
       - apps/web/test/reception-eligibility-verified.test.tsx::offers booking, carrying the identifier the service resolved
       - apps/web/test/reception-eligibility-verified.test.tsx::does not offer it when the member may not be seen today
       - apps/web/test/reception-eligibility-verified.test.tsx::does not offer it to a caller who cannot book
+
+  - id: INV-THE-RESOLVED-BRANCH-REACH-REACHES-THE-GUARD
+    statement: >-
+      A service that resolves the caller's branch scope carries BOTH halves of it onto the request state —
+      the context AND the reach mode. `BranchScopeState.Mode` defaults to MemberScoped so it agrees with
+      `BranchContext.Unrestricted`, and MemberScoped is the one value meaning "the branch dimension does not
+      restrict this caller"; a middleware that copies the context and drops the mode therefore tells every
+      write guard the caller is unrestricted, whoever they are. `BranchWriteScope.ResolveTarget` then returns
+      the branch id off the request body untested and `RefuseUnlessWritable` returns null for every row —
+      exactly the hole `BranchWriteScope` was written to close, reopened one layer above it.
+    source: design 37 §3; design 42 §1; ADR-0029; libs/authz/BranchWriteScope.cs
+    severity: Critical
+    tests:
+      - Mersal.Architecture.Tests.BranchScopeModeCarriedTests.Every_service_that_resolves_a_branch_scope_carries_its_mode_too
+      - Mersal.Architecture.Tests.BranchScopeModeCarriedTests.The_scan_actually_reaches_the_services_that_resolve_a_branch_scope
+      - Mersal.Emr.Tests.DayRosterTests.Another_clinics_roster_is_not_on_this_desks_day
+      - Mersal.Emr.Tests.EmrEndpointTests.Slots_are_not_materialized_for_a_doctor_who_does_not_serve_that_branch
+
+  - id: INV-A-DAYS-ROSTER-IS-COMPUTED-WHERE-AVAILABILITY-IS
+    statement: >-
+      The day roster — who works this clinic on this date, in what hours, and how many patients they can
+      still take — comes out of the single availability computation (`SlotGeneration`), never from a second
+      derivation over the weekly pattern and the exception calendar. Combining those by hand means applying
+      four rules that are easy to state and easy to get wrong: a whole-day closure outranks an extra clinic,
+      a part-day absence shortens a session without cancelling it, the daily cap applies across every window
+      the date offers and AFTER subtraction, and a trailing partial slot is not a slot. A second
+      implementation of them is a clinic telling a patient it is open on a day the booking engine has closed.
+    source: design 42 §4/§6/§7 rule 5
+    severity: High
+    tests:
+      - Mersal.Emr.Tests.DayRosterTests.A_working_day_reports_the_pattern_the_cap_and_what_is_already_booked
+      - Mersal.Emr.Tests.DayRosterTests.Leave_leaves_the_line_in_place_and_names_the_reason
+      - Mersal.Emr.Tests.DayRosterTests.An_afternoon_away_shortens_the_day_and_still_reads_as_working
+      - Mersal.Emr.Tests.DayRosterTests.A_closed_clinic_outranks_an_extra_session_on_the_same_day
+      - Mersal.Emr.Tests.DayRosterTests.A_closure_with_nothing_to_close_is_still_reported_as_a_notice
+
+  - id: INV-A-ROSTER-NAMES-EACH-CLINICIAN-ONCE
+    statement: >-
+      The roster lists each clinician once, with the clinics they work named wherever a row could otherwise
+      be ambiguous, and shows the days somebody does NOT work alongside the days they do. A table of
+      availability RULES gives a clinician one row per weekday per clinic, so the person supervising cover
+      cannot see a week, cannot tell two buildings apart, and cannot see the free day they are looking for.
+    source: design 42 §4/§6; 12-ui-wireframes.md
+    severity: High
+    tests:
+      - apps/web/test/branch-roster.test.tsx::names each clinician ONCE, however many sessions they work
+      - apps/web/test/branch-roster.test.tsx::names the clinics of anyone who works more than one
+      - apps/web/test/branch-roster.test.tsx::keeps a clinician who has no pattern at all
+      - apps/web/test/branch-roster.test.tsx::shows the whole week, including the days the clinician does not work
+      - apps/web/test/branch-roster.test.tsx::names the clinic on every row of somebody who works two

@@ -23,6 +23,16 @@ namespace Mersal.Emr.Tests;
 [Collection("emr-db")]
 public class AppointmentNoteAuthorTests
 {
+    /// <summary>
+    /// The desk's own clinic.
+    ///
+    /// <para>Named rather than left unset because a BranchScoped caller with no branch assignment resolves to
+    /// an EMPTY reach and may write nowhere. These tests were escaping that only because emr's middleware
+    /// dropped the resolved <c>Mode</c>, so every write guard read the desk as branch-unrestricted; with the
+    /// mode carried, a test that books has to say which clinic it books at.</para>
+    /// </summary>
+    private static readonly Guid Desk = Guid.Parse("cc000000-0000-4000-8000-00000000d002");
+
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
     private const string Author = "Nada Fahmy";
 
@@ -30,7 +40,7 @@ public class AppointmentNoteAuthorTests
     public async Task A_note_written_at_booking_captures_the_author_by_name_and_by_id()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient(displayName: Author);
@@ -51,7 +61,7 @@ public class AppointmentNoteAuthorTests
     public async Task The_name_reaches_the_reader_over_HTTP()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient(displayName: Author);
@@ -72,7 +82,7 @@ public class AppointmentNoteAuthorTests
     public async Task Editing_the_note_re_attributes_it_to_whoever_edited_it()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var booker = app.ReceptionClient(displayName: Author);
@@ -99,7 +109,7 @@ public class AppointmentNoteAuthorTests
     public async Task Clearing_the_note_clears_the_author_with_it()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient(displayName: Author);
@@ -123,7 +133,7 @@ public class AppointmentNoteAuthorTests
     public async Task A_nameless_caller_leaves_the_name_null_rather_than_falling_back_to_the_id()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             // No display name on the token at all — a machine caller, or a token shape that carries neither

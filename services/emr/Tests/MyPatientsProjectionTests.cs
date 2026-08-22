@@ -75,11 +75,14 @@ public class MyPatientsProjectionTests
     public async Task Worklist_carries_the_branch_of_the_appointment_the_visit_was_started_from()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        // The doctor's reach has to include the clinic the appointment is at. Opening a visit is a WRITE,
+        // and a BranchScoped caller with no assignment may write nowhere — which these tests were escaping
+        // only because emr dropped the resolved scope mode and every guard read the doctor as unrestricted.
+        var branchId = Guid.NewGuid();
+        await using var app = new EmrApiFactory { HomeBranch = branchId };
         try
         {
             var beneficiary = Guid.NewGuid();
-            var branchId = Guid.NewGuid();
             var appointmentId = await SeedCheckedInAppointment(app, beneficiary, "Amal Hassan", branchId);
 
             using var doctor = app.DoctorClient();
@@ -122,11 +125,11 @@ public class MyPatientsProjectionTests
     public async Task An_appointment_with_a_branch_and_no_name_still_yields_its_branch()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        var branchId = Guid.NewGuid();
+        await using var app = new EmrApiFactory { HomeBranch = branchId };
         try
         {
             var beneficiary = Guid.NewGuid();
-            var branchId = Guid.NewGuid();
             var appointmentId = await SeedCheckedInAppointment(app, beneficiary, name: null, branchId);
 
             using var doctor = app.DoctorClient();

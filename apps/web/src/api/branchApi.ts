@@ -269,12 +269,86 @@ export const zRosterHistoryEntry = z.object({
 }).passthrough();
 export type RosterHistoryEntry = z.infer<typeof zRosterHistoryEntry>;
 
+/**
+ * 33.10 — ONE CLINIC, ONE DAY.
+ *
+ * <p>The weekly pattern says what normally happens and the exception calendar says what does not. The
+ * question a coordinator actually opens the screen with — is this clinician in today, and how many can they
+ * still take — is neither of those, and reading it off the two by eye means applying four rules by hand: a
+ * whole-day closure beats an extra clinic, a part-day absence shortens a session without cancelling it, the
+ * daily cap applies across every window the date offers and AFTER subtraction, and a trailing partial slot is
+ * not a slot.</p>
+ *
+ * <p><b>So the server answers it.</b> Every line comes out of `SlotGeneration` — the one place availability
+ * is decided — run for a single date. Deriving the same answer here would be a second implementation of those
+ * four rules in a language with no tests over them, and the first divergence would be a clinic telling a
+ * patient it was open on a day the booking engine had already closed.</p>
+ */
+export const zDayRosterLine = z.object({
+  /** Null on an EXTRA session: an ad-hoc clinic is an exception, not a weekly rule, so it has no rule id. */
+  availabilityId: z.string().nullable(),
+  practitionerId: z.string().nullable(),
+  branchId: z.string().nullable(),
+  startTime: z.string(),
+  endTime: z.string(),
+  slotMinutes: z.number(),
+  maxPerDay: z.number().nullable(),
+  /** What the weekly pattern alone offers, cap included and exceptions excluded. */
+  slotsFromPattern: z.number(),
+  /** What this DATE offers, once exceptions and the cap have both applied. */
+  slotsOffered: z.number(),
+  /** Appointments on this clinician's day at this clinic — everything but a cancellation. */
+  booked: z.number(),
+  /** "Working" | "Off" | "Extra", named by the server rather than inferred here from a slot count. */
+  status: z.string(),
+  exceptionKind: z.string().nullable(),
+  exceptionReason: z.string().nullable(),
+}).passthrough();
+export type DayRosterLine = z.infer<typeof zDayRosterLine>;
+
+/**
+ * An exception in force on this date, whether or not it changed any line.
+ *
+ * A clinic closed on a day nobody was rostered has no lines at all — and "why is this day empty" still needs
+ * an answer, because "nobody is working today" reads identically for a bank holiday and for a rota somebody
+ * forgot to enter.
+ */
+export const zDayRosterNotice = z.object({
+  exceptionId: z.string(),
+  kind: z.string(),
+  reason: z.string(),
+  branchId: z.string().nullable(),
+  practitionerId: z.string().nullable(),
+  wholeDay: z.boolean(),
+  startTime: z.string().nullable(),
+  endTime: z.string().nullable(),
+  subtractive: z.boolean(),
+}).passthrough();
+export type DayRosterNotice = z.infer<typeof zDayRosterNotice>;
+
+export const zDayRoster = z.object({
+  date: z.string(),
+  branchId: z.string().nullable(),
+  lines: z.array(zDayRosterLine),
+  notices: z.array(zDayRosterNotice),
+  summary: z.object({
+    clinicians: z.number(),
+    slotsOffered: z.number(),
+    booked: z.number(),
+    /** Floored at zero server-side: a walk-in books without consuming a slot, and "-2 open" helps nobody. */
+    open: z.number(),
+  }).passthrough(),
+}).passthrough();
+export type DayRoster = z.infer<typeof zDayRoster>;
+
 export interface RosterApi {
   list(params?: { branchId?: string; practitionerId?: string; from?: string; to?: string }): Promise<RosterException[]>;
   preview(body: CreateRosterExceptionBody): Promise<RosterImpact>;
   apply(body: CreateRosterExceptionBody): Promise<{ exceptionId: string; affectedCount: number; flagged: number; cancelled: number }>;
   withdraw(exceptionId: string): Promise<{ exceptionId: string; withdrawn: boolean }>;
   history(exceptionId: string): Promise<{ exceptionId: string; entries: RosterHistoryEntry[] }>;
+  /** One clinic on one date: who is working, in what hours, and how full they are. */
+  day(params: { branchId?: string; date: string }): Promise<DayRoster>;
 }
 
 const httpRosterApi: RosterApi = {
@@ -311,6 +385,8 @@ const httpRosterApi: RosterApi = {
     parsed(
       z.object({ exceptionId: z.string(), entries: z.array(zRosterHistoryEntry) }).passthrough(),
       getRaw(`/roster-exceptions/${exceptionId}/history`)),
+
+  day: (params) => parsed(zDayRoster, getRaw(`/roster/day${qs(params)}`)),
 };
 
 // ── The weekly pattern ──────────────────────────────────────────────────────────────────────────────────

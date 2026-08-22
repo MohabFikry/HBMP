@@ -3508,7 +3508,8 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    for the reason spelled out on the identical guard in the policy screens above: a KPI tile is a card by
    construction and carries its own spacing, so flattening it strips the padding off the tile rather than
    preventing a double inset. This screen has no KPI row today — it is excluded here so it cannot acquire the
-   same defect the moment it gains one. */
+   same defect the moment it gains one — which it since has: the day roster's summary strip is a `.dash-kpis`
+   row of KPI tiles, and without the exclusion above every one of them would render flush against its border. */
 .branch-screen .mrs-card .mrs-card:not(.mrs-kpi) {
   padding: 0;
 }
@@ -3519,6 +3520,112 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   font-size: var(--fs-body-lg, 15px);
   max-width: 68ch;
   margin: 0;
+}
+
+/* ============================================================================================================
+   ROSTER & AVAILABILITY (33.10)
+
+   The screen is master/detail over PEOPLE — one row per clinician, their week in a pane beside the list — plus
+   a second view that answers one clinic on one date. Everything below is layout for those two; the tables,
+   chips and fields are the design system's, unstyled here on purpose.
+   ============================================================================================================ */
+
+/* The filter bar. A row on a wide screen and a stack on a narrow one, with each control free to be as wide as
+   its content needs — a clinic name and a clinician name are very different lengths, and forcing equal columns
+   makes the shorter one look like an empty field. */
+.rst-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp3);
+}
+.rst-scope > * { flex: 1 1 220px; min-inline-size: 0; }
+/* The day steppers are a group, not three independent controls, so they stay together and never stretch. */
+.rst-scope > .rst-daynav { flex: 0 0 auto; }
+.rst-daynav {
+  display: flex;
+  gap: var(--sp1);
+  align-items: center;
+}
+
+/* The view switch and the exceptions trigger on one row: the switch takes the space it needs and the button
+   sits at the far end, wrapping under it rather than shrinking when the two stop fitting. */
+.rst-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+}
+
+/* The count beside "Exceptions". Tabular so the button does not resize between 9 and 10. */
+.rst-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.rst-split { margin-block-start: var(--sp1); }
+
+/* Name over specialty in one cell: two facts about one person, read together, without a second column that
+   would be empty for every clinician whose specialty is not recorded. */
+.rst-who {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.rst-who .muted { font-size: var(--fs-caption, 13px); }
+.rst-clinics { font-size: var(--fs-caption, 13px); }
+
+/* The clinics a clinician is assigned to, and the control that changes them. */
+.rst-assign {
+  display: grid;
+  gap: var(--sp1);
+  margin-block: var(--sp3);
+}
+.rst-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+
+/* Two fields on one line — start/end, slot length/cap. Collapses below the point where two time inputs stop
+   fitting side by side, rather than at an arbitrary breakpoint. */
+.rst-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp3);
+}
+
+/* Status and the reason it is that status, stacked. The reason is the actionable half — "Off" tells a
+   coordinator to find cover, "Off · Annual leave" tells them how long for — so it travels with the chip
+   rather than living in a column of its own that would be blank on every ordinary row. */
+.rst-status {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 2px;
+}
+.rst-status .muted { font-size: var(--fs-caption, 13px); }
+
+/* The exceptions in force on a date, inside their alert. `list-style-position: inside` keeps the markers
+   within the alert's padding instead of hanging into its border. */
+.rst-notices {
+  margin: var(--sp1) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+/* The record-an-exception form inside the exceptions dialog. A separated block rather than a nested card:
+   a card inside a dialog is a second frame around content that already has one. */
+.rst-record {
+  display: grid;
+  gap: var(--sp3);
+  margin-block-start: var(--sp4);
+  padding-block-start: var(--sp4);
+  border-block-start: 1px solid var(--border);
 }
 
 /* ============================================================================================================

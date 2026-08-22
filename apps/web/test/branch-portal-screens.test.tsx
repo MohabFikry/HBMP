@@ -165,9 +165,22 @@ describe("roster exceptions", () => {
     expect(after.map((e) => e.exceptionId)).not.toContain(target);
   });
 
-  it("renders the exceptions the clinic already has", async () => {
+  it("renders the exceptions the clinic already has, behind the header button", async () => {
+    // 33.10 — the exceptions table and its nine-field form used to occupy two thirds of the screen while
+    // being MAINTENANCE, not something anyone opens the roster to read. Both moved into a dialog. The count
+    // on the button is what the table used to say by being visible, so it is asserted with the content.
+    const user = userEvent.setup();
     wrap(<BranchRoster />);
-    await waitFor(() => expect(screen.getByText("Eid al-Adha")).toBeInTheDocument());
+
+    // The count is what the table used to say by being visible, so it is asserted with the content — against
+    // the live list rather than a literal, because the tests above this one withdraw and apply.
+    const expected = (await rosterApi.list()).length;
+    const trigger = await screen.findByRole("button", { name: /Exceptions/ });
+    await waitFor(() => expect(trigger).toHaveTextContent(String(expected)));
+
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(within(dialog).getByText("Eid al-Adha")).toBeInTheDocument());
   });
 });
 

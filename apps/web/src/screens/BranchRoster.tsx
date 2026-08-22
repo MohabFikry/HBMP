@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, InlineAlert, InputField, ComboboxField, Modal, StatusChip, useTheme,
+  Button, Card, DataTable, InlineAlert, InputField, ComboboxField, KpiCard, Modal, SegmentedControl,
+  StatusChip, useTheme,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { availabilityApi, branchApi, rosterApi } from "../api/branchApi";
 import type {
-  AvailabilityRule, BranchPractitioner, BranchRef, CreateRosterExceptionBody, RosterException, RosterImpact,
-  RosterKind,
+  AvailabilityRule, BranchPractitioner, BranchRef, CreateRosterExceptionBody, DayRoster, DayRosterLine,
+  RosterException, RosterImpact, RosterKind,
 } from "../api/branchApi";
 import { useAsync } from "../api/useAsync";
 import { useWrite, writeErrorText } from "../api/useWrite";
@@ -21,36 +22,66 @@ import type { Localized } from "../portals/catalog";
 const S = {
   title: { en: "Roster & Availability", ar: "الجدول والإتاحة" },
   intro: {
-    en: "The weekly pattern says when the clinic normally runs and how many patients each clinician takes. Exceptions say when it does not — leave, a public holiday, a closure — or when it runs extra.",
-    ar: "يحدد النمط الأسبوعي مواعيد العمل المعتادة وعدد المرضى لكل إكلينيكي. أما الاستثناءات فتحدد متى لا تعمل العيادة — إجازة أو عطلة رسمية أو إغلاق — أو متى تعمل بشكل إضافي.",
-  },
-  whyNotDelete: {
-    en: "Adding an exception leaves the weekly pattern intact. Deleting the pattern to cover one absence removes every other week too.",
-    ar: "إضافة استثناء تُبقي النمط الأسبوعي كما هو. أما حذف النمط لتغطية غياب واحد فيلغي كل الأسابيع الأخرى أيضًا.",
+    en: "Pick a clinician to see and change the week they normally work. Switch to Today's roster to see one clinic on one day, with the exceptions already applied.",
+    ar: "اختر إكلينيكيًا لعرض أسبوع عمله المعتاد وتعديله. وانتقل إلى جدول اليوم لعرض عيادة واحدة في يوم واحد، مع تطبيق الاستثناءات.",
   },
 
-  // ── weekly pattern ────────────────────────────────────────────────────────────────────────────────────
-  patternHeading: { en: "Weekly pattern", ar: "النمط الأسبوعي" },
-  noPattern: {
-    en: "No weekly pattern is recorded for this clinic yet. Until one is, no appointment slots are generated.",
-    ar: "لا يوجد نمط أسبوعي مسجل لهذه العيادة بعد. وحتى يُسجَّل، لن تُنشأ أي مواعيد متاحة.",
+  // ── the two views ─────────────────────────────────────────────────────────────────────────────────────
+  viewPattern: { en: "Weekly pattern", ar: "النمط الأسبوعي" },
+  viewDay: { en: "Today's roster", ar: "جدول اليوم" },
+  viewLabel: { en: "Which view", ar: "أي عرض" },
+  /* The filter bar's own accessible name. Deliberately NOT the view's name: the pane below carries that, and
+     two regions with one name is a screen reader offering the same landmark twice. */
+  scopeRegion: { en: "Filters", ar: "عوامل التصفية" },
+
+  // ── scope ─────────────────────────────────────────────────────────────────────────────────────────────
+  branchLabel: { en: "Clinic", ar: "العيادة" },
+  allBranches: { en: "All clinics you run", ar: "كل العيادات التي تديرها" },
+  clinicianLabel: { en: "Clinician", ar: "الإكلينيكي" },
+  clinicianPlaceholder: { en: "Search by name…", ar: "ابحث بالاسم…" },
+  noClinician: { en: "Nobody selected", ar: "لم يتم اختيار أحد" },
+
+  // ── the clinician list ────────────────────────────────────────────────────────────────────────────────
+  listHeading: { en: "Clinicians", ar: "الإكلينيكيون" },
+  listEmpty: {
+    en: "No clinicians are assigned to this clinic yet.",
+    ar: "لا يوجد إكلينيكيون معينون لهذه العيادة بعد.",
   },
-  clinician: { en: "Clinician", ar: "الإكلينيكي" },
-  day: { en: "Day", ar: "اليوم" },
+  noMatches: { en: "No clinician matches that search.", ar: "لا يوجد إكلينيكي مطابق لهذا البحث." },
+  colClinics: { en: "Clinics", ar: "العيادات" },
+  colDays: { en: "Days a week", ar: "أيام أسبوعيًا" },
+  colWeekly: { en: "Slots a week", ar: "المواعيد أسبوعيًا" },
+  noPatternShort: { en: "No pattern", ar: "بلا نمط" },
+
+  // ── the pattern pane ──────────────────────────────────────────────────────────────────────────────────
+  pickSomeone: {
+    en: "Choose a clinician to see the week they normally work.",
+    ar: "اختر إكلينيكيًا لعرض أسبوع عمله المعتاد.",
+  },
+  patternHeading: { en: "Weekly pattern", ar: "النمط الأسبوعي" },
+  assignedClinics: { en: "Assigned clinics", ar: "العيادات المعينة" },
+  noClinics: { en: "None recorded", ar: "لا يوجد" },
+  manageClinics: { en: "Assign a clinic", ar: "تعيين عيادة" },
+  notWorking: { en: "Not working", ar: "لا يعمل" },
+  addDay: { en: "Add", ar: "إضافة" },
+  cannotAddYet: {
+    en: "A first pattern at a clinic is created when its calendar is generated — after that, days can be added here.",
+    ar: "يُنشأ أول نمط في العيادة عند توليد تقويمها — وبعد ذلك يمكن إضافة الأيام من هنا.",
+  },
   hoursCol: { en: "Hours", ar: "الساعات" },
   slotLength: { en: "Slot length", ar: "مدة الموعد" },
   cap: { en: "Daily limit", ar: "الحد اليومي" },
   offered: { en: "Slots offered", ar: "المواعيد المتاحة" },
   noCap: { en: "No limit", ar: "بلا حد" },
   minutes: { en: "min", ar: "دقيقة" },
-  capExplains: {
-    en: "of {window} the hours allow",
-    ar: "من {window} تسمح بها الساعات",
-  },
+  capExplains: { en: "of {window} the hours allow", ar: "من {window} تسمح بها الساعات" },
   editPattern: { en: "Edit", ar: "تعديل" },
   historyAction: { en: "History", ar: "السجل" },
+  retireAction: { en: "Remove", ar: "إزالة" },
 
+  // ── editing ───────────────────────────────────────────────────────────────────────────────────────────
   editHeading: { en: "Edit the weekly pattern", ar: "تعديل النمط الأسبوعي" },
+  addHeadingDay: { en: "Add a working day", ar: "إضافة يوم عمل" },
   startLabel: { en: "Starts", ar: "يبدأ" },
   endLabel: { en: "Ends", ar: "ينتهي" },
   slotMinutesLabel: { en: "Slot length (minutes)", ar: "مدة الموعد (بالدقائق)" },
@@ -60,14 +91,62 @@ const S = {
     ar: "اتركه فارغًا لعدم وضع حد. الساعات تحدد عدد المواعيد الممكنة، وهذا يحدد عدد المعروض منها. يوم من ست ساعات بمواعيد ١٥ دقيقة يتيح ٢٤ موعدًا — والإكلينيكي الذي يمكنه استقبال ٢٠ بأمان يحدد ٢٠.",
   },
   savePattern: { en: "Save pattern", ar: "حفظ النمط" },
-  patternSaved: { en: "Weekly pattern updated.", ar: "تم تحديث النمط الأسبوعي." },
   capMustBePositive: {
-    en: "A limit of zero would close the clinic silently. Leave it empty for no limit, or record a closure below.",
-    ar: "الحد صفر يغلق العيادة دون إشعار. اتركه فارغًا لعدم وضع حد، أو سجّل إغلاقًا أدناه.",
+    en: "A limit of zero would close the clinic silently. Leave it empty for no limit, or record a closure instead.",
+    ar: "الحد صفر يغلق العيادة دون إشعار. اتركه فارغًا لعدم وضع حد، أو سجّل إغلاقًا بدلًا من ذلك.",
   },
   historyHeading: { en: "Change history", ar: "سجل التغييرات" },
 
-  // ── exceptions ────────────────────────────────────────────────────────────────────────────────────────
+  retireHeading: { en: "Remove this working day", ar: "إزالة يوم العمل هذا" },
+  retireExplains: {
+    en: "This removes the day from the weekly pattern, so no new slots are generated for it. It does NOT withdraw slots already generated, or cancel anything booked into them — those need a closure, which carries a reason and an impact preview.",
+    ar: "يؤدي هذا إلى إزالة اليوم من النمط الأسبوعي، فلا تُنشأ مواعيد جديدة له. لكنه لا يسحب المواعيد المتاحة التي أُنشئت بالفعل ولا يلغي ما حُجز فيها — فذلك يحتاج إلى إغلاق يحمل سببًا ومعاينة للأثر.",
+  },
+  retired: { en: "Working day removed.", ar: "تمت إزالة يوم العمل." },
+
+  assignHeading: { en: "Assign a clinic", ar: "تعيين عيادة" },
+  assignHelp: {
+    en: "Adding a clinic lets this clinician be rostered and booked there from the date you choose. It does not move anything already booked elsewhere.",
+    ar: "إضافة عيادة تتيح إدراج هذا الإكلينيكي في جدولها وحجز مواعيده فيها اعتبارًا من التاريخ الذي تختاره. ولا ينقل ذلك أي حجز قائم في مكان آخر.",
+  },
+  assignFrom: { en: "From", ar: "من" },
+  assignSaved: { en: "Clinic assigned.", ar: "تم تعيين العيادة." },
+  needBranch: { en: "Choose a clinic.", ar: "اختر عيادة." },
+
+  // ── the day view ──────────────────────────────────────────────────────────────────────────────────────
+  dateLabel: { en: "Date", ar: "التاريخ" },
+  today: { en: "Today", ar: "اليوم" },
+  prevDay: { en: "Previous day", ar: "اليوم السابق" },
+  nextDay: { en: "Next day", ar: "اليوم التالي" },
+  dayHeading: { en: "On duty", ar: "في الخدمة" },
+  dayEmpty: {
+    en: "Nobody is rostered at this clinic on this date.",
+    ar: "لا يوجد أحد مُدرج في جدول هذه العيادة في هذا التاريخ.",
+  },
+  kpiClinicians: { en: "Clinicians on duty", ar: "إكلينيكيون في الخدمة" },
+  kpiOffered: { en: "Slots offered", ar: "المواعيد المتاحة" },
+  kpiBooked: { en: "Booked", ar: "محجوزة" },
+  kpiOpen: { en: "Still open", ar: "ما زالت متاحة" },
+  colStatus: { en: "Status", ar: "الحالة" },
+  colBooked: { en: "Booked", ar: "محجوزة" },
+  colOpen: { en: "Open", ar: "متاحة" },
+  statusWorking: { en: "Working", ar: "يعمل" },
+  statusOff: { en: "Off", ar: "غائب" },
+  statusExtra: { en: "Extra clinic", ar: "عيادة إضافية" },
+  reducedBy: { en: "Shortened — {reason}", ar: "مختصر — {reason}" },
+  noticesHeading: { en: "In force on this date", ar: "ساري في هذا التاريخ" },
+
+  // ── exceptions, behind a button ───────────────────────────────────────────────────────────────────────
+  exceptionsAction: { en: "Exceptions", ar: "الاستثناءات" },
+  exceptionsHeading: { en: "Exceptions to the pattern", ar: "استثناءات النمط" },
+  exceptionsDescription: {
+    en: "Leave, public holidays, closures and extra clinics — dated departures from the weekly pattern.",
+    ar: "الإجازات والعطلات الرسمية والإغلاقات والعيادات الإضافية — انحرافات مؤرخة عن النمط الأسبوعي.",
+  },
+  whyNotDelete: {
+    en: "Adding an exception leaves the weekly pattern intact. Removing a working day to cover one absence removes every other week too.",
+    ar: "إضافة استثناء تُبقي النمط الأسبوعي كما هو. أما إزالة يوم عمل لتغطية غياب واحد فتلغي كل الأسابيع الأخرى أيضًا.",
+  },
   existing: { en: "Exceptions", ar: "الاستثناءات" },
   noneYet: { en: "No exceptions are recorded for the next 90 days.", ar: "لا توجد استثناءات مسجلة خلال التسعين يومًا القادمة." },
   kind: { en: "Kind", ar: "النوع" },
@@ -104,7 +183,6 @@ const S = {
     en: "Required. A patient will ask why their appointment moved, and this is the answer they are owed.",
     ar: "مطلوب. سيسأل المستفيد عن سبب تغيير موعده، وهذا هو الجواب الذي يستحقه.",
   },
-
   whoLabel: { en: "Who is affected", ar: "من يتأثر" },
   whoHelp: {
     en: "Leave as the whole clinic to close it for everyone. Name a clinician to record their absence while the clinic stays open.",
@@ -146,6 +224,7 @@ const S = {
     en: "The number of affected appointments changed since you checked. Check the impact again.",
     ar: "تغيّر عدد المواعيد المتأثرة منذ الفحص. افحص الأثر مرة أخرى.",
   },
+  close: { en: "Close", ar: "إغلاق" },
   cancel: { en: "Cancel", ar: "إلغاء" },
 } satisfies Record<string, Localized>;
 
@@ -167,147 +246,543 @@ const DAY_LABEL: Localized[] = [
   { en: "Saturday", ar: "السبت" },
 ];
 
+const DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/** Today in the ISO form both `<input type="date">` and the endpoint speak. Local, not UTC: the clinic's day. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shiftIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const next = new Date(y, m - 1, d + days);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+}
+
+type View = "pattern" | "day";
+
 /**
- * (design 42 §4/§6) — the roster: the weekly pattern the clinic normally runs, and the exceptions to it.
+ * (design 42 §4/§6, 33.10) — the roster, rebuilt around the two questions a clinic actually asks.
  *
- * <b>The weekly pattern band is new, and its absence was the defect.</b> This screen opened by telling the
- * coordinator that "the weekly pattern says when the clinic normally runs" and then showed only the
- * exceptions to it — because `emr.provider_availability` had no read endpoint anywhere on the platform. Leave
- * could be recorded; working hours could not be seen, changed or retired. The sentence was describing data
- * the screen had no way to fetch.
+ * ============================================================================================================
+ * WHY IT IS TWO VIEWS AND NOT ONE TABLE
+ * ============================================================================================================
+ * This screen used to be a flat list of availability RULES: one row per clinician per weekday. A clinician
+ * working five days appeared five times, a clinician working two clinics appeared under both with nothing
+ * saying which row belonged to which building, and there was no way to ask the two questions the roster
+ * exists for:
  *
- * <b>The impact preview is not advisory.</b> Apply is disabled until the operator has run it AND ticked that
- * they read the list, and the server independently refuses an apply whose acknowledged count no longer
- * matches what it computes. Both halves are needed: the client stops the careless click, and the server stops
- * the stale one — a preview taken twenty minutes ago, before two more people booked, must not silently cover
- * them.
+ *   • "What does Dr Karim's week look like?" — his rows were scattered through a table sorted by day.
+ *   • "Who is in at Dokki on Thursday?" — nowhere at all. The weekly pattern says what NORMALLY happens and
+ *     the exception calendar says what does not; combining them by eye means applying four rules by hand.
+ *
+ * So the pattern view is now MASTER/DETAIL over people — each clinician once, their week in a pane beside the
+ * list — and the day view is a separate, server-computed answer for one clinic on one date. The exceptions,
+ * which are a maintenance task rather than something anyone reads on arrival, are folded behind a button.
+ *
+ * ============================================================================================================
+ * THE DAY VIEW IS NOT DERIVED HERE
+ * ============================================================================================================
+ * It comes from `GET /roster/day`, which runs `SlotGeneration` — the one place availability is decided
+ * (design 42 §7 rule 5) — for a single date. Computing it in the browser from the rules and the exceptions
+ * this screen already holds would have been easy and wrong: it is a second implementation of "a whole-day
+ * closure beats an extra clinic, a part-day absence shortens a session, the cap applies after subtraction",
+ * in a language with no tests over any of it, and the first divergence would be a clinic telling a patient it
+ * was open on a day the booking engine had already closed.
+ *
+ * ============================================================================================================
+ * ONE SCREEN, TWO ROLES
+ * ============================================================================================================
+ * A branch coordinator and a clinics manager hold the SAME permissions (design 42 §1) and differ only in
+ * reach. That is why the clinic control is a filter rather than a switch, why it disappears for a caller who
+ * runs one clinic, and why every write that could land in more than one building names the building.
  */
 export function BranchRoster() {
   const t = useLoc();
   const { lang } = useTheme();
-  const exceptions = useAsync(() => rosterApi.list(), []);
-  const rules = useAsync(() => availabilityApi.list(), []);
-  // Names for the ids the roster rows carry. Both reads are cheap reference data and both are needed by the
-  // two bands, so they are fetched once here rather than by each.
+  const { session } = useAuth();
+
+  const [view, setView] = useState<View>("pattern");
+  const [branchId, setBranchId] = useState("");
+  const [clinicianId, setClinicianId] = useState("");
+  const [date, setDate] = useState(todayIso());
+  const [exceptionsOpen, setExceptionsOpen] = useState(false);
+
   const people = useAsync(() => branchApi.practitioners({ includeUnlicensed: true }), []);
   const branches = useAsync(() => branchApi.branches(), []);
+  // Re-read on a clinic change: the server narrows by branch, so the filter is a REQUEST and not a client
+  // predicate over a set that might not contain the other clinics' rules at all.
+  const rules = useAsync(() => availabilityApi.list(branchId ? { branchId } : {}), [branchId]);
+  const exceptions = useAsync(() => rosterApi.list(), []);
+
+  // Memoized, all three, because each is a fresh array on every render otherwise and every derivation below
+  // depends on them — the lists would be rebuilt and the table re-sorted on every keystroke in the combobox.
+  const practitioners = useMemo(() => people.data ?? [], [people.data]);
+  const branchList = useMemo(() => branches.data ?? [], [branches.data]);
+  const ruleList = useMemo(() => rules.data ?? [], [rules.data]);
 
   const nameOf = useMemo(() => {
-    const byId = new Map((people.data ?? []).map((p) => [p.practitionerId, p]));
+    const byId = new Map(practitioners.map((p) => [p.practitionerId, p]));
     return (id: string | null): string | null => {
       if (!id) return null;
       const p = byId.get(id);
       if (!p) return id.slice(0, 8);
       return lang === "ar" ? p.fullNameAr : p.fullNameEn;
     };
-  }, [people.data, lang]);
+  }, [practitioners, lang]);
+
+  const branchName = useMemo(() => {
+    const byId = new Map(branchList.map((b) => [b.branchId, b]));
+    return (id: string | null): string | null => {
+      if (!id) return null;
+      const b = byId.get(id);
+      if (!b) return id.slice(0, 8);
+      return lang === "ar" ? b.nameAr : b.nameEn;
+    };
+  }, [branchList, lang]);
+
+  /*
+    THE UNIQUE CLINICIAN LIST.
+
+    Built from the PRACTITIONER directory rather than from the rules, so somebody with no pattern at all still
+    appears — they are precisely the person a coordinator is looking for when a clinic is short. The rules are
+    then folded in as a summary of the week.
+  */
+  const clinicians = useMemo(() => {
+    const inScope = practitioners.filter((p) => !branchId || p.branches.includes(branchId));
+    return inScope
+      .map((p) => {
+        const mine = ruleList.filter((r) => r.doctorId === p.practitionerId);
+        return {
+          person: p,
+          rules: mine,
+          days: new Set(mine.map((r) => r.dayOfWeek)).size,
+          weekly: mine.reduce((n, r) => n + r.slotsPerDay, 0),
+        };
+      })
+      .sort((a, b) => {
+        const an = lang === "ar" ? a.person.fullNameAr : a.person.fullNameEn;
+        const bn = lang === "ar" ? b.person.fullNameAr : b.person.fullNameEn;
+        return an.localeCompare(bn, lang);
+      });
+  }, [practitioners, ruleList, branchId, lang]);
+
+  const selected = clinicians.find((c) => c.person.practitionerId === clinicianId) ?? null;
+  const exceptionCount = (exceptions.data ?? []).length;
+
+  // Only a caller who reaches more than one clinic has a choice to make. A coordinator's clinic is decided by
+  // the app-bar switcher, and offering them a picker with one option in it is a control that does nothing.
+  const multiBranch = isSetScopedRole(session?.role ?? undefined) && branchList.length > 1;
+
+  const branchOptions = [
+    { value: "", label: t(S.allBranches) },
+    ...branchList.map((b) => ({ value: b.branchId, label: lang === "ar" ? b.nameAr : b.nameEn, keywords: b.branchCode })),
+  ];
 
   return (
     <div className="branch-screen">
       <PageHeader title={t(S.title)} />
       <p className="muted lede">{t(S.intro)}</p>
 
-      <WeeklyPattern rules={rules} nameOf={nameOf} onChanged={() => rules.reload()} />
+      {/*
+        THE VIEW SWITCH AND THE EXCEPTIONS BUTTON ARE ONE ROW, and neither is in the page header.
 
-      <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
+        `PageHeader` renders nothing at all when there is no session — a reasonable guard for a component
+        whose entire content is derived from the caller's portal, and a bad place for the ONLY route to a
+        feature. Putting the exceptions trigger there made a whole surface disappear behind a condition that
+        has nothing to do with it. Here it sits beside the control it belongs with, visible in both views.
+      */}
+      <div className="rst-toolbar">
+        <SegmentedControl<View>
+          aria-label={t(S.viewLabel)}
+          segments={[
+            { value: "pattern", label: t(S.viewPattern) },
+            { value: "day", label: t(S.viewDay) },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+        <Button variant="ghost" onClick={() => setExceptionsOpen(true)}>
+          {t(S.exceptionsAction)}
+          {exceptionCount > 0 && <span className="rst-count tnum"> {exceptionCount}</span>}
+        </Button>
+      </div>
 
-      <Exceptions
+      {view === "pattern" ? (
+        <>
+          <Card className="rst-scope" as="section" aria-label={t(S.scopeRegion)}>
+            {multiBranch && (
+              <ComboboxField
+                label={t(S.branchLabel)}
+                options={branchOptions}
+                value={branchId}
+                onChange={(v) => {
+                  setBranchId(v);
+                  // A clinician who does not work the newly-chosen clinic must not stay selected: the pane
+                  // would keep showing a week that has nothing to do with what the filter now says.
+                  setClinicianId("");
+                }}
+              />
+            )}
+            <ComboboxField
+              label={t(S.clinicianLabel)}
+              placeholder={t(S.clinicianPlaceholder)}
+              options={clinicians.map((c) => ({
+                value: c.person.practitionerId,
+                label: lang === "ar" ? c.person.fullNameAr : c.person.fullNameEn,
+                hint: c.person.primarySpecialty ?? undefined,
+                // Found by clinic name as well as by their own — "who works Dokki" is a real way to search.
+                keywords: [c.person.fullNameEn, c.person.fullNameAr, c.person.practitionerType,
+                  ...c.person.branches.map((b) => branchName(b) ?? "")].join(" "),
+              }))}
+              value={clinicianId}
+              onChange={setClinicianId}
+            />
+          </Card>
+
+          <div className="split split-wide rst-split">
+            <Card as="section" style={{ padding: "var(--sp3)" }}>
+              <h2 className="section-h">{t(S.listHeading)}</h2>
+              <AsyncSection state={people} isEmpty={() => clinicians.length === 0} emptyLabel={S.listEmpty}>
+                {() => (
+                  <ClinicianList
+                    rows={clinicians}
+                    selectedId={clinicianId}
+                    onSelect={setClinicianId}
+                    branchName={branchName}
+                  />
+                )}
+              </AsyncSection>
+            </Card>
+
+            <div>
+              {selected ? (
+                <PatternPane
+                  key={selected.person.practitionerId}
+                  person={selected.person}
+                  rules={selected.rules}
+                  branches={branchList}
+                  branchName={branchName}
+                  onChanged={() => {
+                    rules.reload();
+                    people.reload();
+                  }}
+                />
+              ) : (
+                <Card style={{ padding: "var(--sp6)" }}>
+                  <p className="muted">{t(S.pickSomeone)}</p>
+                </Card>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <DayView
+          date={date}
+          onDate={setDate}
+          branchId={branchId}
+          onBranch={setBranchId}
+          branchOptions={branchOptions}
+          multiBranch={multiBranch}
+          nameOf={nameOf}
+          branchName={branchName}
+        />
+      )}
+
+      <ExceptionsModal
+        open={exceptionsOpen}
+        onClose={() => setExceptionsOpen(false)}
         state={exceptions}
+        practitioners={practitioners}
+        branches={branchList}
         nameOf={nameOf}
-        onChanged={() => exceptions.reload()}
-      />
-
-      <RecordException
         lang={lang}
-        practitioners={people.data ?? []}
-        branches={branches.data ?? []}
-        onApplied={() => exceptions.reload()}
+        onChanged={() => exceptions.reload()}
       />
     </div>
   );
 }
 
-// ── The weekly pattern ──────────────────────────────────────────────────────────────────────────────────
+// ── The clinician list ──────────────────────────────────────────────────────────────────────────────────
 
-function WeeklyPattern({
+interface ClinicianRow {
+  person: BranchPractitioner;
+  rules: AvailabilityRule[];
+  days: number;
+  weekly: number;
+}
+
+/**
+ * Each clinician ONCE.
+ *
+ * The clinics column is the other half of the fix. A clinician who works two buildings used to appear twice
+ * in a table that never named either, so "Dr Karim, Tuesday, 14:00" and "Dr Karim, Wednesday, 14:00" were
+ * indistinguishable rows about different clinics. Naming the clinics here, and again on the pattern rows of
+ * anyone who has more than one, means the question never has to be asked.
+ */
+function ClinicianList({
+  rows,
+  selectedId,
+  onSelect,
+  branchName,
+}: {
+  rows: ClinicianRow[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  branchName: (id: string | null) => string | null;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+
+  const columns: Column<ClinicianRow>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: t(S.clinicianLabel),
+        cell: (r) => (
+          <span className="rst-who">
+            <strong>{lang === "ar" ? r.person.fullNameAr : r.person.fullNameEn}</strong>
+            <span className="muted">
+              {r.person.primarySpecialty ?? r.person.practitionerType}
+            </span>
+          </span>
+        ),
+        sortable: true,
+        sortValue: (r) => (lang === "ar" ? r.person.fullNameAr : r.person.fullNameEn),
+      },
+      {
+        key: "clinics",
+        header: t(S.colClinics),
+        cell: (r) =>
+          r.person.branches.length === 0
+            ? <span className="muted">{t(S.noClinics)}</span>
+            : <span className="rst-clinics">{r.person.branches.map((b) => branchName(b)).join(" · ")}</span>,
+      },
+      {
+        key: "days",
+        header: t(S.colDays),
+        numeric: true,
+        cell: (r) => (r.days === 0 ? <span className="muted">{t(S.noPatternShort)}</span> : String(r.days)),
+        sortable: true,
+        sortValue: (r) => r.days,
+      },
+      {
+        key: "weekly",
+        header: t(S.colWeekly),
+        numeric: true,
+        cell: (r) => (r.weekly === 0 ? <span className="muted">—</span> : String(r.weekly)),
+        sortable: true,
+        sortValue: (r) => r.weekly,
+      },
+    ],
+    [t, lang, branchName],
+  );
+
+  return (
+    <DataTable
+      caption={t(S.listHeading)}
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => r.person.practitionerId}
+      interactive
+      density="compact"
+      selectedKey={selectedId || undefined}
+      onSelect={(r) => onSelect(r.person.practitionerId)}
+      emptyLabel={t(S.noMatches)}
+    />
+  );
+}
+
+// ── The weekly pattern pane ─────────────────────────────────────────────────────────────────────────────
+
+interface DayRow {
+  dayOfWeek: number;
+  rule: AvailabilityRule | null;
+}
+
+function PatternPane({
+  person,
   rules,
-  nameOf,
+  branches,
+  branchName,
   onChanged,
 }: {
-  rules: ReturnType<typeof useAsync<AvailabilityRule[]>>;
-  nameOf: (id: string | null) => string | null;
+  person: BranchPractitioner;
+  rules: AvailabilityRule[];
+  branches: BranchRef[];
+  branchName: (id: string | null) => string | null;
   onChanged: () => void;
 }) {
   const t = useLoc();
-  const [editing, setEditing] = useState<AvailabilityRule | null>(null);
+  const { lang } = useTheme();
+  const [editing, setEditing] = useState<{ day: number; rule: AvailabilityRule | null } | null>(null);
   const [viewingHistory, setViewingHistory] = useState<AvailabilityRule | null>(null);
+  const [retiring, setRetiring] = useState<AvailabilityRule | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [outcome, setOutcome] = useState<string | null>(null);
 
-  const columns: Column<AvailabilityRule>[] = useMemo(
+  // A clinician at two clinics needs the clinic named on every pattern row; one at a single clinic does not,
+  // and a column repeating the same word seven times is noise on the narrower half of a split layout.
+  const showClinic = new Set(rules.map((r) => r.branchId)).size > 1 || person.branches.length > 1;
+
+  /*
+    SEVEN DAYS, ALWAYS — including the ones with nothing in them.
+
+    A table of only the days somebody works cannot show that Wednesday is free, which is the question asked by
+    everyone trying to find cover. Days with more than one rule (two clinics on one weekday) expand to one row
+    each rather than being collapsed, because they are two different sessions in two different buildings.
+  */
+  const rows: DayRow[] = useMemo(() => {
+    const out: DayRow[] = [];
+    for (const d of DAYS) {
+      const onDay = rules.filter((r) => r.dayOfWeek === d)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+      if (onDay.length === 0) out.push({ dayOfWeek: d, rule: null });
+      else for (const r of onDay) out.push({ dayOfWeek: d, rule: r });
+    }
+    return out;
+  }, [rules]);
+
+  // A new day copies the provider and location off an existing rule, because those name the CLINIC's service
+  // point and this screen has no way to ask for them. Nobody with no rule anywhere can be given one here —
+  // said plainly below rather than offering a button that 400s.
+  const canAdd = rules.length > 0;
+
+  const columns: Column<DayRow>[] = useMemo(
     () => [
-      { key: "clinician", header: t(S.clinician), cell: (r) => nameOf(r.doctorId) ?? t(S.wholeClinic) },
       {
-        key: "day", header: t(S.day),
-        cell: (r) => t(DAY_LABEL[r.dayOfWeek] ?? DAY_LABEL[0]),
-        sortable: true, sortValue: (r) => r.dayOfWeek,
+        key: "day",
+        header: t(S.viewPattern),
+        cell: (r) => <strong>{t(DAY_LABEL[r.dayOfWeek] ?? DAY_LABEL[0])}</strong>,
       },
-      { key: "hours", header: t(S.hoursCol), cell: (r) => `${r.startTime}–${r.endTime}` },
-      { key: "slot", header: t(S.slotLength), cell: (r) => `${r.slotMinutes} ${t(S.minutes)}` },
+      ...(showClinic
+        ? [{
+            key: "clinic",
+            header: t(S.branchLabel),
+            cell: (r: DayRow) => (r.rule ? branchName(r.rule.branchId) ?? "—" : "—"),
+          }]
+        : []),
+      {
+        key: "hours",
+        header: t(S.hoursCol),
+        cell: (r) =>
+          r.rule
+            ? `${r.rule.startTime}–${r.rule.endTime}`
+            : <span className="muted">{t(S.notWorking)}</span>,
+      },
+      {
+        key: "slot",
+        header: t(S.slotLength),
+        cell: (r) => (r.rule ? `${r.rule.slotMinutes} ${t(S.minutes)}` : <span className="muted">—</span>),
+      },
       {
         key: "cap",
         header: t(S.cap),
         /*
-          The cap and what it COSTS, together.
-
-          A bare "12" leaves the reader to work out whether that is a restriction at all. Showing "12 of 16
-          the hours allow" makes the two facts one sentence, and it is the sentence somebody is checking when
-          they ask why the calendar looks shorter than the opening times.
+          The cap and what it COSTS, together. A bare "12" leaves the reader to work out whether that is a
+          restriction at all; "12 of 16 the hours allow" is the sentence somebody is checking when they ask
+          why the calendar looks shorter than the opening times.
         */
-        cell: (r) =>
-          r.maxPerDay === null ? (
-            <span className="muted">{t(S.noCap)}</span>
-          ) : (
+        cell: (r) => {
+          if (!r.rule) return <span className="muted">—</span>;
+          if (r.rule.maxPerDay === null) return <span className="muted">{t(S.noCap)}</span>;
+          return (
             <span>
-              <strong>{r.maxPerDay}</strong>{" "}
+              <strong>{r.rule.maxPerDay}</strong>{" "}
               <span className="muted">
-                {t(S.capExplains).replace("{window}", String(r.slotsFromWindow))}
+                {t(S.capExplains).replace("{window}", String(r.rule.slotsFromWindow))}
               </span>
             </span>
-          ),
+          );
+        },
       },
-      { key: "offered", header: t(S.offered), cell: (r) => String(r.slotsPerDay) },
+      {
+        key: "offered",
+        header: t(S.offered),
+        numeric: true,
+        cell: (r) => (r.rule ? String(r.rule.slotsPerDay) : <span className="muted">—</span>),
+      },
       {
         key: "actions",
         header: "",
-        cell: (r) => (
-          <>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>{t(S.editPattern)}</Button>
-            <Button size="sm" variant="ghost" onClick={() => setViewingHistory(r)}>{t(S.historyAction)}</Button>
-          </>
-        ),
+        cell: (r) =>
+          r.rule ? (
+            <span className="row-actions">
+              <Button size="sm" variant="ghost" onClick={() => setEditing({ day: r.dayOfWeek, rule: r.rule })}>
+                {t(S.editPattern)}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setViewingHistory(r.rule)}>
+                {t(S.historyAction)}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setRetiring(r.rule)}>
+                {t(S.retireAction)}
+              </Button>
+            </span>
+          ) : canAdd ? (
+            <Button size="sm" variant="ghost" onClick={() => setEditing({ day: r.dayOfWeek, rule: null })}>
+              {t(S.addDay)}
+            </Button>
+          ) : null,
       },
     ],
-    [t, nameOf],
+    [t, showClinic, branchName, canAdd],
   );
 
   return (
-    <>
-      <h2>{t(S.patternHeading)}</h2>
-      <AsyncSection state={rules} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noPattern}>
-        {(rows) => (
-          <Card>
-            <DataTable
-              caption={t(S.patternHeading)}
-              columns={columns}
-              rows={rows}
-              rowKey={(r) => r.availabilityId}
-            />
-          </Card>
-        )}
-      </AsyncSection>
+    <Card as="section" style={{ padding: "var(--sp4)" }} aria-label={t(S.patternHeading)}>
+      <div className="result-head">
+        <div>
+          <h2 className="section-h" style={{ marginBottom: 0 }}>
+            {lang === "ar" ? person.fullNameAr : person.fullNameEn}
+          </h2>
+          <p className="muted" style={{ margin: "4px 0 0" }}>
+            {person.practitionerType}
+            {person.primarySpecialty && <> · {person.primarySpecialty}</>}
+          </p>
+        </div>
+      </div>
+
+      {/*
+        THE CLINICS THIS PERSON WORKS, on the pane rather than only in the list. It is the fact that makes
+        every row below readable — a 14:00 Wednesday means something different at Maadi and at Dokki — and it
+        is the thing a clinics manager comes here to change.
+      */}
+      <div className="rst-assign">
+        <span className="mrs-label">{t(S.assignedClinics)}</span>
+        <div className="rst-chips">
+          {person.branches.length === 0 ? (
+            <span className="muted">{t(S.noClinics)}</span>
+          ) : (
+            person.branches.map((b) => <StatusChip key={b} kind="neu" label={branchName(b) ?? b.slice(0, 8)} />)
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setAssigning(true)}>{t(S.manageClinics)}</Button>
+        </div>
+      </div>
+
+      <DataTable
+        caption={t(S.patternHeading)}
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.rule?.availabilityId ?? `free-${r.dayOfWeek}`}
+        density="compact"
+      />
+
+      {!canAdd && <p className="muted">{t(S.cannotAddYet)}</p>}
+
+      {outcome && (
+        <InlineAlert tone="ok">
+          <span role="status" aria-live="polite">{outcome}</span>
+        </InlineAlert>
+      )}
 
       {editing && (
-        <EditPattern
-          rule={editing}
+        <PatternForm
+          person={person}
+          dayOfWeek={editing.day}
+          rule={editing.rule}
+          templates={rules}
+          branchName={branchName}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -319,29 +794,78 @@ function WeeklyPattern({
       {viewingHistory && (
         <PatternHistory rule={viewingHistory} onClose={() => setViewingHistory(null)} />
       )}
-    </>
+
+      {retiring && (
+        <RetirePattern
+          rule={retiring}
+          onClose={() => setRetiring(null)}
+          onRetired={() => {
+            setRetiring(null);
+            setOutcome(t(S.retired));
+            onChanged();
+          }}
+        />
+      )}
+
+      {assigning && (
+        <AssignClinic
+          person={person}
+          branches={branches}
+          onClose={() => setAssigning(false)}
+          onSaved={() => {
+            setAssigning(false);
+            setOutcome(t(S.assignSaved));
+            onChanged();
+          }}
+        />
+      )}
+    </Card>
   );
 }
 
-function EditPattern({
+/**
+ * One modal for editing a working day and for adding one.
+ *
+ * The two differ in exactly two places — whether a clinic has to be chosen, and which verb the button uses —
+ * and splitting them would mean two copies of the cap rule, the validation and the write. The rule's IDENTITY
+ * (clinician, clinic, weekday) is fixed once created: moving a Tuesday to a Wednesday is removing one rule and
+ * stating another, because the slots already generated from it belong to the Tuesday.
+ */
+function PatternForm({
+  person,
+  dayOfWeek,
   rule,
+  templates,
+  branchName,
   onClose,
   onSaved,
 }: {
-  rule: AvailabilityRule;
+  person: BranchPractitioner;
+  dayOfWeek: number;
+  rule: AvailabilityRule | null;
+  templates: AvailabilityRule[];
+  branchName: (id: string | null) => string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const t = useLoc();
   const { lang } = useTheme();
-  const [startTime, setStartTime] = useState(rule.startTime);
-  const [endTime, setEndTime] = useState(rule.endTime);
-  const [slotMinutes, setSlotMinutes] = useState(String(rule.slotMinutes));
+  const existing = templates.filter((r) => r.branchId !== null);
+  const branchChoices = [...new Set(existing.map((r) => r.branchId as string))];
+
+  const [branchId, setBranchId] = useState(rule?.branchId ?? branchChoices[0] ?? "");
+  const [startTime, setStartTime] = useState(rule?.startTime ?? "09:00");
+  const [endTime, setEndTime] = useState(rule?.endTime ?? "13:00");
+  const [slotMinutes, setSlotMinutes] = useState(String(rule?.slotMinutes ?? 15));
   // Empty string means "no limit", which is a different value from 0 — and 0 is refused, because a clinic
-  // that takes nobody is a closure and closures carry a reason and an impact preview.
-  const [cap, setCap] = useState(rule.maxPerDay === null ? "" : String(rule.maxPerDay));
+  // that takes nobody is a closure, and closures carry a reason and an impact preview.
+  const [cap, setCap] = useState(rule?.maxPerDay == null ? "" : String(rule.maxPerDay));
   const [validation, setValidation] = useState<string | null>(null);
   const write = useWrite();
+
+  // Provider and location name the clinic's service point. They are not editable here and not askable here;
+  // a new day inherits them from a rule this clinician already has at the same clinic.
+  const template = templates.find((r) => r.branchId === branchId) ?? templates[0] ?? null;
 
   const submit = async () => {
     const capValue = cap.trim() === "" ? null : Number(cap);
@@ -349,20 +873,23 @@ function EditPattern({
       setValidation(t(S.capMustBePositive));
       return;
     }
+    if (!template) { setValidation(t(S.cannotAddYet)); return; }
     setValidation(null);
+
+    const body = {
+      providerId: rule?.providerId ?? template.providerId,
+      locationId: rule?.locationId ?? template.locationId,
+      doctorId: person.practitionerId,
+      branchId: (rule?.branchId ?? branchId) || undefined,
+      dayOfWeek,
+      startTime,
+      endTime,
+      slotMinutes: Number(slotMinutes),
+      maxPerDay: capValue,
+    };
+
     const ok = await write.run(() =>
-      availabilityApi.update(rule.availabilityId, {
-        providerId: rule.providerId,
-        locationId: rule.locationId,
-        doctorId: rule.doctorId ?? undefined,
-        branchId: rule.branchId ?? undefined,
-        dayOfWeek: rule.dayOfWeek,
-        startTime,
-        endTime,
-        slotMinutes: Number(slotMinutes),
-        maxPerDay: capValue,
-      }),
-    );
+      rule ? availabilityApi.update(rule.availabilityId, body) : availabilityApi.create(body));
     if (ok) onSaved();
   };
 
@@ -370,8 +897,8 @@ function EditPattern({
     <Modal
       open
       onOpenChange={(next) => { if (!next) onClose(); }}
-      title={t(S.editHeading)}
-      description={`${t(DAY_LABEL[rule.dayOfWeek] ?? DAY_LABEL[0])} · ${rule.startTime}–${rule.endTime}`}
+      title={rule ? t(S.editHeading) : t(S.addHeadingDay)}
+      description={`${lang === "ar" ? person.fullNameAr : person.fullNameEn} · ${t(DAY_LABEL[dayOfWeek] ?? DAY_LABEL[0])}`}
       footer={
         <>
           <Button onClick={submit} disabled={write.busy}>{t(S.savePattern)}</Button>
@@ -379,10 +906,30 @@ function EditPattern({
         </>
       }
     >
-      <InputField label={t(S.startLabel)} type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
-      <InputField label={t(S.endLabel)} type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
-      <InputField label={t(S.slotMinutesLabel)} type="number" min={1} value={slotMinutes} onChange={(e) => setSlotMinutes(e.target.value)} required />
-      <InputField label={t(S.capLabel)} type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} help={t(S.capHelp)} />
+      {/* Only when there is a choice: a new day at a clinician who works two clinics has to say which. */}
+      {!rule && branchChoices.length > 1 && (
+        <ComboboxField
+          label={t(S.branchLabel)}
+          options={branchChoices.map((b) => ({ value: b, label: branchName(b) ?? b.slice(0, 8) }))}
+          value={branchId}
+          onChange={setBranchId}
+          required
+        />
+      )}
+      {rule && rule.branchId && (
+        <p className="muted">{t(S.branchLabel)}: {branchName(rule.branchId)}</p>
+      )}
+
+      <div className="rst-pair">
+        <InputField label={t(S.startLabel)} type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+        <InputField label={t(S.endLabel)} type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+      </div>
+      <div className="rst-pair">
+        <InputField label={t(S.slotMinutesLabel)} type="number" min={1} value={slotMinutes} onChange={(e) => setSlotMinutes(e.target.value)} required />
+        <InputField label={t(S.capLabel)} type="number" min={1} value={cap} onChange={(e) => setCap(e.target.value)} />
+      </div>
+      <p className="muted">{t(S.capHelp)}</p>
+
       {validation && <InlineAlert tone="warn">{validation}</InlineAlert>}
       {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
     </Modal>
@@ -412,7 +959,7 @@ function PatternHistory({ rule, onClose }: { rule: AvailabilityRule; onClose: ()
       title={t(S.historyHeading)}
       description={t(DAY_LABEL[rule.dayOfWeek] ?? DAY_LABEL[0])}
       wide
-      footer={<Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>}
+      footer={<Button variant="ghost" onClick={onClose}>{t(S.close)}</Button>}
     >
       <AsyncSection state={history} isEmpty={(d) => d.entries.length === 0} emptyLabel={S.historyHeading}>
         {() => <ChangeTimeline entries={entries} />}
@@ -421,7 +968,372 @@ function PatternHistory({ rule, onClose }: { rule: AvailabilityRule; onClose: ()
   );
 }
 
-// ── Exceptions ──────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * Removing a working day.
+ *
+ * The confirmation exists for the half people do not expect: retiring the rule stops FUTURE slots and leaves
+ * the ones already generated — and everything booked into them — exactly where they are. Somebody who removes
+ * a Tuesday to cover next Tuesday's absence has changed every Tuesday and cancelled nothing, which is the
+ * opposite of what they wanted on both counts.
+ */
+function RetirePattern({
+  rule,
+  onClose,
+  onRetired,
+}: {
+  rule: AvailabilityRule;
+  onClose: () => void;
+  onRetired: () => void;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+  const write = useWrite();
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.retireHeading)}
+      description={`${t(DAY_LABEL[rule.dayOfWeek] ?? DAY_LABEL[0])} · ${rule.startTime}–${rule.endTime}`}
+      footer={
+        <>
+          <Button
+            onClick={async () => {
+              const ok = await write.run(() => availabilityApi.retire(rule.availabilityId));
+              if (ok) onRetired();
+            }}
+            disabled={write.busy}
+          >
+            {t(S.retireAction)}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+        </>
+      }
+    >
+      <p>{t(S.retireExplains)}</p>
+      <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
+      {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+    </Modal>
+  );
+}
+
+function AssignClinic({
+  person,
+  branches,
+  onClose,
+  onSaved,
+}: {
+  person: BranchPractitioner;
+  branches: BranchRef[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+  const [branchId, setBranchId] = useState("");
+  const [validFrom, setValidFrom] = useState(todayIso());
+  const [validation, setValidation] = useState<string | null>(null);
+  const write = useWrite();
+
+  // Only clinics they are not already at. Offering one they already work reads as an edit and is an insert.
+  const options = branches
+    .filter((b) => !person.branches.includes(b.branchId))
+    .map((b) => ({ value: b.branchId, label: lang === "ar" ? b.nameAr : b.nameEn, keywords: b.branchCode }));
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.assignHeading)}
+      description={lang === "ar" ? person.fullNameAr : person.fullNameEn}
+      footer={
+        <>
+          <Button
+            disabled={write.busy}
+            onClick={async () => {
+              if (!branchId) { setValidation(t(S.needBranch)); return; }
+              setValidation(null);
+              const ok = await write.run(() =>
+                branchApi.assignBranch(person.practitionerId, { branchId, validFrom }));
+              if (ok) onSaved();
+            }}
+          >
+            {t(S.manageClinics)}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+        </>
+      }
+    >
+      <p className="muted">{t(S.assignHelp)}</p>
+      <ComboboxField
+        label={t(S.branchLabel)}
+        options={[{ value: "", label: t(S.pickClinic) }, ...options]}
+        value={branchId}
+        onChange={setBranchId}
+        required
+      />
+      <InputField label={t(S.assignFrom)} type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} required />
+      {validation && <InlineAlert tone="warn">{validation}</InlineAlert>}
+      {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+    </Modal>
+  );
+}
+
+// ── Today's roster ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One clinic, one date — the answer the two other tables could not give between them.
+ *
+ * <p>Every number here is the server's. `GET /roster/day` runs the same slot computation the booking engine
+ * runs, for a single day, so "Working, 8 of 12" already has the leave, the closure, the extra clinic and the
+ * cap applied to it. The screen's job is to say which of those changed the answer, which is why the exception
+ * reason travels on the line rather than being looked up in a second table.</p>
+ */
+function DayView({
+  date,
+  onDate,
+  branchId,
+  onBranch,
+  branchOptions,
+  multiBranch,
+  nameOf,
+  branchName,
+}: {
+  date: string;
+  onDate: (d: string) => void;
+  branchId: string;
+  onBranch: (id: string) => void;
+  branchOptions: { value: string; label: string; keywords?: string }[];
+  multiBranch: boolean;
+  nameOf: (id: string | null) => string | null;
+  branchName: (id: string | null) => string | null;
+}) {
+  const t = useLoc();
+  const fmt = useFormat();
+  const day = useAsync(
+    () => rosterApi.day({ branchId: branchId || undefined, date }),
+    [branchId, date]);
+
+  const columns: Column<DayRosterLine>[] = useMemo(
+    () => [
+      {
+        key: "who",
+        header: t(S.clinicianLabel),
+        cell: (l) => nameOf(l.practitionerId) ?? t(S.wholeClinic),
+        sortable: true,
+        sortValue: (l) => nameOf(l.practitionerId) ?? "",
+      },
+      ...(multiBranch && !branchId
+        ? [{ key: "clinic", header: t(S.branchLabel), cell: (l: DayRosterLine) => branchName(l.branchId) ?? "—" }]
+        : []),
+      {
+        key: "hours",
+        header: t(S.hoursCol),
+        cell: (l) => `${l.startTime}–${l.endTime}`,
+        sortable: true,
+        sortValue: (l) => l.startTime,
+      },
+      { key: "slot", header: t(S.slotLength), cell: (l) => `${l.slotMinutes} ${t(S.minutes)}` },
+      {
+        key: "cap",
+        header: t(S.cap),
+        cell: (l) => (l.maxPerDay === null ? <span className="muted">{t(S.noCap)}</span> : String(l.maxPerDay)),
+      },
+      {
+        key: "offered",
+        header: t(S.offered),
+        numeric: true,
+        /*
+          The day's number and the week's, together, whenever they disagree. "8" on its own looks like the
+          pattern; "8 of 12" says something took four away, and the status cell beside it says what.
+        */
+        cell: (l) =>
+          l.slotsOffered === l.slotsFromPattern ? (
+            String(l.slotsOffered)
+          ) : (
+            <span>
+              <strong>{l.slotsOffered}</strong>{" "}
+              <span className="muted">/ {l.slotsFromPattern}</span>
+            </span>
+          ),
+        sortable: true,
+        sortValue: (l) => l.slotsOffered,
+      },
+      { key: "booked", header: t(S.colBooked), numeric: true, cell: (l) => String(l.booked) },
+      {
+        key: "open",
+        header: t(S.colOpen),
+        numeric: true,
+        cell: (l) => String(Math.max(0, l.slotsOffered - l.booked)),
+      },
+      {
+        key: "status",
+        header: t(S.colStatus),
+        cell: (l) => <DayStatus line={l} />,
+        sortable: true,
+        sortValue: (l) => l.status,
+      },
+    ],
+    [t, nameOf, branchName, multiBranch, branchId],
+  );
+
+  return (
+    <>
+      <Card className="rst-scope" as="section" aria-label={t(S.scopeRegion)}>
+        {multiBranch && (
+          <ComboboxField
+            label={t(S.branchLabel)}
+            options={branchOptions}
+            value={branchId}
+            onChange={onBranch}
+          />
+        )}
+        <InputField label={t(S.dateLabel)} type="date" value={date} onChange={(e) => onDate(e.target.value)} />
+        {/* Stepping a day at a time is how a roster is actually read — nobody types a date to see tomorrow. */}
+        <div className="rst-daynav">
+          <Button size="sm" variant="ghost" onClick={() => onDate(shiftIso(date, -1))}>{t(S.prevDay)}</Button>
+          <Button size="sm" variant="ghost" onClick={() => onDate(todayIso())}>{t(S.today)}</Button>
+          <Button size="sm" variant="ghost" onClick={() => onDate(shiftIso(date, 1))}>{t(S.nextDay)}</Button>
+        </div>
+      </Card>
+
+      <AsyncSection state={day} isEmpty={() => false} emptyLabel={S.dayEmpty}>
+        {(d: DayRoster) => (
+          <>
+            <div className="dash-kpis">
+              <KpiCard label={t(S.kpiClinicians)} value={String(d.summary.clinicians)} />
+              <KpiCard label={t(S.kpiOffered)} value={String(d.summary.slotsOffered)} />
+              <KpiCard label={t(S.kpiBooked)} value={String(d.summary.booked)} />
+              <KpiCard label={t(S.kpiOpen)} value={String(d.summary.open)} tone={d.summary.open === 0 ? "warn" : undefined} />
+            </div>
+
+            {/*
+              THE NOTICES. A closure on a day nobody was rostered removes no lines, so without this the screen
+              says "nobody is working" for a public holiday and for a rota somebody forgot to enter, in
+              identical words.
+            */}
+            {d.notices.length > 0 && (
+              <InlineAlert tone={d.notices.some((n) => n.subtractive) ? "warn" : "info"}>
+                <strong>{t(S.noticesHeading)}</strong>
+                <ul className="rst-notices">
+                  {d.notices.map((n) => (
+                    <li key={n.exceptionId}>
+                      {t(KIND_LABEL[n.kind as RosterKind] ?? S.kind)} · {n.reason}
+                      {n.practitionerId && <> · {nameOf(n.practitionerId)}</>}
+                      {!n.wholeDay && n.startTime && n.endTime && <> · {n.startTime}–{n.endTime}</>}
+                    </li>
+                  ))}
+                </ul>
+              </InlineAlert>
+            )}
+
+            <Card>
+              <h2 className="section-h">{t(S.dayHeading)} · {fmt.date(`${d.date}T00:00:00`)}</h2>
+              <DataTable
+                caption={t(S.dayHeading)}
+                columns={columns}
+                rows={d.lines}
+                rowKey={(l) => `${l.availabilityId ?? "extra"}-${l.practitionerId ?? "none"}-${l.startTime}`}
+                emptyLabel={t(S.dayEmpty)}
+              />
+            </Card>
+          </>
+        )}
+      </AsyncSection>
+    </>
+  );
+}
+
+/** Status with its reason attached — the reason is the actionable half, and it belongs beside the word. */
+function DayStatus({ line }: { line: DayRosterLine }) {
+  const t = useLoc();
+  if (line.status === "Off") {
+    return (
+      <span className="rst-status">
+        <StatusChip kind="warn" label={t(S.statusOff)} />
+        {line.exceptionReason && <span className="muted">{line.exceptionReason}</span>}
+      </span>
+    );
+  }
+  if (line.status === "Extra") {
+    return (
+      <span className="rst-status">
+        <StatusChip kind="info" label={t(S.statusExtra)} />
+        {line.exceptionReason && <span className="muted">{line.exceptionReason}</span>}
+      </span>
+    );
+  }
+  // Working, but shortened: the cap did not do this and the hours column does not show it, so say so.
+  const shortened = line.slotsOffered < line.slotsFromPattern && line.exceptionReason;
+  return (
+    <span className="rst-status">
+      <StatusChip kind="ok" label={t(S.statusWorking)} />
+      {shortened && (
+        <span className="muted">{t(S.reducedBy).replace("{reason}", line.exceptionReason ?? "")}</span>
+      )}
+    </span>
+  );
+}
+
+// ── Exceptions, behind a button ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Leave, holidays, closures and extra clinics — the whole exception surface, in one dialog.
+ *
+ * <p><b>Why it folded.</b> It used to occupy two thirds of the screen: a table of every exception for ninety
+ * days, and beneath it a nine-field form that was always open. Both are MAINTENANCE — somebody records an
+ * absence when it is known — and neither is what anyone opens the roster to read. Leaving them permanently
+ * expanded pushed the weekly pattern above the fold and the day's roster off the page entirely, and the count
+ * on the button says what the table used to say by being visible.</p>
+ *
+ * <p>Rendered only while open, so the impact preview inside it starts clean each time. A preview is a claim
+ * about a moment, and one left over from a dialog closed twenty minutes ago is exactly the stale number the
+ * acknowledgement exists to prevent.</p>
+ */
+function ExceptionsModal({
+  open,
+  onClose,
+  state,
+  practitioners,
+  branches,
+  nameOf,
+  lang,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: ReturnType<typeof useAsync<RosterException[]>>;
+  practitioners: BranchPractitioner[];
+  branches: BranchRef[];
+  nameOf: (id: string | null) => string | null;
+  lang: "en" | "ar";
+  onChanged: () => void;
+}) {
+  const t = useLoc();
+  if (!open) return null;
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={t(S.exceptionsHeading)}
+      description={t(S.exceptionsDescription)}
+      wide
+      footer={<Button variant="ghost" onClick={onClose}>{t(S.close)}</Button>}
+    >
+      <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
+
+      <Exceptions state={state} nameOf={nameOf} onChanged={onChanged} />
+
+      <RecordException
+        lang={lang}
+        practitioners={practitioners}
+        branches={branches}
+        onApplied={onChanged}
+      />
+    </Modal>
+  );
+}
 
 function Exceptions({
   state,
@@ -487,9 +1399,7 @@ function Exceptions({
     <>
       <AsyncSection state={state} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noneYet}>
         {(rows) => (
-          <Card>
-            <DataTable caption={t(S.existing)} columns={columns} rows={rows} rowKey={(e) => e.exceptionId} />
-          </Card>
+          <DataTable caption={t(S.existing)} columns={columns} rows={rows} rowKey={(e) => e.exceptionId} density="compact" />
         )}
       </AsyncSection>
 
@@ -626,34 +1536,36 @@ function RecordException({
   const applyDisabled = applyWrite.busy || !impact || (impact.affectedCount > 0 && !acknowledged);
 
   return (
-    <Card>
-      <h2>{t(S.addHeading)}</h2>
+    <section aria-label={t(S.addHeading)} className="rst-record">
+      <h3 className="section-h">{t(S.addHeading)}</h3>
 
-      <ComboboxField
-        label={t(S.kind)}
-        options={(Object.keys(KIND_LABEL) as RosterKind[]).map((k) => ({ value: k, label: t(KIND_LABEL[k]) }))}
-        value={kind}
-        onChange={(v) => invalidate(setKind)(v as RosterKind)}
-      />
+      <div className="rst-pair">
+        <ComboboxField
+          label={t(S.kind)}
+          options={(Object.keys(KIND_LABEL) as RosterKind[]).map((k) => ({ value: k, label: t(KIND_LABEL[k]) }))}
+          value={kind}
+          onChange={(v) => invalidate(setKind)(v as RosterKind)}
+        />
 
-      {/*
-        WHO. Design 42 §4's motivating example is "Dr Hala is on leave next Tuesday", and this form could not
-        express it: it never sent a practitionerId, so every exception it created closed the entire clinic.
-        The server has accepted the field since 25.4.
-      */}
-      <ComboboxField
-        label={t(S.whoLabel)}
-        options={[
-          { value: "", label: t(S.wholeClinic) },
-          ...practitioners.map((p) => ({
-            value: p.practitionerId,
-            label: lang === "ar" ? p.fullNameAr : p.fullNameEn,
-          })),
-        ]}
-        value={practitionerId}
-        onChange={(v) => invalidate(setPractitionerId)(v)}
-        help={t(S.whoHelp)}
-      />
+        {/*
+          WHO. Design 42 §4's motivating example is "Dr Hala is on leave next Tuesday", and this form could not
+          express it: it never sent a practitionerId, so every exception it created closed the entire clinic.
+          The server has accepted the field since 25.4.
+        */}
+        <ComboboxField
+          label={t(S.whoLabel)}
+          options={[
+            { value: "", label: t(S.wholeClinic) },
+            ...practitioners.map((p) => ({
+              value: p.practitionerId,
+              label: lang === "ar" ? p.fullNameAr : p.fullNameEn,
+            })),
+          ]}
+          value={practitionerId}
+          onChange={(v) => invalidate(setPractitionerId)(v)}
+          help={t(S.whoHelp)}
+        />
+      </div>
 
       {mustChooseClinic && (
         <ComboboxField
@@ -669,10 +1581,14 @@ function RecordException({
         />
       )}
 
-      <InputField label={t(S.from)} type="date" value={dateFrom} onChange={(e) => invalidate(setDateFrom)(e.target.value)} required />
-      <InputField label={t(S.to)} type="date" value={dateTo} onChange={(e) => invalidate(setDateTo)(e.target.value)} />
-      <InputField label={t(S.startTime)} type="time" value={startTime} onChange={(e) => invalidate(setStartTime)(e.target.value)} help={t(S.timeHelp)} />
-      <InputField label={t(S.endTime)} type="time" value={endTime} onChange={(e) => invalidate(setEndTime)(e.target.value)} />
+      <div className="rst-pair">
+        <InputField label={t(S.from)} type="date" value={dateFrom} onChange={(e) => invalidate(setDateFrom)(e.target.value)} required />
+        <InputField label={t(S.to)} type="date" value={dateTo} onChange={(e) => invalidate(setDateTo)(e.target.value)} />
+      </div>
+      <div className="rst-pair">
+        <InputField label={t(S.startTime)} type="time" value={startTime} onChange={(e) => invalidate(setStartTime)(e.target.value)} help={t(S.timeHelp)} />
+        <InputField label={t(S.endTime)} type="time" value={endTime} onChange={(e) => invalidate(setEndTime)(e.target.value)} />
+      </div>
       <InputField label={t(S.reason)} value={reason} onChange={(e) => invalidate(setReason)(e.target.value)} help={t(S.reasonHelp)} required maxLength={300} />
 
       <div className="row-actions">
@@ -704,6 +1620,7 @@ function RecordException({
                 ]}
                 rows={impact.affected}
                 rowKey={(a) => a.appointmentId}
+                density="compact"
               />
               <label className="check">
                 <input
@@ -738,6 +1655,6 @@ function RecordException({
           {t(S.apply)}
         </Button>
       </div>
-    </Card>
+    </section>
   );
 }

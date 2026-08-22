@@ -97,6 +97,11 @@ services:
           # deployment while working perfectly against fixtures. Found by the route-coverage gate, which is
           # what it is for.
           - /api/v1/provider-availability
+          # 33.10 — the day roster (GET /roster/day). Named as the /api/v1/roster resource, which is the
+          # unit Kong routes and the coverage gate checks. It prefix-matches /roster-exceptions above as
+          # well; both are emr's own roster reads and both resolve to this service, so the overlap costs
+          # nothing and the explicit line above stays for readability.
+          - /api/v1/roster
           - /api/v1/queue
           - /api/v1/queues
           - /api/v1/treating-relationship

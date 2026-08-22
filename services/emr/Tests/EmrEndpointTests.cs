@@ -34,11 +34,14 @@ public class EmrEndpointTests
     public async Task Slots_are_not_materialized_for_a_doctor_who_does_not_serve_that_branch()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory { DoctorServesBranch = false };
+        await using var app = new EmrApiFactory { HomeBranch = Desk, DoctorServesBranch = false };
         try
         {
             using var reception = app.ReceptionClient();
-            var r = await reception.PostAsJsonAsync("/api/v1/appointment-slots", Slots(branchId: Guid.NewGuid()), Web);
+            // The desk's OWN clinic, at which this doctor does not work. It used to be a random guid, which
+            // now trips the branch-write guard first and returns 403 — a correct refusal for a different
+            // reason, and one that would leave the practitioner gate below untested.
+            var r = await reception.PostAsJsonAsync("/api/v1/appointment-slots", Slots(branchId: Desk), Web);
             r.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
             (await r.Content.ReadAsStringAsync()).Should().Contain("practitioner-not-at-branch");
 
@@ -52,7 +55,7 @@ public class EmrEndpointTests
     public async Task Materializing_slots_twice_over_the_same_window_creates_no_duplicates()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient();
@@ -89,7 +92,7 @@ public class EmrEndpointTests
     public async Task Materializing_the_same_window_twice_leaves_exactly_ONE_availability_rule()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient();
@@ -120,7 +123,7 @@ public class EmrEndpointTests
     public async Task Regenerating_a_calendar_without_naming_a_cap_does_not_clear_the_cap()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient();
@@ -167,7 +170,7 @@ public class EmrEndpointTests
     public async Task Booking_then_checking_in_issues_a_queue_ticket_that_belongs_to_the_tenant()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient();
@@ -208,7 +211,7 @@ public class EmrEndpointTests
     public async Task The_same_slot_cannot_be_booked_twice()
     {
         Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
-        await using var app = new EmrApiFactory();
+        await using var app = new EmrApiFactory { HomeBranch = Desk };
         try
         {
             using var reception = app.ReceptionClient();
@@ -332,6 +335,18 @@ public class EmrEndpointTests
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------
+
+
+    /// <summary>
+    /// The desk's own clinic.
+    ///
+    /// <para>Named rather than left unset because a BranchScoped caller with no branch assignment resolves to
+    /// an EMPTY reach and may write nowhere — which is correct, and which these tests were only escaping
+    /// because emr's middleware dropped the resolved <c>Mode</c> and every write guard therefore read the
+    /// desk as branch-unrestricted. With the mode carried, a test that books has to say which clinic it is
+    /// booking at, exactly as a real desk does.</para>
+    /// </summary>
+    private static readonly Guid Desk = Guid.Parse("cc000000-0000-4000-8000-00000000d001");
 
     private static readonly Guid Provider = Guid.NewGuid();
 

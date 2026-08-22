@@ -130,7 +130,64 @@ let rules: AvailabilityRule[] = [
     maxPerDay: null, slotsFromWindow: 12, slotsPerDay: 12,
     updatedAt: stamp(31), updatedBy: "u-network", updatedByName: "Network Team",
   },
+  /*
+    33.10 — A WEEK WITH SOMETHING IN IT.
+
+    Two rules were enough to demonstrate the pattern TABLE and not enough to demonstrate anything else: five
+    of seven weekdays were empty, so the day view had nothing to show on most dates, and no clinician
+    appeared at two clinics — the one case the pattern pane exists to disambiguate. These add the rest of Dr
+    Karim's week across Maadi AND Dokki, and give Dr Nadia a Dokki pattern, so the demo shows a clinician
+    whose Tuesday and Wednesday are in different buildings.
+  */
+  {
+    availabilityId: "a0000000-0000-4000-8000-000000000003",
+    providerId: "p0000000-0000-4000-8000-000000000001",
+    locationId: "l0000000-0000-4000-8000-000000000001",
+    branchId: MAADI, doctorId: PRACTITIONERS[0].practitionerId,
+    dayOfWeek: 0, startTime: "09:00", endTime: "13:00", slotMinutes: 15,
+    maxPerDay: 12, slotsFromWindow: 16, slotsPerDay: 12,
+    updatedAt: stamp(9), updatedBy: "u-coordinator", updatedByName: "Mona Saleh",
+  },
+  {
+    availabilityId: "a0000000-0000-4000-8000-000000000004",
+    providerId: "p0000000-0000-4000-8000-000000000001",
+    locationId: "l0000000-0000-4000-8000-000000000001",
+    branchId: MAADI, doctorId: PRACTITIONERS[1].practitionerId,
+    dayOfWeek: 1, startTime: "14:00", endTime: "18:00", slotMinutes: 20,
+    maxPerDay: null, slotsFromWindow: 12, slotsPerDay: 12,
+    updatedAt: stamp(31), updatedBy: "u-network", updatedByName: "Network Team",
+  },
+  {
+    availabilityId: "a0000000-0000-4000-8000-000000000005",
+    providerId: "p0000000-0000-4000-8000-000000000002",
+    locationId: "l0000000-0000-4000-8000-000000000002",
+    branchId: DOKKI, doctorId: PRACTITIONERS[1].practitionerId,
+    dayOfWeek: 3, startTime: "14:00", endTime: "17:00", slotMinutes: 20,
+    maxPerDay: 8, slotsFromWindow: 9, slotsPerDay: 8,
+    updatedAt: stamp(12), updatedBy: "u-manager", updatedByName: "Clinics Manager",
+  },
+  {
+    availabilityId: "a0000000-0000-4000-8000-000000000006",
+    providerId: "p0000000-0000-4000-8000-000000000002",
+    locationId: "l0000000-0000-4000-8000-000000000002",
+    branchId: DOKKI, doctorId: PRACTITIONERS[2].practitionerId,
+    dayOfWeek: 0, startTime: "10:00", endTime: "14:00", slotMinutes: 30,
+    maxPerDay: null, slotsFromWindow: 8, slotsPerDay: 8,
+    updatedAt: stamp(60), updatedBy: "u-network", updatedByName: "Network Team",
+  },
+  {
+    availabilityId: "a0000000-0000-4000-8000-000000000007",
+    providerId: "p0000000-0000-4000-8000-000000000002",
+    locationId: "l0000000-0000-4000-8000-000000000002",
+    branchId: DOKKI, doctorId: PRACTITIONERS[2].practitionerId,
+    dayOfWeek: 3, startTime: "10:00", endTime: "14:00", slotMinutes: 30,
+    maxPerDay: null, slotsFromWindow: 8, slotsPerDay: 8,
+    updatedAt: stamp(60), updatedBy: "u-network", updatedByName: "Network Team",
+  },
 ];
+
+/** Ids for rules the demo CREATES. Counted from past the seeded block so a new rule cannot reuse one. */
+let ruleSeq = 100;
 
 const availabilityHistory: Record<string, AvailabilityHistoryEntry[]> = {
   "a0000000-0000-4000-8000-000000000001": [
@@ -327,6 +384,113 @@ const devRosterApi: RosterApi = {
     return after({ exceptionId, withdrawn: true });
   },
 
+  /**
+   * 33.10 — the demo's day roster.
+   *
+   * <p>A MIRROR of a server computation, and knowingly so. On a real deployment this comes out of
+   * `SlotGeneration` — the one place availability is decided — and the browser never re-derives it. The
+   * fixture has no server to ask, so it reproduces the four rules the endpoint applies: a whole-day
+   * subtraction removes the day outright (an extra clinic at a shut clinic is not a clinic), a part-day one
+   * removes only the slots it overlaps, the cap applies after subtraction, and a trailing partial slot is
+   * not a slot.</p>
+   *
+   * <p>It is worth writing out rather than faking, because a demo whose numbers do not behave is a demo that
+   * teaches the reader the numbers are decoration.</p>
+   */
+  day: ({ branchId, date }) => {
+    const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+
+    const onDate = exceptions.filter(
+      (e) => e.dateFrom <= date && date <= e.dateTo
+        && (e.branchId === null || !branchId || e.branchId === branchId));
+
+    const bites = (e: RosterException, ruleBranch: string | null, ruleDoctor: string | null): boolean =>
+      (e.branchId === null || e.branchId === ruleBranch)
+      && (e.practitionerId === null || e.practitionerId === ruleDoctor);
+
+    const minutes = (t: string): number => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    /** Slots surviving the part-day subtractions, then the cap. Overlap, not containment. */
+    const surviving = (
+      start: string, end: string, slotMinutes: number, cap: number | null,
+      cuts: RosterException[],
+    ): number => {
+      if (slotMinutes <= 0) return 0;
+      let count = 0;
+      for (let t = minutes(start); t + slotMinutes <= minutes(end); t += slotMinutes) {
+        const covered = cuts.some((c) =>
+          c.wholeDay
+          || (t < minutes(c.endTime ?? "24:00") && t + slotMinutes > minutes(c.startTime ?? "00:00")));
+        if (covered) continue;
+        count += 1;
+        if (cap !== null && count >= cap) break;
+      }
+      return count;
+    };
+
+    const lines = rules
+      .filter((r) => r.dayOfWeek === dayOfWeek && (!branchId || r.branchId === branchId))
+      .map((r) => {
+        const applicable = onDate.filter((e) => bites(e, r.branchId, r.doctorId));
+        const cuts = applicable.filter((e) => e.subtractive);
+        const offered = cuts.some((c) => c.wholeDay)
+          ? 0
+          : surviving(r.startTime, r.endTime, r.slotMinutes, r.maxPerDay, cuts);
+        const blocking = cuts[0] ?? null;
+        return {
+          availabilityId: r.availabilityId, practitionerId: r.doctorId, branchId: r.branchId,
+          startTime: r.startTime, endTime: r.endTime, slotMinutes: r.slotMinutes, maxPerDay: r.maxPerDay,
+          slotsFromPattern: r.slotsPerDay, slotsOffered: offered,
+          // Demo bookings: a plausible load rather than an empty clinic, and never more than exist.
+          booked: Math.min(offered, (r.slotMinutes + dayOfWeek) % 5),
+          status: offered === 0 && blocking ? "Off" : "Working",
+          exceptionKind: blocking?.kind ?? null,
+          exceptionReason: blocking?.reason ?? null,
+        };
+      });
+
+    const extra = onDate
+      .filter((e) => e.kind === "AdHocClinic")
+      // A whole-day closure outranks an extra session — the generator's own precedence.
+      .filter((e) => !onDate.some((c) => c.subtractive && c.wholeDay && bites(c, e.branchId, e.practitionerId)))
+      .filter((e) => !rules.some((r) => r.dayOfWeek === dayOfWeek
+        && r.doctorId === e.practitionerId && r.branchId === e.branchId))
+      .map((e) => {
+        const template = rules.find((r) => r.doctorId === e.practitionerId && r.branchId === e.branchId);
+        const slotMinutes = template?.slotMinutes ?? 0;
+        const offered = surviving(e.startTime ?? "00:00", e.endTime ?? "23:59", slotMinutes, template?.maxPerDay ?? null, []);
+        return {
+          availabilityId: null, practitionerId: e.practitionerId, branchId: e.branchId,
+          startTime: e.startTime ?? "00:00", endTime: e.endTime ?? "23:59",
+          slotMinutes, maxPerDay: template?.maxPerDay ?? null,
+          slotsFromPattern: offered, slotsOffered: offered, booked: 0,
+          status: "Extra", exceptionKind: e.kind, exceptionReason: e.reason,
+        };
+      });
+
+    const all = [...lines, ...extra].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const slotsOffered = all.reduce((n, l) => n + l.slotsOffered, 0);
+    const booked = all.reduce((n, l) => n + l.booked, 0);
+
+    return after({
+      date,
+      branchId: branchId ?? null,
+      lines: all,
+      notices: onDate.map((e) => ({
+        exceptionId: e.exceptionId, kind: e.kind, reason: e.reason,
+        branchId: e.branchId, practitionerId: e.practitionerId,
+        wholeDay: e.wholeDay, startTime: e.startTime, endTime: e.endTime, subtractive: e.subtractive,
+      })),
+      summary: {
+        clinicians: all.filter((l) => l.status !== "Off").length,
+        slotsOffered, booked, open: Math.max(0, slotsOffered - booked),
+      },
+    });
+  },
+
   history: (exceptionId) => {
     const e = exceptions.find((x) => x.exceptionId === exceptionId);
     const entries: RosterHistoryEntry[] = [{
@@ -349,7 +513,7 @@ const devAvailabilityApi: AvailabilityApi = {
 
   create: (body) => {
     const rule = withCounts({
-      availabilityId: `a0000000-0000-4000-8000-${String(rules.length + 3).padStart(12, "0")}`,
+      availabilityId: `a0000000-0000-4000-8000-${String(++ruleSeq).padStart(12, "0")}`,
       providerId: body.providerId, locationId: body.locationId,
       branchId: body.branchId ?? null, doctorId: body.doctorId ?? null,
       dayOfWeek: body.dayOfWeek, startTime: body.startTime, endTime: body.endTime,
