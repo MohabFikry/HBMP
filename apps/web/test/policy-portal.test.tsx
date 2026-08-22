@@ -32,6 +32,35 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
   const reject = () => Promise.reject(new ApiError("network", "not stubbed in this test"));
   return {
     payers: () => Promise.resolve([]),
+    // 19.8 — the plan and contract detail reads. Stubbed rather than left to `reject` because the screens
+    // fetch them on selection, and a rejected detail sets a page-level error that has nothing to do with
+    // what these tests are about.
+    plan: () => Promise.resolve({
+      plan: {
+        planId: "p1", planCode: "PLAN-1", nameEn: "Plan", nameAr: "خطة", description: null,
+        category: "Standard", status: "Active", statusReason: null, statusChangedAt: null,
+        updatedAt: "2026-08-01T09:00:00Z", updatedByName: null,
+      },
+      book: {
+        versionCount: 1, draftCount: 0, activeCount: 1, supersededCount: 0, policyCount: 0,
+        activePolicyCount: 0, memberCount: 0, activeMemberCount: 0,
+        firstEffectiveFrom: "2026-01-01", lastEffectiveTo: null,
+      },
+    }),
+    planHistory: () => Promise.resolve({ planId: "p1", entries: [] }),
+    policy: () => Promise.resolve({
+      policy: {
+        policyId: "pol1", policyNo: "POL-1", status: "Active", statusReason: null, statusChangedAt: null,
+        effectiveFrom: "2026-01-01", effectiveTo: null, windowState: "InForce",
+        terms: { payerId: null, maxMembers: null, previousPolicyId: null, notes: null },
+        updatedAt: "2026-08-01T09:00:00Z", updatedByName: null,
+      },
+      book: {
+        memberCount: 0, activeMemberCount: 0, planCount: 0,
+        committedLimit: 0, consumedValue: 0, percentOfCap: null,
+      },
+    }),
+    policyHistory: () => Promise.resolve({ policyId: "pol1", entries: [] }),
     plans: () => Promise.resolve([]),
     benefitCategories: () => Promise.resolve([]),
     planVersions: () => Promise.resolve([]),

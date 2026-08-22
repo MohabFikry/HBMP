@@ -30,6 +30,7 @@ public static class PlanEndpoints
 
         PayerEndpoints.MapPayers(v1);   // 19.7 — the payer surface moved to its own file when it grew one
         MapPlans(v1);
+        PlanAdminEndpoints.MapPlanAdmin(v1);   // 19.8 — detail, update, deactivate/reactivate, history
         MapPlanVersions(v1);
         MapBenefitCategories(v1);
 

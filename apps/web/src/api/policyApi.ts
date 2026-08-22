@@ -183,6 +183,150 @@ export interface PayerWrite {
   notes?: string | null;
 }
 
+// ── Plan administration (19.8) ──────────────────────────────────────────────────────────────────────────
+
+export const zPlanAdminView = z.object({
+  planId: z.string(),
+  planCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  status: z.string(),
+  statusReason: z.string().nullable().optional(),
+  statusChangedAt: z.string().nullable().optional(),
+  updatedAt: z.string(),
+  updatedByName: z.string().nullable().optional(),
+}).passthrough();
+export type PlanAdminView = z.infer<typeof zPlanAdminView>;
+
+export const zPlanBook = z.object({
+  versionCount: z.number(),
+  draftCount: z.number(),
+  activeCount: z.number(),
+  supersededCount: z.number(),
+  policyCount: z.number(),
+  activePolicyCount: z.number(),
+  memberCount: z.number(),
+  activeMemberCount: z.number(),
+  /** The sellable window, derived from the versions. `lastEffectiveTo: null` = open-ended, not unknown. */
+  firstEffectiveFrom: z.string().nullable().optional(),
+  lastEffectiveTo: z.string().nullable().optional(),
+}).passthrough();
+export type PlanBook = z.infer<typeof zPlanBook>;
+
+export const zPlanDetail = z.object({ plan: zPlanAdminView, book: zPlanBook }).passthrough();
+export type PlanDetail = z.infer<typeof zPlanDetail>;
+
+export const zPlanHistoryEntry = z.object({
+  historyId: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorName: z.string().nullable().optional(),
+  actorId: z.string().nullable().optional(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  status: z.string(),
+  statusReason: z.string().nullable().optional(),
+}).passthrough();
+export type PlanHistoryEntry = z.infer<typeof zPlanHistoryEntry>;
+
+export const zPlanHistoryPage = z.object({
+  planId: z.string(),
+  entries: z.array(zPlanHistoryEntry),
+}).passthrough();
+export type PlanHistoryPage = z.infer<typeof zPlanHistoryPage>;
+
+// ── Policy (contract) administration (19.8) ─────────────────────────────────────────────────────────────
+
+/** Withheld as a BLOCK from a caller who may not read contract terms — null means restricted, not absent. */
+export const zPolicyTerms = z.object({
+  payerId: z.string().nullable().optional(),
+  maxMembers: z.number().nullable().optional(),
+  previousPolicyId: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+}).passthrough();
+export type PolicyTerms = z.infer<typeof zPolicyTerms>;
+
+export const zPolicyAdminView = z.object({
+  policyId: z.string(),
+  policyNo: z.string(),
+  status: z.string(),
+  statusReason: z.string().nullable().optional(),
+  statusChangedAt: z.string().nullable().optional(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  /** `NotYetStarted | InForce | Ended` — the contract's own window, which is not its status. */
+  windowState: z.string(),
+  terms: zPolicyTerms.nullable().optional(),
+  updatedAt: z.string(),
+  updatedByName: z.string().nullable().optional(),
+}).passthrough();
+export type PolicyAdminView = z.infer<typeof zPolicyAdminView>;
+
+export const zPolicyBook = z.object({
+  memberCount: z.number(),
+  activeMemberCount: z.number(),
+  planCount: z.number(),
+  committedLimit: z.number().nullable().optional(),
+  consumedValue: z.number().nullable().optional(),
+  /** Active members as a percentage of the cap. Survives a caller who may not read the cap itself. */
+  percentOfCap: z.number().nullable().optional(),
+}).passthrough();
+export type PolicyBook = z.infer<typeof zPolicyBook>;
+
+export const zPolicyDetail = z.object({ policy: zPolicyAdminView, book: zPolicyBook }).passthrough();
+export type PolicyDetail = z.infer<typeof zPolicyDetail>;
+
+/** A status change reports its blast radius: suspending a contract is not refused for having members, so
+ *  the count comes back and the confirmation states the impact. */
+export const zPolicyStatusResult = z.object({
+  policy: zPolicyAdminView,
+  activeMembersAffected: z.number(),
+}).passthrough();
+export type PolicyStatusResult = z.infer<typeof zPolicyStatusResult>;
+
+export const zPolicyHistoryEntry = z.object({
+  historyId: z.number(),
+  operation: z.string(),
+  recordedAt: z.string(),
+  actorName: z.string().nullable().optional(),
+  actorId: z.string().nullable().optional(),
+  policyNo: z.string(),
+  status: z.string(),
+  statusReason: z.string().nullable().optional(),
+  effectiveFrom: z.string().nullable().optional(),
+  effectiveTo: z.string().nullable().optional(),
+  maxMembers: z.number().nullable().optional(),
+  payerId: z.string().nullable().optional(),
+}).passthrough();
+export type PolicyHistoryEntry = z.infer<typeof zPolicyHistoryEntry>;
+
+export const zPolicyHistoryPage = z.object({
+  policyId: z.string(),
+  entries: z.array(zPolicyHistoryEntry),
+}).passthrough();
+export type PolicyHistoryPage = z.infer<typeof zPolicyHistoryPage>;
+
+/** What the plan form sends. `planCode` is on create only — see `UpdatePlan` on the server. */
+export interface PlanWrite {
+  nameEn: string;
+  nameAr: string;
+  description?: string | null;
+  category: string;
+}
+
+/** What the contract form sends. `policyNo` is on create only. */
+export interface PolicyWrite {
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  maxMembers?: number | null;
+  payerId?: string | null;
+  notes?: string | null;
+}
+
 export const zPlanView = z.object({
   planId: z.string(),
   planCode: z.string(),
@@ -1007,6 +1151,23 @@ export interface PolicyApi {
   deactivatePayer(payerId: string, reason: string, idempotencyKey: string): Promise<PayerView>;
   reactivatePayer(payerId: string, reason: string, idempotencyKey: string): Promise<PayerView>;
   payerHistory(payerId: string): Promise<PayerHistoryPage>;
+
+  // Plan administration (19.8)
+  plan(planId: string): Promise<PlanDetail>;
+  createPlan(body: PlanWrite & { planCode: string }, idempotencyKey: string): Promise<PlanView>;
+  updatePlan(planId: string, body: PlanWrite): Promise<PlanAdminView>;
+  /** Refused with 409 while an active policy still sells it — the message carries the count. */
+  deactivatePlan(planId: string, reason: string, idempotencyKey: string): Promise<PlanAdminView>;
+  reactivatePlan(planId: string, reason: string, idempotencyKey: string): Promise<PlanAdminView>;
+  planHistory(planId: string): Promise<PlanHistoryPage>;
+
+  // Contract administration (19.8)
+  policy(policyId: string): Promise<PolicyDetail>;
+  createPolicy(body: PolicyWrite & { policyNo: string; payerId: string }, idempotencyKey: string): Promise<{ policyId: string; policyNo: string }>;
+  updatePolicy(policyId: string, body: PolicyWrite): Promise<PolicyAdminView>;
+  /** Suspend / resume / expire. NOT refused for having members — the result reports how many it reached. */
+  changePolicyStatus(policyId: string, move: "suspend" | "resume" | "expire", reason: string, idempotencyKey: string): Promise<PolicyStatusResult>;
+  policyHistory(policyId: string): Promise<PolicyHistoryPage>;
   plans(): Promise<PlanView[]>;
   benefitCategories(): Promise<BenefitCategoryView[]>;
   planVersions(planId: string): Promise<PlanVersionView[]>;
@@ -1139,6 +1300,22 @@ export function createHttpPolicyApi(): PolicyApi {
     deactivatePayer: (id, reason, key) => parsed(zPayerView, postRaw(`/payers/${id}/deactivate`, { reason }, key)),
     reactivatePayer: (id, reason, key) => parsed(zPayerView, postRaw(`/payers/${id}/reactivate`, { reason }, key)),
     payerHistory: (id) => parsed(zPayerHistoryPage, getRaw(`/payers/${id}/history`)),
+
+    plan: (id) => parsed(zPlanDetail, getRaw(`/plans/${id}`)),
+    createPlan: (body, key) => parsed(zPlanView, postRaw("/plans", body, key)),
+    updatePlan: (id, body) => parsed(zPlanAdminView, putRaw(`/plans/${id}`, body)),
+    deactivatePlan: (id, reason, key) => parsed(zPlanAdminView, postRaw(`/plans/${id}/deactivate`, { reason }, key)),
+    reactivatePlan: (id, reason, key) => parsed(zPlanAdminView, postRaw(`/plans/${id}/reactivate`, { reason }, key)),
+    planHistory: (id) => parsed(zPlanHistoryPage, getRaw(`/plans/${id}/history`)),
+
+    policy: (id) => parsed(zPolicyDetail, getRaw(`/policies/${id}`)),
+    createPolicy: (body, key) => parsed(
+      z.object({ policyId: z.string(), policyNo: z.string() }).passthrough(),
+      postRaw("/policies", body, key)),
+    updatePolicy: (id, body) => parsed(zPolicyAdminView, putRaw(`/policies/${id}`, body)),
+    changePolicyStatus: (id, move, reason, key) =>
+      parsed(zPolicyStatusResult, postRaw(`/policies/${id}/${move}`, { reason }, key)),
+    policyHistory: (id) => parsed(zPolicyHistoryPage, getRaw(`/policies/${id}/history`)),
     plans: () => parsed(z.array(zPlanView), getRaw("/plans")),
     benefitCategories: () => parsed(z.array(zBenefitCategoryView), getRaw("/benefit-categories")),
     planVersions: (planId) => parsed(z.array(zPlanVersionView), getRaw(`/plans/${planId}/versions`)),

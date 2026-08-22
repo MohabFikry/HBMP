@@ -25,10 +25,50 @@ public sealed class Policy
     public Guid? PreviousPolicyId { get; set; }
     public int? MaxMembers { get; set; }
 
+    /// <summary>Why the contract is in the state it is. Required on every status change: a policy found
+    /// Suspended with no reason preserves the fact and loses the decision, and the decision is what somebody
+    /// needs when a payer calls asking why their members are being turned away.</summary>
+    public string? StatusReason { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public Guid? StatusChangedBy { get; set; }
+    /// <summary>Administrative notes on the CONTRACT — commercial context, never anything about a member.</summary>
+    public string? Notes { get; set; }
+
     public bool IsDeleted { get; set; }
     public int RowVersion { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    /// <summary>19.8 (0021). This table is the oldest in the schema and had carried timestamps with no
+    /// subject since 0001 — survivable while the only write was the create, and not survivable once the row
+    /// became editable.</summary>
+    public Guid? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+
+    /// <summary>Where the contract's own window stands on a date, which is NOT its status: an Active policy
+    /// whose window closed last month is the combination somebody has to act on, exactly as with a payer's
+    /// funding agreement (19.7).</summary>
+    public PolicyWindowState WindowState(DateOnly on) =>
+        on < EffectiveFrom ? PolicyWindowState.NotYetStarted
+        : EffectiveTo is { } to && on > to ? PolicyWindowState.Ended
+        : PolicyWindowState.InForce;
+}
+
+/// <summary>Where a policy's effective window stands on a date. <c>EffectiveTo</c> is INCLUSIVE here, unlike
+/// the payer's exclusive agreement end — the column has meant the last covered day since 0001 and changing
+/// that to match a newer table would silently move every existing policy's last day.</summary>
+public enum PolicyWindowState { NotYetStarted, InForce, Ended }
+
+/// <summary>One row of <c>policy.policy_history</c> — the snapshot 0021's trigger writes.</summary>
+public sealed class PolicyHistoryEntry
+{
+    public long HistoryId { get; set; }
+    public Guid PolicyId { get; set; }
+    public string TenantId { get; set; } = "";
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = "{}";
+    public DateTimeOffset RecordedAt { get; set; }
 }
 
 public sealed class BenefitCategory

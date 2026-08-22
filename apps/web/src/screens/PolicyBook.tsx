@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiList, Pagination, StatusChip, Tabs, useTableQuery } from "@mersal/design-system";
+import {
+  Button, Card, ComboboxField, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiList, Modal,
+  Pagination, StatusChip, Tabs, TextareaField, useTableQuery,
+} from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   PayerView,
+  PolicyAdminView,
+  PolicyBook,
+  PolicyDetail,
   MemberGroupView,
   PolicyApi,
   PolicyPlanView,
@@ -18,7 +24,11 @@ import { createHttpPolicyApi } from "../api/policyApi";
  *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
 const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { PageHeader, fillLocalized, useLoc, readErrorMessage } from "./_shared";
+import { useAuth } from "../auth/AuthProvider";
+import { mayAdministerMembership } from "../authz/permissions";
+import { Fact, HistoryModal, ReasonDialog, RecordActions } from "./AdminRecordControls";
+import { useIdempotencyKey } from "./PolicyPanels";
 import { ChangeTimeline, DocumentsPanel, LimitMeters, NotesPanel } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { useEnumLabel } from "../i18n/enumLabels";
@@ -54,6 +64,85 @@ const S = {
   payer: { en: "Payer", ar: "الجهة الممولة" },
   search: { en: "Search", ar: "بحث" },
   clearFilters: { en: "Clear", ar: "مسح" },
+  // ── 19.8: the contract as an administrable record ──────────────────────────────────────────────────────
+  newPolicy: { en: "New policy", ar: "وثيقة جديدة" },
+  editPolicy: { en: "Edit this policy", ar: "تعديل هذه الوثيقة" },
+  suspendPolicy: { en: "Suspend this policy", ar: "تعليق هذه الوثيقة" },
+  resumePolicy: { en: "Resume this policy", ar: "استئناف هذه الوثيقة" },
+  expirePolicy: { en: "End this policy", ar: "إنهاء هذه الوثيقة" },
+  policyHistory: { en: "Change history", ar: "سجل التغييرات" },
+  policyNoLabel: { en: "Policy number", ar: "رقم الوثيقة" },
+  policyNoLocked: {
+    en: "The number can never be changed. Claims, extracts and the payer's own systems key on it. To replace one, issue the right policy and move its members deliberately.",
+    ar: "لا يمكن تغيير الرقم أبدًا. فالمطالبات والمستخرجات وأنظمة الجهة الممولة ترتبط به. لاستبداله، أصدر الوثيقة الصحيحة وانقل أعضاءها عمدًا.",
+  },
+  from: { en: "In force from", ar: "سارية من" },
+  until: { en: "Until (inclusive)", ar: "حتى (شامل)" },
+  untilHint: {
+    en: "The last day covered. Leave it empty for open-ended.",
+    ar: "آخر يوم مغطى. اتركه فارغًا لغير محدد.",
+  },
+  cap: { en: "Member cap", ar: "حد الأعضاء" },
+  capHint: {
+    en: "Leave it empty for uncapped. It cannot be set below the members already active.",
+    ar: "اتركه فارغًا لغير محدود. لا يمكن ضبطه أقل من الأعضاء النشطين بالفعل.",
+  },
+  policyNotes: { en: "Notes", ar: "ملاحظات" },
+  needPolicyNo: { en: "A policy number is required.", ar: "رقم الوثيقة مطلوب." },
+  needPayer: { en: "Choose the payer this contract is with.", ar: "اختر الجهة الممولة لهذا العقد." },
+  needForwardWindow: { en: "The policy must end on or after it starts.", ar: "يجب أن تنتهي الوثيقة في أو بعد تاريخ بدايتها." },
+  needPositiveCap: {
+    en: "A cap of zero is not 'uncapped', it is 'closed to enrolment'. Leave it empty instead.",
+    ar: "حد بقيمة صفر ليس «غير محدود» بل «مغلق للتسجيل». اتركه فارغًا بدلًا من ذلك.",
+  },
+  policyCreated: { en: "Policy issued.", ar: "تم إصدار الوثيقة." },
+  policyUpdated: { en: "Policy updated.", ar: "تم تحديث الوثيقة." },
+  policySuspended: { en: "Policy suspended.", ar: "تم تعليق الوثيقة." },
+  policyResumed: { en: "Policy resumed.", ar: "تم استئناف الوثيقة." },
+  policyExpired: { en: "Policy ended.", ar: "تم إنهاء الوثيقة." },
+  formCreatePolicy: { en: "New policy", ar: "وثيقة جديدة" },
+  formEditPolicy: { en: "Edit policy", ar: "تعديل الوثيقة" },
+  save: { en: "Save", ar: "حفظ" },
+  createPolicy: { en: "Issue policy", ar: "إصدار الوثيقة" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  // ── window state ───────────────────────────────────────────────────────────────────────────────────────
+  windowNotYetStarted: { en: "Starts later", ar: "تبدأ لاحقًا" },
+  windowInForce: { en: "In force", ar: "سارية" },
+  windowEnded: { en: "Window closed", ar: "انتهت المدة" },
+  activeButEnded: {
+    en: "This policy is Active and its own effective window has closed. Renew it, or end it once its members are moved.",
+    ar: "هذه الوثيقة نشطة وقد انتهت مدة سريانها. جدّدها أو أنهِها بعد نقل أعضائها.",
+  },
+  // ── the book ───────────────────────────────────────────────────────────────────────────────────────────
+  membersTotal: { en: "Members", ar: "الأعضاء" },
+  activeMembers: { en: "Active members", ar: "الأعضاء النشطون" },
+  plansOn: { en: "Plans", ar: "الخطط" },
+  committed: { en: "Committed", ar: "الملتزم به" },
+  restricted: { en: "Restricted for your role", ar: "مقيّد حسب دورك" },
+  ofCap: { en: "{0}% of the member cap", ar: "{0}٪ من حد الأعضاء" },
+  overCap: { en: "Active members exceed this policy's cap.", ar: "عدد الأعضاء النشطين يتجاوز حد الوثيقة." },
+  // ── status moves ───────────────────────────────────────────────────────────────────────────────────────
+  suspendTitle: { en: "Suspend {0}?", ar: "تعليق {0}؟" },
+  suspendBody: {
+    en: "Cover under {0} stops being honoured until it is resumed. Nothing is terminated and no member is removed.",
+    ar: "تتوقف التغطية بموجب {0} حتى يتم استئنافها. لا يُنهى أي تسجيل ولا يُزال أي عضو.",
+  },
+  resumeTitle: { en: "Resume {0}?", ar: "استئناف {0}؟" },
+  resumeBody: { en: "Cover under {0} is honoured again from now.", ar: "تُعتمد التغطية بموجب {0} مجددًا من الآن." },
+  expireTitle: { en: "End {0}?", ar: "إنهاء {0}؟" },
+  expireBody: {
+    en: "{0} stops covering anybody. An ended policy is not resumed — reopening cover means issuing a renewal, which is a new contract linked to this one.",
+    ar: "تتوقف {0} عن تغطية أي شخص. الوثيقة المنتهية لا تُستأنف — فإعادة فتح التغطية تعني إصدار تجديد، وهو عقد جديد مرتبط بهذا.",
+  },
+  reversible: { en: "It can be resumed at any time.", ar: "يمكن استئنافها في أي وقت." },
+  notReversible: { en: "This cannot be undone — the way back is a renewal.", ar: "لا يمكن التراجع عن هذا — والسبيل للعودة هو التجديد." },
+  impact: {
+    en: "{0} members are active on this policy right now.",
+    ar: "{0} عضوًا نشطًا على هذه الوثيقة الآن.",
+  },
+  policyHistoryTitle: { en: "Change history — {0}", ar: "سجل التغييرات — {0}" },
+  lastChanged: { en: "Last changed", ar: "آخر تعديل" },
+  by: { en: "by {0}", ar: "بواسطة {0}" },
   select: { en: "Select a policy to see its plans, groups, utilization and notes.", ar: "اختر وثيقة لعرض خططها ومجموعاتها واستخدامها وملاحظاتها." },
   tabPlans: { en: "Plans", ar: "الخطط" },
   tabGroups: { en: "Groups", ar: "المجموعات" },
@@ -149,6 +238,14 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
     each change is a server round trip over the whole book.
   */
   const [payers, setPayers] = useState<PayerView[]>([]);
+  // 19.8 — the contract's own record, loaded on selection, beside the tabs that describe what hangs off it.
+  const [detail, setDetail] = useState<PolicyDetail | null>(null);
+  const [form, setForm] = useState<{ mode: "create" } | { mode: "edit"; policy: PolicyAdminView } | null>(null);
+  const [move, setMove] = useState<"suspend" | "resume" | "expire" | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [announce, setAnnounce] = useState("");
+  const { session } = useAuth();
+  const mayWrite = mayAdministerMembership(session?.role ?? undefined);
   const [draft, setDraft] = useState<{ policyNo: string; status: string; payerId: string }>(
     { policyNo: "", status: "", payerId: "" });
   const [applied, setApplied] = useState<{ policyNo: string; status: string; payerId: string }>(
@@ -187,6 +284,25 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
     [api],
   );
 
+  useEffect(() => {
+    if (!selected) { setDetail(null); return; }
+    let live = true;
+    setDetail(null);
+    api.policy(selected.policyId)
+      .then((d) => { if (live) setDetail(d); })
+      .catch((e) => { if (live) setError(readErrorMessage(e)); });
+    return () => { live = false; };
+  }, [api, selected]);
+
+  const reloadPolicy = useCallback(async (id: string) => {
+    try {
+      setDetail(await api.policy(id));
+      await run(pageNo, pageSize, sort, applied);
+    } catch (e) {
+      setError(readErrorMessage(e));
+    }
+  }, [api, run, pageNo, pageSize, sort, applied]);
+
   // ONE effect drives every fetch, keyed on the whole query — a per-control handler that also fetched would
   // race, and the older response can land last.
   useEffect(() => {
@@ -207,7 +323,17 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   return (
     <div className="pol-screen">
       <PageHeader title={t(S.title)} />
+      <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+
+      {mayWrite && (
+        <div className="screen-toolbar">
+          <span />
+          <Button variant="primary" leadingIcon={<Icon name="plus" />} onClick={() => setForm({ mode: "create" })}>
+            {t(S.newPolicy)}
+          </Button>
+        </div>
+      )}
 
       <Card>
         <div className="pol-searchbar">
@@ -329,6 +455,18 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
       {!selected && <InlineAlert tone="info">{t(S.select)}</InlineAlert>}
 
       {selected && (
+        <PolicyDetailPane
+          policy={detail?.policy ?? null}
+          book={detail?.book ?? null}
+          policyNo={selected.policyNo}
+          mayWrite={mayWrite}
+          onEdit={() => detail && setForm({ mode: "edit", policy: detail.policy })}
+          onMove={setMove}
+          onHistory={() => setHistoryOpen(true)}
+        />
+      )}
+
+      {selected && (
         // `Tabs` force-mounts every panel (so a hidden pane is still in the DOM for assistive tech), which
         // means the CONTENT must gate its own fetching — otherwise selecting a policy would fire six
         // requests, including a PHI-adjacent notes read the operator never asked for.
@@ -346,7 +484,303 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
           ]}
         />
       )}
+
+      {form && (
+        <PolicyForm
+          api={api}
+          mode={form.mode}
+          policy={form.mode === "edit" ? form.policy : null}
+          policyNo={form.mode === "edit" ? selected?.policyNo ?? "" : ""}
+          payers={payers}
+          onClose={() => setForm(null)}
+          onSaved={async (id, wasCreate) => {
+            setForm(null);
+            setAnnounce(t(wasCreate ? S.policyCreated : S.policyUpdated));
+            if (wasCreate) await run(1, pageSize, sort, applied);
+            else await reloadPolicy(id);
+          }}
+        />
+      )}
+
+      {selected && move && (
+        <ReasonDialog
+          title={fillLocalized(MOVE_TITLE[move], selected.policyNo)}
+          body={fillLocalized(MOVE_BODY[move], selected.policyNo)}
+          /* Suspending and resuming are reversible; ending is not, and the line has to say which — a dialog
+             that overstates on the reversible cases is one nobody reads on the irreversible one. */
+          description={move === "expire" ? S.notReversible : S.reversible}
+          confirmLabel={MOVE_CONFIRM[move]}
+          onConfirm={async (reason, key) => { await api.changePolicyStatus(selected.policyId, move, reason, key); }}
+          onClose={() => setMove(null)}
+          onDone={async () => {
+            setMove(null);
+            setAnnounce(t(MOVE_DONE[move]));
+            await reloadPolicy(selected.policyId);
+          }}
+        >
+          {/* The blast radius, stated BEFORE the button rather than discovered after it. Suspending is not
+              refused for having members — it is the operation — so the count is context, not a barrier. */}
+          {detail && detail.book.activeMemberCount > 0 && (
+            <InlineAlert tone={move === "expire" ? "warn" : "info"}>
+              {t(fillLocalized(S.impact, String(detail.book.activeMemberCount)))}
+            </InlineAlert>
+          )}
+        </ReasonDialog>
+      )}
+
+      {selected && historyOpen && (
+        <HistoryModal
+          title={fillLocalized(S.policyHistoryTitle, selected.policyNo)}
+          load={() => api.policyHistory(selected.policyId)}
+          facts={(e) => (
+            <>
+              <Fact label={t(S.status)} value={enumLabel(e.status)} />
+              <Fact
+                label={t(S.window)}
+                value={`${fmt.date(e.effectiveFrom)} → ${e.effectiveTo ? fmt.date(e.effectiveTo) : "—"}`}
+              />
+              {typeof e.maxMembers === "number" && <Fact label={t(S.cap)} value={fmt.number(e.maxMembers)} />}
+            </>
+          )}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/** The three moves, named once. A `Record` per axis rather than a switch in five places: the labels, the
+ *  bodies and the announcements have to stay in step, and three parallel switches is how they stop. */
+const MOVE_TITLE: Record<"suspend" | "resume" | "expire", Localized> =
+  { suspend: S.suspendTitle, resume: S.resumeTitle, expire: S.expireTitle };
+const MOVE_BODY: Record<"suspend" | "resume" | "expire", Localized> =
+  { suspend: S.suspendBody, resume: S.resumeBody, expire: S.expireBody };
+const MOVE_CONFIRM: Record<"suspend" | "resume" | "expire", Localized> =
+  { suspend: S.suspendPolicy, resume: S.resumePolicy, expire: S.expirePolicy };
+const MOVE_DONE: Record<"suspend" | "resume" | "expire", Localized> =
+  { suspend: S.policySuspended, resume: S.policyResumed, expire: S.policyExpired };
+
+const WINDOW_LABEL: Record<string, Localized> = {
+  NotYetStarted: S.windowNotYetStarted, InForce: S.windowInForce, Ended: S.windowEnded,
+};
+const WINDOW_KIND: Record<string, "ok" | "info" | "warn" | "neu"> = {
+  NotYetStarted: "info", InForce: "ok", Ended: "warn",
+};
+
+// ── The contract's own record ───────────────────────────────────────────────────────────────────────────
+
+function PolicyDetailPane({
+  policy, book, policyNo, mayWrite, onEdit, onMove, onHistory,
+}: {
+  policy: PolicyAdminView | null;
+  book: PolicyBook | null;
+  policyNo: string;
+  mayWrite: boolean;
+  onEdit: () => void;
+  onMove: (m: "suspend" | "resume" | "expire") => void;
+  onHistory: () => void;
+}) {
+  const t = useLoc();
+  const fmt = useFormat();
+  const enumLabel = useEnumLabel();
+  const active = policy?.status === "Active";
+  const suspended = policy?.status === "Suspended";
+  const ended = policy?.status === "Expired";
+
+  return (
+    <Card>
+      <div className="screen-toolbar">
+        <div className="pay-head">
+          <h3><span className="tnum">{policy?.policyNo ?? policyNo}</span></h3>
+          <div className="pay-chips">
+            {policy && <StatusChip kind={statusKind(policy.status)} label={enumLabel(policy.status)} />}
+            {policy && (
+              <StatusChip
+                kind={WINDOW_KIND[policy.windowState] ?? "neu"}
+                label={t(WINDOW_LABEL[policy.windowState] ?? { en: policy.windowState, ar: policy.windowState })}
+              />
+            )}
+            {policy && (
+              <span className="pol-muted">
+                {fmt.date(policy.effectiveFrom)} → {policy.effectiveTo ? fmt.date(policy.effectiveTo) : "—"}
+              </span>
+            )}
+          </div>
+        </div>
+        <RecordActions
+          onHistory={onHistory}
+          onEdit={mayWrite && policy && !ended ? onEdit : undefined}
+          editLabel={S.editPolicy}
+          status={mayWrite && policy && !ended
+            ? {
+                label: suspended ? S.resumePolicy : S.suspendPolicy,
+                icon: suspended ? "undo" : "lock",
+                onClick: () => onMove(suspended ? "resume" : "suspend"),
+              }
+            : undefined}
+        >
+          {/* Ending is separated from the suspend toggle: it is the one move on this record that cannot be
+              taken back, and putting it under the same control as a reversible one invites the wrong click. */}
+          {mayWrite && policy && !ended && (
+            <Button variant="ghost" aria-label={t(S.expirePolicy)} title={t(S.expirePolicy)} onClick={() => onMove("expire")}>
+              <Icon name="bin" />
+            </Button>
+          )}
+        </RecordActions>
+      </div>
+
+      {/* The combination somebody has to act on, said in words — the same treatment the payer's expired
+          agreement gets, because it is the same shape of fact. */}
+      {policy && active && policy.windowState === "Ended" && (
+        <InlineAlert tone="warn">{t(S.activeButEnded)}</InlineAlert>
+      )}
+      {policy && policy.status !== "Active" && policy.statusReason && (
+        <InlineAlert tone="info">
+          {policy.statusReason}
+          {policy.statusChangedAt ? ` — ${fmt.dateTime(policy.statusChangedAt)}` : ""}
+        </InlineAlert>
+      )}
+
+      {book && (
+        <>
+          <KpiList
+            items={[
+              { label: t(S.membersTotal), value: fmt.number(book.memberCount) },
+              { label: t(S.activeMembers), value: fmt.number(book.activeMemberCount) },
+              { label: t(S.plansOn), value: fmt.number(book.planCount) },
+              {
+                label: t(S.committed),
+                // null is "withheld", 0 is zero — rendering both as an em dash would tell a role with no
+                // amount access that a policy with a book of business has none.
+                value: book.committedLimit === null || book.committedLimit === undefined
+                  ? t(S.restricted)
+                  : fmt.money(book.committedLimit),
+              },
+            ]}
+          />
+          {typeof book.percentOfCap === "number" && (
+            <p className={book.percentOfCap > 100 ? "" : "pol-muted"}>
+              {t(fillLocalized(S.ofCap, fmt.number(book.percentOfCap, { maximumFractionDigits: 1 })))}
+            </p>
+          )}
+          {typeof book.percentOfCap === "number" && book.percentOfCap > 100 && (
+            <InlineAlert tone="warn">{t(S.overCap)}</InlineAlert>
+          )}
+        </>
+      )}
+
+      {policy?.terms?.notes && <p>{policy.terms.notes}</p>}
+      {policy?.updatedByName && (
+        <p className="pol-muted">
+          {t(S.lastChanged)}: {fmt.dateTime(policy.updatedAt)} {t(fillLocalized(S.by, policy.updatedByName))}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+function statusKind(status: string): "ok" | "warn" | "neu" {
+  return status === "Active" ? "ok" : status === "Suspended" ? "warn" : "neu";
+}
+
+// ── Issue / amend ───────────────────────────────────────────────────────────────────────────────────────
+
+function PolicyForm({
+  api, mode, policy, policyNo, payers, onClose, onSaved,
+}: {
+  api: PolicyApi;
+  mode: "create" | "edit";
+  policy: PolicyAdminView | null;
+  policyNo: string;
+  payers: PayerView[];
+  onClose: () => void;
+  onSaved: (policyId: string, wasCreate: boolean) => void | Promise<void>;
+}) {
+  const t = useLoc();
+  const { lang } = useTheme();
+  const [key, rotate] = useIdempotencyKey();
+  const [no, setNo] = useState("");
+  const [from, setFrom] = useState(policy?.effectiveFrom ?? "");
+  const [until, setUntil] = useState(policy?.effectiveTo ?? "");
+  const [cap, setCap] = useState(
+    typeof policy?.terms?.maxMembers === "number" ? String(policy.terms.maxMembers) : "");
+  const [payerId, setPayerId] = useState(policy?.terms?.payerId ?? "");
+  const [notes, setNotes] = useState(policy?.terms?.notes ?? "");
+  const [problem, setProblem] = useState<Localized | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const capValue = cap.trim() === "" ? null : Number(cap);
+    if (mode === "create" && !no.trim()) { setProblem(S.needPolicyNo); return; }
+    if (mode === "create" && !payerId) { setProblem(S.needPayer); return; }
+    if (!from) { setProblem(S.needForwardWindow); return; }
+    if (until && until < from) { setProblem(S.needForwardWindow); return; }
+    if (capValue !== null && !(capValue > 0)) { setProblem(S.needPositiveCap); return; }
+
+    const body = {
+      effectiveFrom: from,
+      effectiveTo: until || null,
+      maxMembers: capValue,
+      payerId: payerId || null,
+      notes: notes.trim() || null,
+    };
+
+    setBusy(true);
+    setProblem(null);
+    try {
+      const id = mode === "create"
+        ? (await api.createPolicy({ ...body, policyNo: no.trim(), payerId }, key)).policyId
+        : (await api.updatePolicy(policy!.policyId, body)).policyId;
+      await onSaved(id, mode === "create");
+    } catch (e) {
+      rotate();
+      setProblem(writeErrorMessage(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={t(mode === "create" ? S.formCreatePolicy : S.formEditPolicy)}
+      closeLabel={t(S.cancel)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+          <Button variant="primary" onClick={() => void submit()} loading={busy}>
+            {t(mode === "create" ? S.createPolicy : S.save)}
+          </Button>
+        </>
+      }
+    >
+      {problem && <InlineAlert tone="bad">{t(problem)}</InlineAlert>}
+      <div className="pay-form-grid">
+        {mode === "create" ? (
+          <InputField
+            label={t(S.policyNoLabel)} value={no} onChange={(e) => setNo(e.currentTarget.value)}
+            help={t(S.policyNoLocked)} required
+          />
+        ) : (
+          <InputField label={t(S.policyNoLabel)} value={policy?.policyNo ?? policyNo} readOnly help={t(S.policyNoLocked)} />
+        )}
+        <ComboboxField
+          label={t(S.payer)}
+          value={payerId || null}
+          placeholder={t(S.anyPayer)}
+          onChange={(v) => setPayerId(v ?? "")}
+          options={payers.map((p) => ({ value: p.payerId, label: lang === "ar" ? p.nameAr : p.nameEn }))}
+        />
+        <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} required />
+        <InputField label={t(S.until)} type="date" value={until} onChange={(e) => setUntil(e.currentTarget.value)} help={t(S.untilHint)} />
+        <InputField
+          label={t(S.cap)} type="number" min={1} inputMode="numeric"
+          value={cap} onChange={(e) => setCap(e.currentTarget.value)} help={t(S.capHint)}
+        />
+      </div>
+      <TextareaField label={t(S.policyNotes)} rows={3} value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
+    </Modal>
   );
 }
 

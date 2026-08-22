@@ -29,6 +29,7 @@ public static class EnrollmentEndpoints
     {
         var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:read"));
         MapPolicies(v1);
+        PolicyContractEndpoints.MapPolicyAdmin(v1);   // 19.8 — detail, update, suspend/resume/expire, history
         MapPolicyPlans(v1);
         MapGroups(v1);
         MapEnrollments(v1);

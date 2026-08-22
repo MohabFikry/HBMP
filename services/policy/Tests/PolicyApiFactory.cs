@@ -104,11 +104,22 @@ public sealed class PolicyApiFactory : WebApplicationFactory<Program>
         var c = CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-Sub", sub);
         c.DefaultRequestHeaders.Add("X-Test-Role", role);
+        c.DefaultRequestHeaders.Add("X-Test-Name", DisplayNameFor(role));
         c.DefaultRequestHeaders.Add("X-Test-Scope", scopes);
         c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
         return c;
     }
+
+    /// <summary>A readable name per role, so a history row reads "Policy Admin" rather than a bare uuid — the
+    /// same thing the issuer supplies in a real deployment.</summary>
+    private static string DisplayNameFor(string role) => role switch
+    {
+        "policy_admin" => "Policy Admin",
+        "beneficiary_mgmt" => "Member Admin",
+        "claims_officer" => "Claims Officer",
+        _ => role,
+    };
 
     /// <summary>Children first, and the enrolment event log needs its append-only trigger lifted for the
     /// session — the same shape the policy store suites use.</summary>
@@ -129,6 +140,9 @@ public sealed class PolicyApiFactory : WebApplicationFactory<Program>
             // 19.7 — payers, and the history twin the 0020 trigger fills on every write. Left behind, they
             // accumulate a row per create and per edit across every run of the suite.
             "DELETE FROM policy.payer_history WHERE tenant_id = {0}; " +
+            // 19.8 — the two twins 0021's triggers fill on every write.
+            "DELETE FROM policy.policy_history WHERE tenant_id = {0}; " +
+            "DELETE FROM policy.plan_history WHERE tenant_id = {0}; " +
             "DELETE FROM policy.payer WHERE tenant_id = {0}; " +
             "SET session_replication_role = origin;", Tenant);
     }
@@ -182,6 +196,11 @@ public sealed class PolicyTestAuth(
             return Task.FromResult(AuthenticateResult.NoResult());
 
         var claims = new List<Claim> { new("sub", sub.ToString()) };
+        // 19.8 — a DISPLAY NAME, because the history twins snapshot the actor by name as well as by subject
+        // (0014's precedent, followed by 0020 and 0021). Without it every test principal is anonymous and
+        // "who changed this" is untestable — which is exactly the question the twins exist to answer.
+        if (Request.Headers.TryGetValue("X-Test-Name", out var display))
+            claims.Add(new Claim("name", display.ToString()));
         if (Request.Headers.TryGetValue("X-Test-Role", out var role))
             foreach (var r in role.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 claims.Add(new Claim("role", r));

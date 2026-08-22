@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, Combobox, DataTableView, Icon, InlineAlert, StatusChip, useTableQuery } from "@mersal/design-system";
+import {
+  Button, Card, Combobox, DataTableView, Icon, InlineAlert, InputField, KpiList, Modal, StatusChip,
+  TextareaField, useTableQuery,
+} from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
@@ -9,6 +12,9 @@ import type {
   BenefitRuleTierInput,
   BenefitRuleView,
   NetworkTierView,
+  PlanAdminView,
+  PlanBook,
+  PlanDetail,
   PlanVersionView,
   PlanView,
   PolicyApi,
@@ -20,7 +26,10 @@ import { createHttpPolicyApi } from "../api/policyApi";
  *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
 const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { PageHeader, fillLocalized, useLoc, readErrorMessage } from "./_shared";
+import { useAuth } from "../auth/AuthProvider";
+import { mayAdministerBenefitProduct } from "../authz/permissions";
+import { Fact, HistoryModal, ReasonDialog, RecordActions } from "./AdminRecordControls";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { useEnumLabel } from "../i18n/enumLabels";
@@ -99,6 +108,61 @@ const S = {
   amended: { en: "New draft created from the active version.", ar: "تم إنشاء مسودة جديدة من الإصدار الساري." },
   selectPlan: { en: "Select a plan to see its versions.", ar: "اختر خطة لعرض إصداراتها." },
   members: { en: "Members", ar: "الأعضاء" },
+  // ── 19.8: the plan as an administrable record ──────────────────────────────────────────────────────────
+  newPlan: { en: "New plan", ar: "خطة جديدة" },
+  editPlan: { en: "Edit this plan", ar: "تعديل هذه الخطة" },
+  deactivatePlan: { en: "Withdraw this plan", ar: "سحب هذه الخطة" },
+  reactivatePlan: { en: "Return this plan to the catalogue", ar: "إعادة الخطة إلى الكتالوج" },
+  planHistory: { en: "Change history", ar: "سجل التغييرات" },
+  planIdentity: { en: "Plan", ar: "الخطة" },
+  planCode: { en: "Plan code", ar: "رمز الخطة" },
+  planCodeLocked: {
+    en: "The code can never be changed. Extracts, reconciliation files and the payer's own systems join on it. To replace a code, create the right plan and move its policies deliberately.",
+    ar: "لا يمكن تغيير الرمز أبدًا. فالمستخرجات وملفات التسوية وأنظمة الجهة الممولة ترتبط به. لاستبدال الرمز، أنشئ الخطة الصحيحة وانقل وثائقها عمدًا.",
+  },
+  nameEn: { en: "Name (English)", ar: "الاسم (إنجليزي)" },
+  nameAr: { en: "Name (Arabic)", ar: "الاسم (عربي)" },
+  planDescription: { en: "Description", ar: "الوصف" },
+  needPlanCode: { en: "A plan code is required.", ar: "رمز الخطة مطلوب." },
+  needPlanNames: {
+    en: "A plan needs a name in both languages: half the platform renders in Arabic.",
+    ar: "تحتاج الخطة إلى اسم بكلتا اللغتين: نصف المنصة يُعرض بالعربية.",
+  },
+  needCategory: { en: "A plan needs a category.", ar: "تحتاج الخطة إلى فئة." },
+  planCreated: { en: "Plan created.", ar: "تم إنشاء الخطة." },
+  planUpdated: { en: "Plan updated.", ar: "تم تحديث الخطة." },
+  planWithdrawn: { en: "Plan withdrawn from the catalogue.", ar: "تم سحب الخطة من الكتالوج." },
+  planReturned: { en: "Plan returned to the catalogue.", ar: "أُعيدت الخطة إلى الكتالوج." },
+  save: { en: "Save", ar: "حفظ" },
+  create: { en: "Create plan", ar: "إنشاء خطة" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  formCreate: { en: "New plan", ar: "خطة جديدة" },
+  formEdit: { en: "Edit plan", ar: "تعديل الخطة" },
+  // ── the book of business ───────────────────────────────────────────────────────────────────────────────
+  versionsTotal: { en: "Versions", ar: "الإصدارات" },
+  drafts: { en: "Drafts", ar: "المسودات" },
+  inForceNow: { en: "Active version", ar: "الإصدار الساري" },
+  policiesSelling: { en: "Policies", ar: "الوثائق" },
+  activePolicies: { en: "Active policies", ar: "الوثائق النشطة" },
+  membersOnPlan: { en: "Members", ar: "الأعضاء" },
+  sellableWindow: { en: "Sellable", ar: "متاح للبيع" },
+  openEnded: { en: "open-ended", ar: "غير محدد" },
+  // ── withdrawal ─────────────────────────────────────────────────────────────────────────────────────────
+  withdrawTitle: { en: "Withdraw {0} from the catalogue?", ar: "سحب {0} من الكتالوج؟" },
+  withdrawBody: {
+    en: "{0} stops being offered for new policies. Its versions stay resolvable forever — a claim for care given last March is still judged by March's rules — and nothing already enrolled changes.",
+    ar: "لن تُعرض {0} للوثائق الجديدة. وتبقى إصداراتها قابلة للتحديد دائمًا — فالمطالبة عن رعاية قُدّمت في مارس تُقيَّم وفق قواعد مارس — ولا يتغيّر أي تسجيل قائم.",
+  },
+  returnTitle: { en: "Return {0} to the catalogue?", ar: "إعادة {0} إلى الكتالوج؟" },
+  returnBody: {
+    en: "{0} becomes available again for new policies.",
+    ar: "تصبح {0} متاحة مجددًا للوثائق الجديدة.",
+  },
+  reversible: { en: "It can be reversed at any time.", ar: "يمكن التراجع عنه في أي وقت." },
+  historyTitle: { en: "Change history — {0}", ar: "سجل التغييرات — {0}" },
+  selectPlanFirst: { en: "Select a plan to see its versions and what is sold against them.", ar: "اختر خطة لعرض إصداراتها وما يُباع عليها." },
+  lastChanged: { en: "Last changed", ar: "آخر تعديل" },
+  by: { en: "by {0}", ar: "بواسطة {0}" },
 } satisfies Record<string, Localized>;
 
 const LIMIT_TYPES = ["", "Annual", "PerEncounter", "Lifetime", "Count"];
@@ -125,6 +189,15 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [error, setError] = useState<Localized | null>(null);
   const [announce, setAnnounce] = useState("");
+  // 19.8 — the plan's own detail, loaded on selection. A second read rather than a slice of the list,
+  // because the book of business is a set of aggregates the list cannot afford per row.
+  const [detail, setDetail] = useState<PlanDetail | null>(null);
+  const [form, setForm] = useState<{ mode: "create" } | { mode: "edit"; plan: PlanAdminView } | null>(null);
+  const [statusChange, setStatusChange] = useState<"deactivate" | "reactivate" | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const { session } = useAuth();
+  const mayWrite = mayAdministerBenefitProduct(session?.role ?? undefined);
 
   useEffect(() => {
     let live = true;
@@ -137,6 +210,25 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
       })
       .catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
+  }, [api]);
+
+  useEffect(() => {
+    if (!selectedPlan) { setDetail(null); return; }
+    let live = true;
+    setDetail(null);
+    api.plan(selectedPlan)
+      .then((d) => { if (live) setDetail(d); })
+      .catch((e) => { if (live) setError(readErrorMessage(e)); });
+    return () => { live = false; };
+  }, [api, selectedPlan]);
+
+  const reloadPlans = useCallback(async (id: string) => {
+    try {
+      setPlans(await api.plans());
+      setDetail(await api.plan(id));
+    } catch (e) {
+      setError(readErrorMessage(e));
+    }
   }, [api]);
 
   const loadVersions = useCallback(
@@ -162,6 +254,7 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
     [tiers],
   );
 
+  const current = plans?.find((p) => p.planId === selectedPlan) ?? null;
   const version = versions.find((v) => v.planVersionId === selectedVersion) ?? null;
   const previous = version
     ? versions.filter((v) => v.versionNo < version.versionNo).sort((a, b) => b.versionNo - a.versionNo)[0] ?? null
@@ -209,6 +302,15 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
+      {mayWrite && (
+        <div className="screen-toolbar">
+          <span />
+          <Button variant="primary" leadingIcon={<Icon name="plus" />} onClick={() => setForm({ mode: "create" })}>
+            {t(S.newPlan)}
+          </Button>
+        </div>
+      )}
+
       {/* The house table — search, filters, sortable columns, pager — rather than the bare `DataTable` this
           was. Payers sits directly above this in the same nav group and has had all four since 19.7; a
           catalogue list beside another catalogue list, one searchable and one not, is the inconsistency an
@@ -230,7 +332,20 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
         />
       </Card>
 
-      {!selectedPlan && <InlineAlert tone="info">{t(S.selectPlan)}</InlineAlert>}
+      {!selectedPlan && <InlineAlert tone="info">{t(S.selectPlanFirst)}</InlineAlert>}
+
+      {/* 19.8 — the plan's own record, above its versions. What the plan IS and what is riding on it, before
+          the editor that changes what it covers. */}
+      {selectedPlan && current && (
+        <PlanDetailPane
+          plan={detail?.plan ?? PlanAsAdminView(current)}
+          book={detail?.book ?? null}
+          mayWrite={mayWrite}
+          onEdit={() => setForm({ mode: "edit", plan: detail?.plan ?? PlanAsAdminView(current) })}
+          onStatus={() => setStatusChange(current.status === "Active" ? "deactivate" : "reactivate")}
+          onHistory={() => setHistoryOpen(true)}
+        />
+      )}
 
       {selectedPlan && (
         <Card>
@@ -286,7 +401,242 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onAnnounce={setAnnounce}
         />
       )}
+
+      {form && (
+        <PlanForm
+          api={api}
+          mode={form.mode}
+          plan={form.mode === "edit" ? form.plan : null}
+          onClose={() => setForm(null)}
+          onSaved={async (id, wasCreate) => {
+            setForm(null);
+            setSelectedPlan(id);
+            setAnnounce(t(wasCreate ? S.planCreated : S.planUpdated));
+            await reloadPlans(id);
+          }}
+        />
+      )}
+
+      {selectedPlan && current && statusChange && (
+        <ReasonDialog
+          title={fillLocalized(statusChange === "deactivate" ? S.withdrawTitle : S.returnTitle, current.planCode)}
+          body={fillLocalized(statusChange === "deactivate" ? S.withdrawBody : S.returnBody, current.planCode)}
+          description={S.reversible}
+          confirmLabel={statusChange === "deactivate" ? S.deactivatePlan : S.reactivatePlan}
+          onConfirm={async (reason, key) => {
+            if (statusChange === "deactivate") await api.deactivatePlan(selectedPlan, reason, key);
+            else await api.reactivatePlan(selectedPlan, reason, key);
+          }}
+          onClose={() => setStatusChange(null)}
+          onDone={async () => {
+            setStatusChange(null);
+            setAnnounce(t(statusChange === "deactivate" ? S.planWithdrawn : S.planReturned));
+            await reloadPlans(selectedPlan);
+          }}
+        />
+      )}
+
+      {selectedPlan && current && historyOpen && (
+        <HistoryModal
+          title={fillLocalized(S.historyTitle, current.planCode)}
+          load={() => api.planHistory(selectedPlan)}
+          facts={(e) => (
+            <>
+              <Fact label={t(S.name)} value={e.nameEn} />
+              <Fact label={t(S.category)} value={e.category} />
+              <Fact label={t(S.status)} value={enumLabel(e.status)} />
+            </>
+          )}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/** The list row as the detail shape, for the moment before the detail read lands — so the pane renders
+ *  immediately with what the table already knows rather than flashing empty. */
+function PlanAsAdminView(r: PlanView): PlanAdminView {
+  return {
+    planId: r.planId, planCode: r.planCode, nameEn: r.nameEn, nameAr: r.nameAr,
+    description: r.description ?? null, category: r.category, status: r.status,
+    statusReason: null, statusChangedAt: null, updatedAt: new Date(0).toISOString(), updatedByName: null,
+  };
+}
+
+// ── The plan's own record ───────────────────────────────────────────────────────────────────────────────
+
+function PlanDetailPane({
+  plan, book, mayWrite, onEdit, onStatus, onHistory,
+}: {
+  plan: PlanAdminView;
+  book: PlanBook | null;
+  mayWrite: boolean;
+  onEdit: () => void;
+  onStatus: () => void;
+  onHistory: () => void;
+}) {
+  const t = useLoc();
+  const fmt = useFormat();
+  const enumLabel = useEnumLabel();
+  const active = plan.status === "Active";
+
+  return (
+    <Card>
+      <div className="screen-toolbar">
+        <div className="pay-head">
+          <h3>
+            <BiName en={plan.nameEn} ar={plan.nameAr} />{" "}
+            <span className="tnum pol-muted">{plan.planCode}</span>
+          </h3>
+          <div className="pay-chips">
+            <StatusChip kind={active ? "ok" : "neu"} label={enumLabel(plan.status)} />
+            <span className="pol-muted">{plan.category}</span>
+          </div>
+        </div>
+        <RecordActions
+          onHistory={onHistory}
+          onEdit={mayWrite ? onEdit : undefined}
+          editLabel={S.editPlan}
+          status={mayWrite
+            ? {
+                label: active ? S.deactivatePlan : S.reactivatePlan,
+                icon: active ? "lock" : "undo",
+                onClick: onStatus,
+              }
+            : undefined}
+        />
+      </div>
+
+      {/* A withdrawn plan says WHY on the record, because that is the first thing anybody opening it wants. */}
+      {!active && plan.statusReason && (
+        <InlineAlert tone="info">
+          {plan.statusReason}
+          {plan.statusChangedAt ? ` — ${fmt.dateTime(plan.statusChangedAt)}` : ""}
+        </InlineAlert>
+      )}
+
+      {plan.description && <p>{plan.description}</p>}
+
+      {book && (
+        <>
+          <KpiList
+            items={[
+              { label: t(S.versionsTotal), value: fmt.number(book.versionCount) },
+              { label: t(S.drafts), value: fmt.number(book.draftCount) },
+              { label: t(S.inForceNow), value: fmt.number(book.activeCount) },
+              { label: t(S.policiesSelling), value: fmt.number(book.policyCount) },
+              { label: t(S.activePolicies), value: fmt.number(book.activePolicyCount) },
+              { label: t(S.membersOnPlan), value: fmt.number(book.activeMemberCount) },
+            ]}
+          />
+          <dl className="pol-identity-list">
+            <Fact
+              label={t(S.sellableWindow)}
+              value={book.firstEffectiveFrom
+                ? `${fmt.date(book.firstEffectiveFrom)} → ${book.lastEffectiveTo ? fmt.date(book.lastEffectiveTo) : t(S.openEnded)}`
+                : "—"}
+            />
+          </dl>
+        </>
+      )}
+
+      {plan.updatedByName && (
+        <p className="pol-muted">
+          {t(S.lastChanged)}: {fmt.dateTime(plan.updatedAt)} {t(fillLocalized(S.by, plan.updatedByName))}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// ── Create / edit ───────────────────────────────────────────────────────────────────────────────────────
+
+function PlanForm({
+  api, mode, plan, onClose, onSaved,
+}: {
+  api: PolicyApi;
+  mode: "create" | "edit";
+  plan: PlanAdminView | null;
+  onClose: () => void;
+  onSaved: (planId: string, wasCreate: boolean) => void | Promise<void>;
+}) {
+  const t = useLoc();
+  const [key, rotate] = useIdempotencyKey();
+  const [planCode, setPlanCode] = useState("");
+  const [nameEn, setNameEn] = useState(plan?.nameEn ?? "");
+  const [nameAr, setNameAr] = useState(plan?.nameAr ?? "");
+  const [description, setDescription] = useState(plan?.description ?? "");
+  const [category, setCategory] = useState(plan?.category ?? "Standard");
+  const [problem, setProblem] = useState<Localized | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (mode === "create" && !planCode.trim()) { setProblem(S.needPlanCode); return; }
+    if (!nameEn.trim() || !nameAr.trim()) { setProblem(S.needPlanNames); return; }
+    if (!category.trim()) { setProblem(S.needCategory); return; }
+
+    const body = {
+      nameEn: nameEn.trim(),
+      nameAr: nameAr.trim(),
+      description: description.trim() || null,
+      category: category.trim(),
+    };
+
+    setBusy(true);
+    setProblem(null);
+    try {
+      const id = mode === "create"
+        ? (await api.createPlan({ ...body, planCode: planCode.trim() }, key)).planId
+        : (await api.updatePlan(plan!.planId, body)).planId;
+      await onSaved(id, mode === "create");
+    } catch (e) {
+      rotate();
+      setProblem(writeErrorMessage(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      title={t(mode === "create" ? S.formCreate : S.formEdit)}
+      closeLabel={t(S.cancel)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+          <Button variant="primary" onClick={() => void submit()} loading={busy}>
+            {t(mode === "create" ? S.create : S.save)}
+          </Button>
+        </>
+      }
+    >
+      {problem && <InlineAlert tone="bad">{t(problem)}</InlineAlert>}
+      <div className="pay-form-grid">
+        {mode === "create" ? (
+          <InputField
+            label={t(S.planCode)}
+            value={planCode}
+            onChange={(e) => setPlanCode(e.currentTarget.value)}
+            help={t(S.planCodeLocked)}
+            required
+          />
+        ) : (
+          <InputField label={t(S.planCode)} value={plan?.planCode ?? ""} readOnly help={t(S.planCodeLocked)} />
+        )}
+        <InputField label={t(S.category)} value={category} onChange={(e) => setCategory(e.currentTarget.value)} required />
+        <InputField label={t(S.nameEn)} value={nameEn} onChange={(e) => setNameEn(e.currentTarget.value)} required />
+        <InputField label={t(S.nameAr)} value={nameAr} onChange={(e) => setNameAr(e.currentTarget.value)} required dir="rtl" />
+      </div>
+      <TextareaField
+        label={t(S.planDescription)}
+        rows={3}
+        value={description}
+        onChange={(e) => setDescription(e.currentTarget.value)}
+      />
+    </Modal>
   );
 }
 

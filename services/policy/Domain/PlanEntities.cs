@@ -135,6 +135,14 @@ public sealed class PayerHistoryEntry
     public DateTimeOffset RecordedAt { get; set; }
 }
 
+/// <summary>
+/// The reusable benefit PRODUCT. A plan is a name and a category; what it actually covers lives in its
+/// effective-dated <see cref="PlanVersion"/>s, which is why this row is small and its versions are not.
+///
+/// <para>19.8 gave it the same treatment 19.7 gave the payer: it could be created and then never corrected
+/// or withdrawn. <see cref="Status"/> has accepted <c>Inactive</c> since 0005 and no code path ever wrote
+/// it, so a plan withdrawn from sale was indistinguishable from one still being enrolled onto.</para>
+/// </summary>
 public sealed class Plan
 {
     public Guid PlanId { get; set; }
@@ -145,12 +153,30 @@ public sealed class Plan
     public string? Description { get; set; }
     public string Category { get; set; } = default!;
     public CatalogStatus Status { get; set; } = CatalogStatus.Active;
+    /// <summary>Why the status is what it is. Required on every status change — see 0021's header.</summary>
+    public string? StatusReason { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public Guid? StatusChangedBy { get; set; }
     public bool IsDeleted { get; set; }
     public int RowVersion { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? UpdatedBy { get; set; }
+    public string? UpdatedByName { get; set; }
+}
+
+/// <summary>One row of <c>policy.plan_history</c> — the snapshot 0021's trigger writes on every insert and
+/// update, read at the same authority that maintains the plan.</summary>
+public sealed class PlanHistoryEntry
+{
+    public long HistoryId { get; set; }
+    public Guid PlanId { get; set; }
+    public string TenantId { get; set; } = "";
+    public string Operation { get; set; } = default!;
+    public string RowSnapshot { get; set; } = "{}";
+    public DateTimeOffset RecordedAt { get; set; }
 }
 
 /// <summary>An effective-dated, immutable-once-active snapshot of a plan's benefit configuration. Everything

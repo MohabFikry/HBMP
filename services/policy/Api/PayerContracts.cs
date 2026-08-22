@@ -84,7 +84,8 @@ public sealed record PayerView(
 /// payer" and "what is riding on them" are never asked separately — the second is why the first was opened.</summary>
 public sealed record PayerDetailView(PayerView Payer, PayerBookView Book);
 
-/// <summary>One row of the payer's own change history (0020's trigger). The snapshot is projected into named
+/// <summary>One row of the payer's own change history (0020's trigger). The snapshot is read through the
+/// shared <see cref="SnapshotJson"/> reader (19.8) and projected into named
 /// fields rather than handed over raw: the raw row carries the tenant id and the internal signature columns,
 /// and a history view is not a place to leak the shape of the table.</summary>
 public sealed record PayerHistoryEntryView(
@@ -98,42 +99,22 @@ public sealed record PayerHistoryEntryView(
     public static PayerHistoryEntryView From(PayerHistoryEntry e, bool mayReadContract)
     {
         ArgumentNullException.ThrowIfNull(e);
-        using var doc = Parse(e.RowSnapshot);
+        using var doc = SnapshotJson.Parse(e.RowSnapshot);
         var r = doc?.RootElement;
         return new(
             e.HistoryId, e.Operation, e.RecordedAt,
-            Str(r, "updated_by_name"), Uuid(r, "updated_by"),
-            Str(r, "name_en") ?? "", Str(r, "name_ar") ?? "",
-            Str(r, "payer_type") ?? "", Str(r, "status") ?? "", Str(r, "status_reason"),
-            Str(r, "agreement_no"), Date(r, "agreement_from"), Date(r, "agreement_to"),
+            SnapshotJson.Str(r, "updated_by_name"), SnapshotJson.Uuid(r, "updated_by"),
+            SnapshotJson.Str(r, "name_en") ?? "", SnapshotJson.Str(r, "name_ar") ?? "",
+            SnapshotJson.Str(r, "payer_type") ?? "", SnapshotJson.Str(r, "status") ?? "", SnapshotJson.Str(r, "status_reason"),
+            SnapshotJson.Str(r, "agreement_no"), SnapshotJson.Date(r, "agreement_from"), SnapshotJson.Date(r, "agreement_to"),
             // The commercial half of a history row follows the same rule as the commercial half of the payer.
             // A reader who may not see today's ceiling must not be able to read yesterday's.
-            mayReadContract ? Dec(r, "funding_ceiling") : null,
-            mayReadContract ? Str(r, "currency") : null,
-            mayReadContract ? Int(r, "settlement_terms_days") : null,
-            mayReadContract ? Str(r, "invoicing_cadence") : null,
-            mayReadContract ? Int(r, "claim_submission_window_days") : null);
+            mayReadContract ? SnapshotJson.Dec(r, "funding_ceiling") : null,
+            mayReadContract ? SnapshotJson.Str(r, "currency") : null,
+            mayReadContract ? SnapshotJson.Int(r, "settlement_terms_days") : null,
+            mayReadContract ? SnapshotJson.Str(r, "invoicing_cadence") : null,
+            mayReadContract ? SnapshotJson.Int(r, "claim_submission_window_days") : null);
     }
-
-    private static JsonDocument? Parse(string raw)
-    {
-        try { return JsonDocument.Parse(raw); }
-        // A snapshot that will not parse is a history row we cannot read, not a request we should fail:
-        // returning the entry with empty fields keeps the rest of the timeline readable.
-        catch (JsonException) { return null; }
-    }
-
-    private static JsonElement? Get(JsonElement? root, string name) =>
-        root is { } r && r.ValueKind == JsonValueKind.Object && r.TryGetProperty(name, out var v)
-        && v.ValueKind != JsonValueKind.Null ? v : null;
-
-    private static string? Str(JsonElement? r, string n) => Get(r, n)?.GetString();
-    private static Guid? Uuid(JsonElement? r, string n) => Guid.TryParse(Str(r, n), out var g) ? g : null;
-    private static DateOnly? Date(JsonElement? r, string n) => DateOnly.TryParse(Str(r, n), out var d) ? d : null;
-    private static decimal? Dec(JsonElement? r, string n) =>
-        Get(r, n) is { ValueKind: JsonValueKind.Number } v ? v.GetDecimal() : null;
-    private static int? Int(JsonElement? r, string n) =>
-        Get(r, n) is { ValueKind: JsonValueKind.Number } v ? v.GetInt32() : null;
 }
 
 // ---- writes ------------------------------------------------------------------------------------------

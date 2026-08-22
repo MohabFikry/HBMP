@@ -471,6 +471,21 @@ export function maySupervisePolicy(role: Role | null | undefined): boolean {
  *
  * A mirror, never the enforcement: the server refuses either way.
  */
+/**
+ * May this caller administer MEMBERSHIP — issue a policy, amend its terms, suspend or end it?
+ *
+ * The server calls it `policy:write`, and its role list is deliberately different from `policy:admin`'s:
+ * a policy is a membership artefact, not a benefit product, and Beneficiary Management has issued contracts
+ * since 19.2. Putting an EDIT of the same row behind the product scope would mean the team that issues a
+ * contract cannot correct its dates.
+ *
+ * A mirror, never the enforcement: the server refuses either way.
+ */
+export function mayAdministerMembership(role: Role | null | undefined): boolean {
+  return role === "beneficiary_mgmt" || role === "policy_admin"
+    || role === "org_admin" || role === "super_admin";
+}
+
 export function mayAdministerBenefitProduct(role: Role | null | undefined): boolean {
   return role === "policy_admin" || role === "org_admin" || role === "super_admin";
 }

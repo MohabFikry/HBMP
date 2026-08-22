@@ -18,6 +18,8 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     // 19.1 — the PAS product layer (design 38 §3).
     public DbSet<Payer> Payers => Set<Payer>();
     public DbSet<PayerHistoryEntry> PayerHistory => Set<PayerHistoryEntry>();   // 19.7 (0020)
+    public DbSet<PlanHistoryEntry> PlanHistory => Set<PlanHistoryEntry>();      // 19.8 (0021)
+    public DbSet<PolicyHistoryEntry> PolicyHistory => Set<PolicyHistoryEntry>(); // 19.8 (0021)
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<PlanVersion> PlanVersions => Set<PlanVersion>();
     public DbSet<BenefitRule> BenefitRules => Set<BenefitRule>();
@@ -57,7 +59,42 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            // 19.8 (0021) — the state a contract enters when a payer stops paying, and who put it there.
+            e.Property(x => x.StatusReason).HasColumnName("status_reason");
+            e.Property(x => x.StatusChangedAt).HasColumnName("status_changed_at");
+            e.Property(x => x.StatusChangedBy).HasColumnName("status_changed_by");
+            e.Property(x => x.Notes).HasColumnName("notes");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.CreatedByName).HasColumnName("created_by_name");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");
             e.HasIndex(x => x.PolicyNo).IsUnique();
+        });
+
+        // 19.8 (0021) — the history twins. Insert-only from the application's side; the triggers own the
+        // writes and EF only ever reads them.
+        b.Entity<PolicyHistoryEntry>(e =>
+        {
+            e.ToTable("policy_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).HasColumnName("history_id").ValueGeneratedOnAdd();
+            e.Property(x => x.PolicyId).HasColumnName("policy_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Operation).HasColumnName("operation");
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.RecordedAt).HasColumnName("recorded_at");
+        });
+
+        b.Entity<PlanHistoryEntry>(e =>
+        {
+            e.ToTable("plan_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).HasColumnName("history_id").ValueGeneratedOnAdd();
+            e.Property(x => x.PlanId).HasColumnName("plan_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Operation).HasColumnName("operation");
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.RecordedAt).HasColumnName("recorded_at");
         });
 
         b.Entity<BenefitCategory>(e =>
@@ -193,6 +230,12 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.Description).HasColumnName("description");
             e.Property(x => x.Category).HasColumnName("category").IsRequired();
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            // 19.8 (0021)
+            e.Property(x => x.StatusReason).HasColumnName("status_reason");
+            e.Property(x => x.StatusChangedAt).HasColumnName("status_changed_at");
+            e.Property(x => x.StatusChangedBy).HasColumnName("status_changed_by");
+            e.Property(x => x.CreatedByName).HasColumnName("created_by_name");
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
