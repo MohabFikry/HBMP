@@ -32,6 +32,11 @@ builder.Services.AddHttpContextAccessor();
 // "manager" routes.
 builder.Services.AddScoped<BranchScopeState>();
 builder.Services.AddScoped<BranchReachGuard>();
+// HttpBranchDirectory caches a caller's permitted branch set for ≤60s, so it takes IMemoryCache — and this
+// registration was missing, which is not a slower path but a dead one: the typed client cannot be activated
+// at all, so EVERY inventory request threw at DI time and answered 500. emr, orders, pharmacy, policy and
+// reporting all register it beside their own copy of this directory; inventory, the fifth copy, did not.
+builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 

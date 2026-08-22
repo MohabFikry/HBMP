@@ -2972,3 +2972,30 @@ invariants:
     severity: High
     tests:
       - Mersal.Architecture.Tests.KongUpstreamsAreDeployedTests.Every_kong_upstream_is_a_service_the_stack_actually_runs
+
+  - id: INV-A-STAGED-OUTBOX-HAS-A-TABLE-TO-STAGE-INTO
+    statement: >-
+      A service that registers `AddHbmpDurableOutbox` has a migration creating its `outbox_message` table.
+      Nineteen services carry a `9000_outbox.sql`; inventory-service shipped without one while registering
+      both the outbox AND the relay, so `OutboxRelayRegistrationTests` — which checks registration against
+      registration — passed. The consequence was not a lost event: `AddHbmpEvents` reroutes the audit client
+      through the same outbox, so an audited READ writes there too, and with no table every request to the
+      service ended in 42P01 and answered 500 while the relay failed once a second forever.
+    source: 16.2 (C1); ADR-0013; libs/events
+    severity: High
+    tests:
+      - Mersal.Architecture.Tests.OutboxRelayRegistrationTests.Every_service_that_stages_a_durable_outbox_has_a_migration_creating_the_table
+
+  - id: INV-THE-CONTAINER-CAN-BUILD-WHAT-THE-SERVICE-SHIPS-WITH
+    statement: >-
+      The production dependency graph can construct the collaborators a test factory substitutes. inventory's
+      `HttpBranchDirectory` takes `IMemoryCache` and nothing registered it, so the typed client could not be
+      activated and EVERY request answered 500 — invisible to all sixty-eight of that service's tests,
+      because the factory replaces `IBranchDirectory` with a fake to test the reach rules without
+      admin-service. A test factory that removes the real implementation of a seam can never find a wiring
+      fault in it.
+    source: ADR-0029; design 37 §2.3
+    severity: High
+    tests:
+      - Mersal.Inventory.Tests.ProductionWiringTests.The_real_branch_directory_can_be_constructed
+      - Mersal.Inventory.Tests.ProductionWiringTests.The_real_medicines_directory_can_be_constructed

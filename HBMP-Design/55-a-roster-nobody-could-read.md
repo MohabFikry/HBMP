@@ -327,6 +327,45 @@ this platform *serves* have a route. Nothing asked whether every host Kong *forw
 in the registry and runs in the ordinary test suite as well as the lint lane. Verified by removing the
 service from compose and watching the gate fail.
 
+### 4.4.1 Three faults, one screen
+
+Deploying the service turned "the service couldn't complete this request" into the same message with a
+different cause, twice. Each was invisible to a different guard.
+
+**1. No outbox table.** `AddHbmpDurableOutbox<InventoryDbContext>` stages events into
+`inventory.outbox_message`, and nineteen services carry a `9000_outbox.sql` creating it. Inventory shipped
+without one. The consequence was not a lost event: `AddHbmpEvents` reroutes the **audit** client through the
+same outbox, so an audited READ writes there too — and with no table every request ended in
+`42P01: relation … does not exist` and answered 500, while the relay logged the same failure once a second
+forever.
+
+`OutboxRelayRegistrationTests` could not see it: it checks registration against registration ("a durable
+outbox without a relay is a postbox with no postman"), and inventory had **both**. Nothing checked that the
+table either of them talks to exists. It does now, read from the migrations so it fails on a developer's
+machine rather than after a deploy.
+
+**2. No `IMemoryCache`.** `HttpBranchDirectory` caches a caller's permitted branch set for ≤60s and takes
+`IMemoryCache`; `AddMemoryCache()` was never called. That is not a slower path but a dead one — the typed
+client cannot be activated at all, so every request threw at DI time. emr, orders, pharmacy, policy and
+reporting all register it beside their own copy of this directory; inventory, the fifth copy, did not.
+
+All sixty-eight of inventory's tests passed throughout, and could not have done otherwise:
+`InventoryApiFactory` **replaces `IBranchDirectory` with a fake** so the reach rules can be tested without
+admin-service. That is the right substitution for those tests, and it means the real implementation — the one
+with the missing dependency — is never constructed anywhere in the suite. It also sets
+`Events:UseInMemoryOutbox`, which is why fault 1 was equally invisible.
+
+> **A test factory that removes the real implementation of a seam can never find a wiring fault in it.**
+
+`ProductionWiringTests` boots the app with the same settings and *none* of the substitutions, and asks the
+container to construct what the fakes stand in for. It makes no HTTP call and needs no database — the fault
+is in the object graph, and that is what it reads. Verified by removing `AddMemoryCache()` and watching it
+fail.
+
+**3. And the deployment itself**, above.
+
+---
+
 While there: **Record a movement** is now a button and a dialog. A nine-field form sat permanently open
 *between* the stock table and the ledger — so the two things the screen exists to show, a balance and the
 movements that produce it, were separated by the form that produces them. Reading the ledger meant scrolling
@@ -363,6 +402,8 @@ A control that appears because somebody has a choice to make, never because they
 | `INV-A-WORKING-DAY-CAN-ALWAYS-BE-ADDED-WHERE-THE-CLINIC-RUNS` | a new rule inherits the clinic's service point from any rule at that clinic |
 | `INV-A-CALLER-WHO-RUNS-SEVERAL-CLINICS-CAN-NAME-ONE` | the switcher retries a failed resolve; booking asks for the clinic when no filter is set |
 | `INV-A-ROUTED-SERVICE-IS-A-RUNNING-SERVICE` | every host the gateway forwards to is a deployed compose service |
+| `INV-A-STAGED-OUTBOX-HAS-A-TABLE-TO-STAGE-INTO` | a service registering a durable outbox has a migration creating it |
+| `INV-THE-CONTAINER-CAN-BUILD-WHAT-THE-SERVICE-SHIPS-WITH` | the production graph can construct what a test factory substitutes |
 
 ---
 
